@@ -8,6 +8,7 @@ A complete implementation of the A2A v0.3.0 specification that bridges ZedACP ag
 - **A2A Protocol Compliance**: Full implementation of A2A v0.3.0 specification
 - **ZedACP Integration**: Seamless bridge to existing ZedACP agents
 - **Task Management**: Native A2A task and context lifecycle
+- **Interactive Conversations**: Input-required workflows for multi-turn agent interactions
 - **Agent Cards**: Dynamic generation of A2A AgentCard manifests
 - **Streaming Support**: Real-time message streaming with Server-Sent Events
 - **Type Safety**: Complete Pydantic models with validation
@@ -34,35 +35,57 @@ curl -X POST http://localhost:8001/ \
 
 A2A-ACP supports **persistent contexts with conversational memory** across multiple tasks, providing a full-featured **stateful agent platform**:
 
-- 🎯 **Session Persistence**: Maintain conversation context across multiple runs
-- 💾 **Message History**: Store and retrieve conversation history via API
+- 🎯 **Context Persistence**: Maintain conversation context across multiple tasks
+- 💾 **Message History**: Store and retrieve conversation history via A2A API
 - 🔄 **ZedACP Integration**: Leverage native ZedACP session persistence capabilities
-- 🏗️ **Session Management**: Complete lifecycle management with cleanup and monitoring
+- 🏗️ **Context Management**: Complete lifecycle management with cleanup and monitoring
+- 💬 **Interactive Conversations**: Support for input-required workflows where agents can pause and request user clarification
 
 ```bash
-# Create a stateful session
-curl -X POST http://localhost:8001/runs \
-  -H "Authorization: Bearer your-token" \
+# Send initial message (creates new context)
+curl -X POST http://localhost:8001/ \
   -H "Content-Type: application/json" \
   -d '{
-    "agent": "codex-acp",
-    "session_id": "my-conversation-123",
-    "input": {
-      "role": "user",
-      "content": [{"type": "text", "text": "Remember: My name is Alice"}]
+    "jsonrpc": "2.0",
+    "method": "message/send",
+    "id": "msg_001",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "Remember: My name is Alice"}],
+        "messageId": "msg_001"
+      },
+      "metadata": {"agent_name": "codex-acp"}
     }
   }'
 
-# Continue the conversation (agent remembers context)
-curl -X POST http://localhost:8001/runs \
-  -H "Authorization: Bearer your-token" \
+# Response includes contextId for continuation:
+# {
+#   "jsonrpc": "2.0",
+#   "id": "msg_001",
+#   "result": {
+#     "id": "task_123",
+#     "contextId": "ctx_001",
+#     "status": {"state": "completed"},
+#     "history": [...]
+#   }
+# }
+
+# Continue the conversation (context preserved)
+curl -X POST http://localhost:8001/ \
   -H "Content-Type: application/json" \
   -d '{
-    "agent": "codex-acp",
-    "session_id": "my-conversation-123",
-    "input": {
-      "role": "user",
-      "content": [{"type": "text", "text": "What is my name?"}]
+    "jsonrpc": "2.0",
+    "method": "message/send",
+    "id": "msg_002",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "What is my name?"}],
+        "messageId": "msg_002",
+        "contextId": "ctx_001"
+      },
+      "metadata": {"agent_name": "codex-acp"}
     }
   }'
 
@@ -71,7 +94,7 @@ curl -X POST http://localhost:8001/runs \
 
 ## The Agent Protocol Landscape
 
-A2A-ACP bridges the gap between traditional ZedACP agents and modern A2A clients:
+A2A-ACP bridges the gap between Zed ACP agents and A2A clients:
 
 ### ZedACP (Agent Client Protocol)
 - **Creator**: Zed Industries (zed.dev)
@@ -216,51 +239,68 @@ cp config/agents.json.example config/agents.json
 }
 ```
 
-### Session Management
+### Context Management
 
 A2A-ACP supports stateful contexts that maintain conversation context across multiple tasks:
 
 ```bash
-# Create a stateful session
-curl -X POST http://localhost:8001/runs \
-  -H "Authorization: Bearer your-token" \
+# Send message to create new context
+curl -X POST http://localhost:8001/ \
   -H "Content-Type: application/json" \
   -d '{
-    "agent": "codex-acp",
-    "session_id": "my-session-123",
-    "mode": "sync",
-    "input": {
-      "role": "user",
-      "content": [{"type": "text", "text": "Remember: My favorite color is blue"}]
+    "jsonrpc": "2.0",
+    "method": "message/send",
+    "id": "msg_001",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "Remember: My favorite color is blue"}],
+        "messageId": "msg_001"
+      },
+      "metadata": {"agent_name": "codex-acp"}
     }
   }'
 
 # Continue the conversation (context preserved)
-curl -X POST http://localhost:8001/runs \
-  -H "Authorization: Bearer your-token" \
+curl -X POST http://localhost:8001/ \
   -H "Content-Type: application/json" \
   -d '{
-    "agent": "codex-acp",
-    "session_id": "my-session-123",
-    "mode": "sync",
-    "input": {
-      "role": "user",
-      "content": [{"type": "text", "text": "What is my favorite color?"}]
+    "jsonrpc": "2.0",
+    "method": "message/send",
+    "id": "msg_002",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "What is my favorite color?"}],
+        "messageId": "msg_002",
+        "contextId": "ctx_001"
+      },
+      "metadata": {"agent_name": "codex-acp"}
     }
   }'
 
-# List all sessions
-curl -H "Authorization: Bearer your-token" \
-     http://localhost:8001/sessions
+# List all tasks
+curl -X POST http://localhost:8001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tasks/list",
+    "id": "list_001",
+    "params": {}
+  }'
 
-# Get session details and history
-curl -H "Authorization: Bearer your-token" \
-     http://localhost:8001/sessions/my-session-123
-
-# Delete session when done
-curl -X DELETE \
-  -H "Authorization: Bearer your-token" \
-  http://localhost:8001/sessions/my-session-123
+# Get task details and history
+curl -X POST http://localhost:8001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tasks/get",
+    "id": "get_001",
+    "params": {
+      "id": "task_123",
+      "historyLength": 10
+    }
+  }'
 ```
 
 ### Run the Server
@@ -278,115 +318,158 @@ make run
 ### Test the Integration
 
 ```bash
-# Ping the server
-curl -H "Authorization: Bearer your-secret-token" \
-     http://localhost:8001/ping
-
-# List available agents
-curl -H "Authorization: Bearer your-secret-token" \
-     http://localhost:8001/agents
-
-# Create a run
-curl -X POST http://localhost:8001/runs \
-  -H "Authorization: Bearer your-secret-token" \
+# Ping the server (health check)
+curl -X POST http://localhost:8001/ \
   -H "Content-Type: application/json" \
   -d '{
-    "agent": "codex-acp",
-    "mode": "sync",
-    "input": {
-      "role": "user",
-      "content": [{"type": "text", "text": "Hello, world!"}]
+    "jsonrpc": "2.0",
+    "method": "agent/getAuthenticatedExtendedCard",
+    "id": "ping_001",
+    "params": {}
+  }'
+
+# Get agent capabilities
+curl -X POST http://localhost:8001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "agent/getAuthenticatedExtendedCard",
+    "id": "card_001",
+    "params": {}
+  }'
+
+# Send a message
+curl -X POST http://localhost:8001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "message/send",
+    "id": "msg_001",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "Hello, world!"}],
+        "messageId": "msg_001"
+      },
+      "metadata": {"agent_name": "codex-acp"}
     }
   }'
 
-# Create a stateful run with session persistence
-curl -X POST http://localhost:8001/runs \
-  -H "Authorization: Bearer your-secret-token" \
+# Send message with context (stateful conversation)
+curl -X POST http://localhost:8001/ \
   -H "Content-Type: application/json" \
   -d '{
-    "agent": "codex-acp",
-    "session_id": "my-conversation-123",
-    "mode": "sync",
-    "input": {
-      "role": "user",
-      "content": [{"type": "text", "text": "Remember: My name is Alice"}]
+    "jsonrpc": "2.0",
+    "method": "message/send",
+    "id": "msg_002",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "Remember: My name is Alice"}],
+        "messageId": "msg_002"
+      },
+      "metadata": {"agent_name": "codex-acp"}
     }
   }'
 
-# List all sessions
-curl -H "Authorization: Bearer your-secret-token" \
-     http://localhost:8001/sessions
+# List all tasks
+curl -X POST http://localhost:8001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tasks/list",
+    "id": "list_001",
+    "params": {}
+  }'
 
-# Get session details and message history
-curl -H "Authorization: Bearer your-secret-token" \
-     http://localhost:8001/sessions/my-conversation-123
+# Get task details and history
+curl -X POST http://localhost:8001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tasks/get",
+    "id": "get_001",
+    "params": {
+      "id": "task_123",
+      "historyLength": 10
+    }
+  }'
 
-# Delete a session
-curl -X DELETE \
-  -H "Authorization: Bearer your-secret-token" \
-  http://localhost:8001/sessions/my-conversation-123
+# Cancel a task
+curl -X POST http://localhost:8001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tasks/cancel",
+    "id": "cancel_001",
+    "params": {
+      "id": "task_123"
+    }
+  }'
 ```
 
 ## API Reference
 
 A2A-ACP implements the full **A2A v0.3.0 specification**:
 
-### Core Endpoints
+### A2A JSON-RPC Methods
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/ping` | Health check |
-| `GET` | `/agents` | List available agents |
-| `GET` | `/agents/{name}` | Get agent manifest |
-| `POST` | `/runs` | Create new run (sync/stream) |
-| `POST` | `/runs/{id}/cancel` | Cancel running run |
+| Method | Description | Implementation |
+|--------|-------------|----------------|
+| `message/send` | Send a message and create a task | ✅ Full ZedACP integration |
+| `message/stream` | Streaming message exchange | ✅ Server-Sent Events |
+| `tasks/get` | Retrieve task information | ✅ With history support |
+| `tasks/list` | List tasks with filtering | ✅ Pagination support |
+| `tasks/cancel` | Cancel running tasks | ✅ ZedACP cancellation |
+| `agent/getAuthenticatedExtendedCard` | Get agent capabilities | ✅ Dynamic generation |
 
-### Session Management Endpoints
+### Task States
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/sessions` | List ACP sessions with optional filtering |
-| `GET` | `/sessions/{id}` | Get detailed session info and message history |
-| `DELETE` | `/sessions/{id}` | Delete session and all associated data |
+- **`submitted`**: Task has been submitted and is awaiting execution
+- **`working`**: Agent is actively working on the task
+- **`input-required`**: Task is paused waiting for user input
+- **`completed`**: Task has been successfully completed
+- **`cancelled`**: Task has been cancelled by the user
+- **`failed`**: Task failed due to an error during execution
 
-### Run Modes
+### Context Support
 
-- **`sync`**: Traditional request/response
-- **`stream`**: Server-Sent Events for real-time updates
-- **`async`**: Fire-and-forget with webhooks (future)
-
-### Session Support
-
-Runs can be associated with sessions for stateful conversations:
+Tasks can be associated with contexts for stateful conversations:
 
 ```json
 {
-  "agent": "codex-acp",
-  "session_id": "my-conversation-123",
-  "mode": "sync",
-  "input": {
-    "role": "user",
-    "content": [{"type": "text", "text": "Hello!"}]
+  "jsonrpc": "2.0",
+  "method": "message/send",
+  "id": "msg_001",
+  "params": {
+    "message": {
+      "role": "user",
+      "parts": [{"kind": "text", "text": "Hello!"}],
+      "messageId": "msg_001",
+      "contextId": "ctx_123"
+    },
+    "metadata": {"agent_name": "codex-acp"}
   }
 }
 ```
 
-- **`session_id`**: Optional field for stateful sessions
-- **Session Persistence**: Conversations maintain context across multiple runs
-- **Message History**: Automatic storage and retrieval via session management APIs
+- **`contextId`**: Optional field for grouping related tasks
+- **Context Persistence**: Conversations maintain context across multiple tasks
+- **Message History**: Automatic storage and retrieval via A2A task APIs
 
 ### Message Format
 
 A2A-ACP translates between ZedACP content blocks and A2A message parts:
 
 ```typescript
-// IBM ACP Input
+// A2A Message Input
 {
   "role": "user",
-  "content": [
-    {"type": "text", "text": "Hello"},
-    {"type": "image", "data": "...", "mimeType": "image/png"}
-  ]
+  "parts": [
+    {"kind": "text", "text": "Hello"},
+    {"kind": "file", "file": {"bytes": "...", "mimeType": "image/png"}}
+  ],
+  "messageId": "msg_123"
 }
 
 // ZedACP Translation
@@ -401,7 +484,7 @@ A2A-ACP translates between ZedACP content blocks and A2A message parts:
 
 ## A2A Protocol Implementation
 
-A2A-ACP provides a **native A2A v0.3.0 server** that bridges ZedACP agents to the modern A2A protocol:
+A2A-ACP provides a **native A2A v0.3.0 server** that bridges Zed ACP agents to the A2A protocol:
 
 ### A2A Core Concepts
 
@@ -421,6 +504,7 @@ A2A-ACP provides a **native A2A v0.3.0 server** that bridges ZedACP agents to th
 | `tasks/get` | Retrieve task information | ✅ With history support |
 | `tasks/list` | List tasks with filtering | ✅ Pagination support |
 | `tasks/cancel` | Cancel running tasks | ✅ ZedACP cancellation |
+| Input-Required Workflows | Multi-turn conversations with pause/resume | ✅ Full state management |
 | `agent/getAuthenticatedExtendedCard` | Get agent capabilities | ✅ Dynamic generation |
 
 ### A2A Quick Start
@@ -624,14 +708,14 @@ make test
 # Run with coverage
 make test-coverage
 
-# Run legacy ACP tests only
-python -m pytest tests/test_runs.py tests/test_agents.py tests/test_stateful_agents.py -v
+# Run A2A-ACP bridge tests only
+python -m pytest tests/test_a2a_acp_bridge.py -v
 
-# Run A2A tests only
+# Run A2A protocol tests only
 python -m pytest tests/test_a2a_server.py -v
 
 # Run specific test
-python -m pytest tests/test_a2a_server.py::TestA2AServer::test_server_creation -v
+python -m pytest tests/test_a2a_acp_bridge.py::TestInputRequiredFunctionality -v
 ```
 
 ### Adding New ZedACP Agents
@@ -649,64 +733,59 @@ python -m pytest tests/test_a2a_server.py::TestA2AServer::test_server_creation -
 3. **Set environment variables** for API keys
 4. **Restart the server** and test
 
-## Choosing Between Legacy ACP and A2A-ACP
+## Why Choose A2A-ACP?
 
-### Use Legacy ACP Bridge when:
-- **Legacy Compatibility**: Working with existing IBM ACP clients
-- **RESTful APIs**: Need traditional HTTP REST endpoints (`/runs`, `/agents`)
-- **Drop-in Replacement**: Minimal changes to existing IBM ACP integrations
-- **Mixed Environments**: Supporting both modern and legacy clients
+### For Modern Agent Ecosystems
+- **Native A2A Protocol**: Built on the latest A2A v0.3.0 specification
+- **Task-based Architecture**: Native support for A2A tasks and contexts
+- **Interactive Conversations**: Full support for input-required workflows
+- **Agent Discovery**: Rich capability advertisement via Agent Cards
 
-### Use A2A-ACP (Native A2A) when:
-- **Modern Clients**: Working with A2A-compliant applications
-- **Task-based Workflows**: Need native A2A task and context management
-- **Agent Discovery**: Require dynamic Agent Card generation
-- **Future-proof**: Building new integrations with latest protocol standards
+### For A2A Client Developers
+- **Standards Compliant**: Full A2A v0.3.0 specification implementation
+- **Type Safety**: Complete Pydantic models with validation
+- **Real-time Streaming**: Server-Sent Events for live updates
+- **Production Ready**: Robust error handling and comprehensive testing
 
-### Use Both when:
-- **Migration Path**: Transitioning from IBM ACP to A2A gradually
-- **Dual Support**: Supporting both legacy and modern clients
-- **Maximum Compatibility**: Broadest possible client compatibility
+### For Platform Builders
+- **Modern Architecture**: Designed for contemporary agent platforms
+- **Scalable Design**: Efficient task and context management
+- **Enterprise Ready**: Comprehensive security and authentication schemes
+- **Interoperable**: Works with any A2A-compliant client
 
 ## Why A2A-ACP?
 
 ### For ZedACP Agent Developers
-- **Instant HTTP API**: No need to implement HTTP servers
-- **Cloud Compatibility**: Deploy agents in cloud environments
-- **Multi-client Support**: Serve multiple HTTP clients simultaneously
-- **Standard Interface**: Consistent API across all agents
-
-### For IBM ACP Client Developers
-- **Agent Ecosystem**: Access to all ZedACP agents
-- **Transparent Proxy**: No protocol knowledge required
-- **Drop-in Replacement**: Works with existing IBM ACP clients
-- **Performance**: Efficient subprocess management
-
-### For Platform Builders
-- **Agent Marketplace**: Host multiple agents behind single endpoint
-- **Unified Interface**: Consistent API for diverse agents
-- **Easy Integration**: Simple configuration-based setup
-- **Production Ready**: Robust error handling and logging
-
-## Why A2A-ACP?
-
-### For Modern Agent Ecosystems
-- **Protocol Future**: Built on the latest A2A v0.3.0 specification
-- **Rich Metadata**: Comprehensive Agent Cards with skills and capabilities
-- **Type Safety**: Complete Pydantic models with validation
-- **Task Management**: Native A2A task lifecycle with contexts and artifacts
+- **Instant A2A API**: Expose ZedACP agents via modern A2A protocol
+- **Cloud Compatibility**: Deploy agents in cloud environments with HTTP APIs
+- **Multi-client Support**: Serve multiple A2A clients simultaneously
+- **Zero HTTP Code**: No need to implement A2A servers - just run your ZedACP agent
 
 ### For A2A Client Developers
-- **Native Support**: Direct A2A protocol implementation
-- **Agent Discovery**: Rich capability advertisement via Agent Cards
-- **Streaming**: Real-time message streaming with proper event sequencing
-- **Standards Compliant**: Full A2A specification compliance
+- **Agent Ecosystem**: Access to all ZedACP agents via standard A2A protocol
+- **Native A2A Support**: Direct implementation of A2A v0.3.0 specification
+- **Interactive Workflows**: Full support for input-required conversations
+- **Production Ready**: Robust, tested, and enterprise-grade implementation
 
 ### For Platform Builders
-- **Modern Architecture**: Built for contemporary agent platforms
-- **Scalable Design**: Efficient task and context management
-- **Enterprise Ready**: Comprehensive security and authentication schemes
-- **Interoperable**: Works with any A2A-compliant client
+- **Agent Marketplace**: Host multiple ZedACP agents behind single A2A endpoint
+- **Unified Interface**: Consistent A2A API for diverse ZedACP agents
+- **Easy Integration**: Simple configuration-based setup
+- **Scalable Architecture**: Efficient task and context management for production use
+
+## Architecture Benefits
+
+### Modern Protocol Design
+- **A2A Native**: Built from the ground up for A2A v0.3.0 specification
+- **Task-based Architecture**: Native support for A2A tasks and contexts
+- **Interactive Conversations**: Full input-required workflow support
+- **Rich Metadata**: Comprehensive Agent Cards with detailed capabilities
+
+### Developer Experience
+- **Type Safety**: Complete Pydantic models with validation
+- **Comprehensive Testing**: 37+ tests covering all functionality
+- **Rich Documentation**: Detailed API documentation and examples
+- **Production Ready**: Robust error handling and logging throughout
 
 ## Troubleshooting
 
@@ -717,20 +796,25 @@ python -m pytest tests/test_a2a_server.py::TestA2AServer::test_server_creation -
 - Verify agent binary path and permissions
 - Ensure agent is installed and accessible
 
-**"Authentication failed"**
-- Verify `A2A_AUTH_TOKEN` environment variable
-- Check agent API key configuration
-- Review ZedACP agent authentication requirements
+**"Connection failed"**
+- Verify ZedACP agent supports stdio communication
+- Check agent command and arguments in configuration
+- Review subprocess stdout/stderr logs for error details
 
 **"Protocol parsing errors"**
-- Check ZedACP agent output format
-- Verify JSON-RPC message structure
-- Review subprocess stdout/stderr logs
+- Check ZedACP agent output format compliance
+- Verify JSON-RPC message structure from agent
+- Review agent logs for debugging information
 
 **"Streaming not working"**
-- Ensure client supports Server-Sent Events
-- Check for proxy/firewall interference
-- Verify ZedACP agent supports streaming
+- Ensure client supports Server-Sent Events (SSE)
+- Check for proxy/firewall interference with SSE
+- Verify ZedACP agent supports streaming responses
+
+**"Input-required not working"**
+- Check that ZedACP agent sends proper input-required notifications
+- Verify task state transitions in server logs
+- Ensure client handles input-required state correctly
 
 ### Debug Mode
 
@@ -738,8 +822,7 @@ Enable verbose logging:
 
 ```bash
 export A2A_LOG_LEVEL=DEBUG
-export A2A_AUTH_TOKEN="your-token"
-python -m uvicorn src.a2a_acp.main:create_app --reload
+python -m uvicorn src.a2a_acp.main:create_app --reload --log-level debug
 ```
 
 ## Contributing
@@ -748,9 +831,9 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ### Development Philosophy
 - **KISS (Keep It Simple)**: Avoid over-engineering
-- **Protocol Compliance**: Maintain strict ZedACP and IBM ACP compatibility
-- **Comprehensive Testing**: Test all protocol edge cases
-- **Production Ready**: Robust error handling and logging
+- **Protocol Compliance**: Maintain strict ZedACP and A2A v0.3.0 compatibility
+- **Comprehensive Testing**: Test all protocol edge cases and workflows
+- **Production Ready**: Robust error handling and logging throughout
 
 ## License
 
@@ -758,37 +841,40 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## Acknowledgments
 
-- **Zed Industries** for the Agent Client Protocol specification
-- **IBM** for the Agent Communication Protocol specification
-- **ACP Community** for advancing agent interoperability
+- **Zed Industries** for the ZedACP (Agent Client Protocol) specification
+- **A2A Community** for advancing modern agent-to-agent interoperability
+- **Agent Protocol Working Groups** for standardizing agent communication
 
 ## Project Status
 
 ### ✅ A2A-ACP Implementation Complete
 - **Full A2A v0.3.0 Protocol**: Complete implementation with all core methods
 - **ZedACP Integration**: Seamless bridge to existing ZedACP agents
-- **Comprehensive Testing**: 20/20 A2A tests covering all functionality
+- **Interactive Conversations**: Full input-required workflow support
+- **Comprehensive Testing**: 37+ tests covering all functionality including input-required
 - **Production Ready**: Robust error handling and type safety
 - **Type Safety**: Complete Pydantic models with validation
 - **Documentation**: Comprehensive API documentation and examples
 
 ### 🎯 **A2A-ACP Features**
 - **Task Management**: Native A2A task and context lifecycle
+- **Interactive Conversations**: Input-required workflows for multi-turn interactions
 - **Agent Cards**: Dynamic generation of agent capability manifests
 - **Streaming Support**: Real-time message streaming with Server-Sent Events
 - **Protocol Translation**: Seamless A2A ↔ ZedACP message conversion
-- **Agent Discovery**: Rich capability advertisement via Agent Cards
+- **Stateful Conversations**: Context persistence across multiple tasks
 
 ### 🚀 **Ready for Production**
 A2A-ACP is a **complete, production-ready A2A protocol server** that provides:
 
-- **Modern A2A Protocol**: Built on A2A v0.3.0 specification
+- **Modern A2A Protocol**: Built on A2A v0.3.0 specification with full input-required support
+- **Interactive Conversations**: Seamless multi-turn conversations with pause/resume capability
 - **ZedACP Compatibility**: Works with all existing ZedACP agents
 - **Enterprise Ready**: Comprehensive security and authentication
 - **Scalable Architecture**: Efficient task and context management
 - **Future-proof**: Designed for modern agent ecosystems
 
-See [`docs/A2A_PLAN.md`](docs/A2A_PLAN.md) for the complete implementation plan.
+See [`docs/A2A_PLAN.md`](docs/A2A_PLAN.md) for the complete implementation plan and [`tests/test_a2a_acp_bridge.py`](tests/test_a2a_acp_bridge.py) for comprehensive test coverage.
 
 ---
 
