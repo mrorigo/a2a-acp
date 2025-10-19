@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime
 
-from ..a2a.models import Task, TaskStatus, TaskState, Message, generate_id, create_task_id
+from ..a2a.models import Task, TaskStatus, TaskState, Message, generate_id, create_task_id, InputRequiredNotification
 from .models import RunMode
 from .zed_agent import ZedAgentConnection, AgentProcessError, PromptCancelled
 
@@ -96,7 +96,7 @@ class A2ATaskManager:
         working_directory: str = ".",
         mcp_servers: Optional[List[Dict]] = None
     ) -> Task:
-        """Execute an A2A task using ZedACP agent."""
+        """Execute an A2A task using ZedACP agent with input-required support."""
         async with self._lock:
             if task_id not in self._active_tasks:
                 raise ValueError(f"Unknown task: {task_id}")
@@ -130,12 +130,37 @@ class A2ATaskManager:
                         translator = A2ATranslator()
                         zedacp_parts = translator.a2a_to_zedacp_message(user_message)
 
-                        # Execute the task
+                        # Execute the task with input-required support
                         cancel_event = context.cancel_event
 
+                        input_required_data = {}
+
                         async def on_chunk(text: str) -> None:
-                            # Could emit A2A message updates here
-                            logger.debug("Task output chunk", extra={"task_id": task_id, "chunk": text[:100]})
+                            # Check for input-required notifications with enhanced detection
+                            upper_text = text.upper()
+                            if ("INPUT_REQUIRED:" in upper_text or
+                                "ADDITIONAL INPUT" in upper_text or
+                                "PLEASE PROVIDE" in upper_text or
+                                "I NEED MORE" in upper_text):
+
+                                # Parse input-required information
+                                logger.info("Input required detected", extra={
+                                    "task_id": task_id,
+                                    "text_length": len(text),
+                                    "text_preview": text[:200]
+                                })
+
+                                input_required_data['detected'] = True
+                                input_required_data['message'] = text
+
+                                # Try to extract input types if provided
+                                if "INPUT_TYPES:" in upper_text:
+                                    try:
+                                        types_start = upper_text.find("INPUT_TYPES:") + len("INPUT_TYPES:")
+                                        types_str = text[types_start:].split('\n')[0].strip()
+                                        input_required_data['input_types'] = [t.strip() for t in types_str.split(',')]
+                                    except:
+                                        input_required_data['input_types'] = ["text/plain"]
 
                         result = await connection.prompt(
                             zed_session_id,
@@ -143,6 +168,30 @@ class A2ATaskManager:
                             on_chunk=on_chunk,
                             cancel_event=cancel_event
                         )
+
+                        # Check if input is required
+                        if input_required_data.get('detected'):
+                            # Update task to input-required state
+                            task.status.state = TaskState.INPUT_REQUIRED
+                            task.status.timestamp = generate_id("ts_")
+
+                            # Create input-required notification with enhanced input types
+                            input_types = input_required_data.get('input_types', ["text/plain"])
+                            input_notification = InputRequiredNotification(
+                                taskId=task_id,
+                                contextId=task.contextId,
+                                message=input_required_data.get('message', 'Additional input required'),
+                                inputTypes=input_types,
+                                timeout=300  # 5 minutes default timeout
+                            )
+
+                            logger.info("Task requires input",
+                                        extra={
+                                            "task_id": task_id,
+                                            "notification": input_notification.model_dump(),
+                                            "input_types": input_types
+                                        })
+                            return task
 
                         # Convert ZedACP response back to A2A message
                         response_message = translator.zedacp_to_a2a_message(result, task.contextId, task_id)
@@ -155,7 +204,7 @@ class A2ATaskManager:
                         task.status.timestamp = generate_id("ts_")
 
                         logger.info("Task completed successfully",
-                                   extra={"task_id": task_id, "agent": context.agent_name})
+                                    extra={"task_id": task_id, "agent": context.agent_name})
 
                         return task
                     else:
@@ -210,6 +259,109 @@ class A2ATaskManager:
 
         return tasks
 
+    async def provide_input_and_continue(
+        self,
+        task_id: str,
+        user_input: Message,
+        agent_command: List[str],
+        api_key: Optional[str] = None,
+        working_directory: Optional[str] = None,
+        mcp_servers: Optional[List[Dict]] = None
+    ) -> Task:
+        """Provide input for an input-required task and continue execution."""
+        async with self._lock:
+            if task_id not in self._active_tasks:
+                raise ValueError(f"Unknown task: {task_id}")
+
+            context = self._active_tasks[task_id]
+            task = context.task
+
+            # Verify task is in input-required state
+            if task.status.state != TaskState.INPUT_REQUIRED:
+                raise ValueError(f"Task {task_id} is not in input-required state")
+
+            try:
+                # Update status back to working
+                task.status.state = TaskState.WORKING
+                task.status.timestamp = generate_id("ts_")
+
+                # Ensure task history exists
+                if task.history is None:
+                    task.history = []
+
+                # Add user input to task history
+                task.history.append(user_input)
+
+                # Use existing ZedACP session if available, otherwise create new connection
+                if context.zedacp_session_id and working_directory == context.working_directory:
+                    # Continue with existing session
+                    async with ZedAgentConnection(agent_command, api_key=api_key) as connection:
+                        await connection.initialize()
+
+                        # Load existing session
+                        await connection.load_session(context.zedacp_session_id, context.working_directory or ".")
+
+                        from ..a2a.translator import A2ATranslator
+                        translator = A2ATranslator()
+                        zedacp_parts = translator.a2a_to_zedacp_message(user_input)
+
+                        cancel_event = context.cancel_event
+
+                        async def on_chunk(text: str) -> None:
+                            logger.debug("Continue task output chunk",
+                                       extra={"task_id": task_id, "chunk": text[:100]})
+
+                        result = await connection.prompt(
+                            context.zedacp_session_id,
+                            zedacp_parts,
+                            on_chunk=on_chunk,
+                            cancel_event=cancel_event
+                        )
+
+                        # Convert response back to A2A message
+                        response_message = translator.zedacp_to_a2a_message(result, task.contextId, task_id)
+
+                        # Ensure history still exists before appending
+                        if task.history is None:
+                            task.history = []
+                        task.history.append(response_message)
+
+                        # Check if more input is required
+                        if "INPUT_REQUIRED:" in result.get("text", "").upper():
+                            task.status.state = TaskState.INPUT_REQUIRED
+                            logger.info("Additional input required", extra={"task_id": task_id})
+                            return task
+
+                        # Mark as completed
+                        task.status.state = TaskState.COMPLETED
+                        task.status.timestamp = generate_id("ts_")
+
+                        logger.info("Task completed after input",
+                                  extra={"task_id": task_id, "agent": context.agent_name})
+                        return task
+                else:
+                    # Need to restart with new connection
+                    return await self.execute_task(
+                        task_id, agent_command, api_key, working_directory or ".",
+                        mcp_servers
+                    )
+
+            except PromptCancelled:
+                task.status.state = TaskState.CANCELLED
+                logger.info("Task cancelled during input continuation", extra={"task_id": task_id})
+                return task
+
+            except AgentProcessError as e:
+                task.status.state = TaskState.FAILED
+                logger.error("Task failed during continuation",
+                           extra={"task_id": task_id, "error": str(e)})
+                raise
+
+            except Exception as e:
+                task.status.state = TaskState.FAILED
+                logger.exception("Unexpected error continuing task", extra={"task_id": task_id})
+                raise
+
     async def cleanup_completed_tasks(self) -> int:
         """Clean up old completed tasks."""
         to_remove = []
@@ -225,6 +377,14 @@ class A2ATaskManager:
             del self._active_tasks[task_id]
 
         return len(to_remove)
+
+    async def get_input_required_tasks(self) -> List[Task]:
+        """Get all tasks currently in input-required state."""
+        input_required_tasks = []
+        for context in self._active_tasks.values():
+            if context.task.status.state == TaskState.INPUT_REQUIRED:
+                input_required_tasks.append(context.task)
+        return input_required_tasks
 
 
 # Global A2A-native task manager

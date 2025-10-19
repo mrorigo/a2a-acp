@@ -400,6 +400,19 @@ class ListTasksResult(BaseModel):
     nextPageToken: str
 
 
+# ===== INPUT-REQUIRED TYPES =====
+
+class InputRequiredNotification(BaseModel):
+    """Represents a notification that a task requires user input."""
+    taskId: str
+    contextId: str
+    kind: Literal["input-required"] = "input-required"
+    message: str
+    inputTypes: List[str] = ["text/plain"]
+    timeout: Optional[int] = None  # Timeout in seconds
+    metadata: Optional[Dict[str, Any]] = None
+
+
 # ===== EVENT TYPES =====
 
 class TaskStatusUpdateEvent(BaseModel):

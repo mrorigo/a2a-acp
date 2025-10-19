@@ -385,6 +385,27 @@ class ZedAgentConnection:
                             "has_text": text is not None,
                             "has_on_chunk": on_chunk is not None
                         })
+
+                elif event == "input_required":
+                    # ZedACP input_required notification - agent needs user input
+                    update_data = params.get("update", {})
+                    self._logger.info("Agent requested input", extra={
+                        "event": event,
+                        "update_data": update_data
+                    })
+
+                    # Extract input requirement details
+                    input_required_info = update_data.get("inputRequired", {})
+                    text = input_required_info.get("text", "Additional input required")
+                    input_types = input_required_info.get("inputTypes", ["text/plain"])
+
+                    # Create enhanced input required message with structured data
+                    input_required_message = f"INPUT_REQUIRED: {text}"
+                    if input_types:
+                        input_required_message += f"\nINPUT_TYPES: {','.join(input_types)}"
+
+                    if on_chunk:
+                        await on_chunk(input_required_message)
                 if event == "session/cancelled":
                     self._logger.warning("Agent reported cancellation via session/update")
                     raise PromptCancelled("Agent reported cancellation")

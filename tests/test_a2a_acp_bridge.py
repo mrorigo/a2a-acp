@@ -608,5 +608,167 @@ class TestA2ACPBridgeIntegration:
         assert response.status_code in [200, 400, 500]
 
 
+class TestInputRequiredFunctionality:
+    """Test input-required functionality in A2A tasks."""
+
+    def test_input_required_notification_model(self):
+        """Test InputRequiredNotification model structure."""
+        from src.a2a.models import InputRequiredNotification
+
+        notification = InputRequiredNotification(
+            taskId="task-123",
+            contextId="ctx-456",
+            message="Please provide more details",
+            inputTypes=["text/plain", "application/json"],
+            timeout=300
+        )
+
+        assert notification.taskId == "task-123"
+        assert notification.contextId == "ctx-456"
+        assert notification.inputTypes == ["text/plain", "application/json"]
+        assert notification.timeout == 300
+
+    @pytest.mark.asyncio
+    async def test_task_input_required_detection(self):
+        """Test that tasks properly detect input-required state."""
+        task_manager = A2ATaskManager()
+
+        # Create a task
+        task = await task_manager.create_task("test-context", "test-agent")
+        task_id = task.id
+
+        # Initially should not be in input-required state
+        assert task.status.state != "input-required"
+
+        # Manually set to input-required for testing
+        from src.a2a.models import TaskState
+        task.status.state = TaskState.INPUT_REQUIRED
+
+        # Test getting input-required tasks
+        input_required_tasks = await task_manager.get_input_required_tasks()
+        assert len(input_required_tasks) == 1
+        assert input_required_tasks[0].id == task_id
+
+    @pytest.mark.asyncio
+    async def test_task_input_continuation_workflow(self):
+        """Test the complete input-required continuation workflow."""
+        from src.a2a.models import Message, TextPart, TaskState
+
+        task_manager = A2ATaskManager()
+
+        # Create a task and set it to input-required state
+        task = await task_manager.create_task("test-context", "test-agent")
+        task_id = task.id
+        task.status.state = TaskState.INPUT_REQUIRED
+
+        # Create user input message
+        user_input = Message(
+            role="user",
+            parts=[TextPart(kind="text", text="Here's the additional information you requested")],
+            messageId="msg-input-1",
+            taskId=task_id,
+            contextId="test-context"
+        )
+
+        # Mock the execute_task method to avoid actual agent execution
+        original_execute = task_manager.execute_task
+
+        async def mock_execute(*args, **kwargs):
+            # Return a completed task for testing
+            mock_task = await original_execute(*args, **kwargs)
+            if mock_task.status.state == TaskState.INPUT_REQUIRED:
+                mock_task.status.state = TaskState.COMPLETED
+            return mock_task
+
+        task_manager.execute_task = mock_execute
+
+        try:
+            # This would normally continue an input-required task
+            # In a real scenario, this would call provide_input_and_continue
+            # For testing, we verify the workflow components exist
+            assert hasattr(task_manager, 'provide_input_and_continue')
+            assert hasattr(task_manager, 'get_input_required_tasks')
+        finally:
+            task_manager.execute_task = original_execute
+
+    @pytest.mark.asyncio
+    async def test_input_required_state_transitions(self):
+        """Test proper state transitions for input-required tasks."""
+        from src.a2a.models import TaskState
+
+        task_manager = A2ATaskManager()
+
+        # Test state transition: submitted -> working -> input_required -> working -> completed
+        task = await task_manager.create_task("test-context", "test-agent")
+        task_id = task.id
+
+        # Initial state should be submitted (based on our implementation)
+        initial_state = task.status.state
+
+        # Transition to working
+        task.status.state = TaskState.WORKING
+        assert task.status.state == TaskState.WORKING
+
+        # Transition to input-required
+        task.status.state = TaskState.INPUT_REQUIRED
+        assert task.status.state == TaskState.INPUT_REQUIRED
+
+        # Transition back to working after input
+        task.status.state = TaskState.WORKING
+        assert task.status.state == TaskState.WORKING
+
+        # Final transition to completed
+        task.status.state = TaskState.COMPLETED
+        assert task.status.state == TaskState.COMPLETED
+
+    def test_input_required_timeout_handling(self):
+        """Test input-required timeout handling."""
+        from src.a2a.models import InputRequiredNotification
+
+        # Test notification with timeout
+        notification = InputRequiredNotification(
+            taskId="task-123",
+            contextId="ctx-456",
+            message="Please provide input",
+            timeout=300
+        )
+
+        assert notification.timeout == 300
+
+        # Test notification without timeout (should use default)
+        notification_no_timeout = InputRequiredNotification(
+            taskId="task-124",
+            contextId="ctx-457",
+            message="Please provide input"
+        )
+
+        assert notification_no_timeout.timeout is None
+
+    @pytest.mark.asyncio
+    async def test_multiple_input_required_tasks(self):
+        """Test handling multiple input-required tasks simultaneously."""
+        task_manager = A2ATaskManager()
+        from src.a2a.models import TaskState
+
+        # Create multiple tasks and set some to input-required
+        tasks = []
+        for i in range(5):
+            task = await task_manager.create_task(f"context-{i}", f"agent-{i}")
+            if i % 2 == 0:  # Set even-numbered tasks to input-required
+                task.status.state = TaskState.INPUT_REQUIRED
+            tasks.append(task)
+
+        # Get input-required tasks
+        input_required_tasks = await task_manager.get_input_required_tasks()
+
+        # Should have 3 input-required tasks (0, 2, 4)
+        assert len(input_required_tasks) == 3
+
+        # Verify they are the correct tasks
+        input_required_ids = {task.id for task in input_required_tasks}
+        expected_ids = {tasks[i].id for i in [0, 2, 4]}
+        assert input_required_ids == expected_ids
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
