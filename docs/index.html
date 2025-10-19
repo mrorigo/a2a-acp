@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>A2A-ACP — Native A2A Protocol Server</title>
+  <style>
+    :root {
+      --bg1: #0f172a;
+      --bg2: #1e293b;
+      --accent1: #f59e0b;
+      --accent2: #ef4444;
+      --text: #f1f6fa;
+      --muted: #9ca3af;
+      --border: rgba(255,255,255,0.08);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', system-ui, sans-serif;
+      background: radial-gradient(circle at 30% 20%, var(--bg2), var(--bg1));
+      color: var(--text);
+      overflow-x: hidden;
+    }
+
+    /* Cloud animation */
+    .clouds {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      overflow: hidden;
+      z-index: -1;
+      pointer-events: none;
+    }
+
+    .cloud {
+      position: absolute;
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.08), rgba(255,255,255,0));
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.5;
+      animation: drift 90s linear infinite;
+    }
+
+    .cloud:nth-child(1) { width: 600px; height: 300px; top: 10%; left: -10%; animation-delay: 0s; }
+    .cloud:nth-child(2) { width: 800px; height: 400px; top: 40%; left: 70%; animation-delay: 10s; }
+    .cloud:nth-child(3) { width: 700px; height: 350px; top: 70%; left: -50%; animation-delay: 20s; }
+
+    @keyframes drift {
+      0% { transform: translateX(0); opacity: 0.5; }
+      50% { opacity: 0.7; }
+      100% { transform: translateX(180%); opacity: 0.5; }
+    }
+
+    .container { max-width: 1100px; margin: 0 auto; padding: 3rem 1.5rem; position: relative; }
+
+    .nav { display: flex; justify-content: space-between; align-items: center; }
+    .logo { background: linear-gradient(135deg, var(--accent1), var(--accent2)); color: white; padding: 0.75rem 1.25rem; border-radius: 10px; font-weight: 700; font-size: 1.2rem; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
+    .actions .btn { padding: 0.6rem 1.1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    .btn.primary { background: linear-gradient(90deg, #ff9f43, #ff5252); color: #fff; }
+    .btn { background: rgba(255,255,255,0.05); color: var(--text); transition: background 0.3s ease; }
+    .btn:hover { background: rgba(255,255,255,0.1); }
+
+    .hero { text-align: center; padding: 0rem 0rem 1rem 2rem; }
+    .hero h1 { font-size: 2.6rem; font-weight: 700; margin-bottom: 1rem; }
+    .hero p { color: var(--muted); max-width: 720px; margin: 0 auto 2rem; font-size: 1.05rem; line-height: 1.6; }
+
+    .badges { display: flex; justify-content: center; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 2rem; }
+    .badge { background: rgba(255,255,255,0.08); border: 1px solid var(--border); padding: 0.4rem 0.8rem; border-radius: 999px; font-size: 0.8rem; color: var(--muted); }
+
+    .info { max-width: 800px; margin: 2rem auto; color: var(--muted); font-size: 1rem; line-height: 1.6; }
+    .info strong { color: var(--accent1); }
+
+    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-top: 2.5rem; }
+    .card { background: rgba(255,255,255,0.04); border-radius: 10px; padding: 1.2rem; border: 1px solid var(--border); transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+    .card h3 { color: var(--accent1); font-size: 1.1rem; margin-bottom: 0.5rem; }
+    .card p { color: var(--muted); margin: 0; }
+
+    footer { text-align: center; margin-top: 3rem; padding-top: 2rem; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+  <div class="clouds">
+    <div class="cloud"></div>
+    <div class="cloud"></div>
+    <div class="cloud"></div>
+  </div>
+
+  <div class="container">
+    <nav class="nav">
+      <div class="logo">A2A-ACP</div>
+      <div class="actions">
+        <button class="btn" onclick="openRepo()">GitHub</button>
+        <button class="btn primary" onclick="copyInstall()">Try A2A</button>
+      </div>
+    </nav>
+
+    <section class="hero">
+      <h1>ZedACP Agents, First-Class HTTP Citizens</h1>
+      <p>A2A-ACP transforms <strong>ZedACP agents into first-class citizens</strong> of the modern agent ecosystem. By implementing native A2A v0.3.0 over HTTP, it makes <strong>Claude Code</strong>, <strong>Codex</strong>, and <strong>Gemini CLI</strong> accessible to any A2A-compliant platform, enabling seamless integration into broader agent workflows and applications.</p>
+      <div class="badges">
+        <div class="badge">HTTP-Native Agents</div>
+        <div class="badge">Agent Ecosystem Integration</div>
+        <div class="badge">A2A Platform Compatible</div>
+        <div class="badge">Universal Agent Access</div>
+        <div class="badge">Enterprise Ready</div>
+      </div>
+    </section>
+
+    <section class="info">
+      <p><strong>A2A</strong> (Agent-to-Agent Protocol) enables agents to communicate as first-class citizens in modern HTTP-based ecosystems. <strong>ZedACP</strong> provides powerful agent capabilities but remains isolated to stdio-based tooling.</p>
+      <p><strong>A2A-ACP</strong> bridges this gap by implementing native A2A v0.3.0 over HTTP — making ZedACP agents accessible to any A2A-compliant platform or application. This unlocks enterprise integration, agent marketplaces, and seamless workflows across different agent ecosystems.</p>
+    </section>
+
+    <section class="info">
+      <h2 style="color:var(--accent1);text-align:center;margin-bottom:1rem;">Universal Agent Access</h2>
+      <p>A2A-ACP makes <strong>Claude Code</strong>, <strong>Codex</strong>, and <strong>Gemini CLI</strong> available to the entire agent ecosystem. No longer confined to local development environments, these agents become accessible via standard HTTP APIs to any A2A-compliant platform, service, or application.</p>
+      <p>This transforms local ZedACP tools into enterprise-ready services that can participate in automated workflows, agent orchestration platforms, and multi-agent conversations — all while maintaining their full capabilities and interactive potential.</p>
+    </section>
+
+    <section class="features">
+      <div class="card">
+        <h3>Ecosystem Integration</h3>
+        <p>Makes ZedACP agents first-class citizens in A2A-compliant platforms and agent marketplaces.</p>
+      </div>
+      <div class="card">
+        <h3>HTTP-Native Access</h3>
+        <p>Exposes powerful ZedACP agents via standard HTTP APIs accessible to any A2A client or platform.</p>
+      </div>
+      <div class="card">
+        <h3>Enterprise Ready</h3>
+        <p>Production-grade A2A server with authentication, monitoring, and scalable agent management.</p>
+      </div>
+    </section>
+
+    <footer>
+      <p>Built for modern agent ecosystems with native A2A protocol and interactive conversations. — <a href="https://github.com/mrorigo/a2a-acp" style="color:var(--accent1);text-decoration:none;">GitHub</a></p>
+    </footer>
+  </div>
+
+  <script>
+    const repo = 'https://github.com/mrorigo/a2a-acp';
+    function openRepo() { window.open(repo, '_blank'); }
+    function copyInstall() {
+      const a2aExample = `curl -X POST http://localhost:8001/ \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "message/send",
+    "id": "msg_001",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "Hello A2A!"}],
+        "messageId": "msg_001"
+      },
+      "metadata": {"agent_name": "codex-acp"}
+    }
+  }'`;
+      navigator.clipboard.writeText(a2aExample).then(() => alert('Copied A2A example!'));
+    }
+  </script>
+</body>
+</html>
