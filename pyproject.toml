@@ -1,0 +1,36 @@
+[project]
+name = "a2a-acp"
+version = "0.1.0"
+description = "A native A2A protocol server that exposes ZedACP agents over HTTP using JSON-RPC 2.0."
+authors = [{ name = "Autonomous Developer Agent" }]
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "httpx",
+    "ruff",
+    "black",
+    "mypy",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.black]
+line-length = 88
+target-version = ["py39"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
