@@ -135,11 +135,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.task_manager = A2ATaskManager()
     app.state.context_manager = A2AContextManager()
 
-    # Load agent configuration
-    config_path = os.path.join(os.path.dirname(__file__), "..", "..", "config", "agents.json")
-    with open(config_path, 'r') as f:
-        agent_config = json.load(f)
-
     # Initialize database
     app.state.database = SessionDatabase()
 
