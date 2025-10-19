@@ -19,10 +19,9 @@ from fastapi.responses import Response, StreamingResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 
-from .agent_registry import AgentRegistry
+# Removed: from .agent_registry import AgentRegistry
 from .database import SessionDatabase
 from .logging_config import configure_logging
-from .models import AgentManifest, AgentSummary, Run, RunCreateRequest, RunMode, RunStatus, Message, MessagePart
 from .task_manager import A2ATaskManager
 from .context_manager import A2AContextManager
 from .settings import get_settings
@@ -33,6 +32,75 @@ from ..a2a.models import Message as A2AMessage, MessageSendParams, Task
 from ..a2a.translator import A2ATranslator
 
 logger = logging.getLogger(__name__)
+
+
+def get_agent_config() -> Dict[str, Any]:
+    """Get the single agent configuration from settings."""
+    settings = get_settings()
+
+    # For testing/development, provide fallback defaults
+    command = settings.agent_command or "python tests/dummy_agent.py"
+    description = settings.agent_description or "A2A-ACP Development Agent"
+
+    return {
+        "command": command,
+        "api_key": settings.agent_api_key,
+        "description": description
+    }
+
+
+def generate_static_agent_card():
+    """Generate a static AgentCard for the single configured agent."""
+    from ..a2a.models import (
+        AgentCard, AgentCapabilities, AgentSkill, AgentProvider,
+        SecurityScheme, HTTPAuthSecurityScheme
+    )
+
+    agent_config = get_agent_config()
+
+    return AgentCard(
+        protocolVersion="0.3.0",
+        name="a2a-acp-agent",
+        description=agent_config["description"],
+        url="http://localhost:8001",  # Server URL
+        preferredTransport="JSONRPC",
+        version="1.0.0",
+        capabilities=AgentCapabilities(
+            streaming=True,
+            pushNotifications=False,
+            stateTransitionHistory=True
+        ),
+        securitySchemes={
+            "bearer": HTTPAuthSecurityScheme(
+                type="http",
+                scheme="bearer",
+                description="JWT bearer token authentication",
+                bearerFormat="JWT"
+            )
+        } if get_settings().auth_token else None,
+        defaultInputModes=["text/plain"],
+        defaultOutputModes=["text/plain"],
+        skills=[
+            AgentSkill(
+                id="code_generation",
+                name="Code Generation",
+                description="Generate and modify code in various programming languages",
+                tags=["coding", "development", "programming"],
+                examples=["Create a Python function to calculate fibonacci numbers"],
+                inputModes=["text/plain"],
+                outputModes=["text/plain"]
+            ),
+            AgentSkill(
+                id="file_system",
+                name="File System Operations",
+                description="Read, write, and modify files in the workspace",
+                tags=["files", "workspace", "io"],
+                examples=["Read the contents of config.json", "Create a new Python script"],
+                inputModes=["text/plain"],
+                outputModes=["text/plain"]
+            )
+        ]
+    )
 
 
 def format_sse(event: str, data: Any) -> bytes:
@@ -64,7 +132,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     configure_logging()
 
     # Initialize components
-    app.state.registry = AgentRegistry()
     app.state.task_manager = A2ATaskManager()
     app.state.context_manager = A2AContextManager()
 
@@ -87,10 +154,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("A2A-ACP proxy shutdown")
 
 
-def get_registry(request: Request) -> AgentRegistry:
-    return request.app.state.registry
-
-
 def get_task_manager(request: Request) -> A2ATaskManager:
     return request.app.state.task_manager
 
@@ -105,6 +168,11 @@ def get_database(request: Request) -> SessionDatabase:
 
 def get_a2a_translator(request: Request) -> A2ATranslator:
     return request.app.state.a2a_translator
+
+
+def get_agent_card(request: Request):
+    """Get the static AgentCard for this server."""
+    return request.app.state.agent_card
 
 
 def create_app() -> FastAPI:
@@ -130,37 +198,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Legacy ACP endpoints (for backward compatibility during transition)
-    @app.get("/ping", dependencies=[Depends(require_authorization)])
+    # Simple ping endpoint for health checks
+    @app.get("/ping")
     async def ping() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get(
-        "/agents",
-        response_model=list[AgentSummary],
-        dependencies=[Depends(require_authorization)],
-    )
-    async def list_agents(registry: AgentRegistry = Depends(get_registry)) -> list[AgentSummary]:
-        agents = [
-            AgentSummary(name=agent.name, description=agent.description)
-            for agent in registry.list()
-        ]
-        return agents
-
-    @app.get(
-        "/agents/{name}",
-        response_model=AgentManifest,
-        dependencies=[Depends(require_authorization)],
-    )
-    async def agent_manifest(name: str, registry: AgentRegistry = Depends(get_registry)) -> AgentManifest:
-        try:
-            return registry.manifest_for(name)
-        except KeyError:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found") from None
-
-    # Initialize A2A server for JSON-RPC handling
-    from ..a2a.server import create_a2a_server
-    a2a_server = create_a2a_server()
+    # Store static AgentCard for A2A responses
+    app.state.agent_card = generate_static_agent_card()
 
     # A2A JSON-RPC endpoint - delegate to A2A server
     @app.post("/a2a/rpc")
@@ -191,14 +235,30 @@ def create_app() -> FastAPI:
             body = json.loads(body_bytes)
             logger.info("Received A2A JSON-RPC request", extra={"method": body.get("method")})
 
-            # Use the A2A server's request handling
-            response = await a2a_server._handle_single_request(body)
+            # Handle A2A methods directly
+            method = body.get("method")
+            params = body.get("params", {})
+            request_id = body.get("id")
 
-            if response is None:
-                # This was a notification with no response expected
-                return Response(content="", status_code=204)
-
-            return response
+            if method == "agent/getAuthenticatedExtendedCard":
+                # Return the static AgentCard
+                agent_card = get_agent_card(request)
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": agent_card.model_dump() if hasattr(agent_card, 'model_dump') else agent_card
+                }
+            else:
+                # For now, return method not found for other methods
+                # TODO: Implement other A2A methods as needed
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32601,
+                        "message": f"Method '{method}' not implemented in streamlined version"
+                    }
+                }
 
         except json.JSONDecodeError as e:
             logger.warning("Invalid JSON in A2A JSON-RPC request", extra={"error": str(e)})
@@ -207,11 +267,10 @@ def create_app() -> FastAPI:
             logger.exception("Error handling A2A JSON-RPC request")
             raise HTTPException(status_code=500, detail=str(e))
 
-    # A2A HTTP API endpoints
+    # A2A HTTP API endpoints (simplified single-agent)
     @app.post("/a2a/message/send")
     async def a2a_message_send(
         params: MessageSendParams,
-        registry: AgentRegistry = Depends(get_registry),
         task_manager: A2ATaskManager = Depends(get_task_manager),
         context_manager: A2AContextManager = Depends(get_context_manager),
         translator: A2ATranslator = Depends(get_a2a_translator),
@@ -220,29 +279,22 @@ def create_app() -> FastAPI:
         """Send an A2A message and return response."""
         require_authorization(authorization)
 
-        # Extract agent name from message metadata
-        agent_name = params.metadata.get("agent_name") if params.metadata else None
-        if not agent_name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Agent name must be specified in message metadata")
-
-        try:
-            agent = registry.get(agent_name)
-        except KeyError:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found") from None
+        # Get single agent configuration
+        agent_config = get_agent_config()
 
         # Create A2A context for this task
-        context_id = params.message.contextId or await context_manager.create_context(agent.name)
+        context_id = params.message.contextId or await context_manager.create_context("default-agent")
 
         # Create A2A task
         task = await task_manager.create_task(
             context_id=context_id,
-            agent_name=agent.name,
+            agent_name="default-agent",
             initial_message=params.message,
             metadata={"mode": "sync"}
         )
 
         try:
-            async with ZedAgentConnection(agent.command, api_key=agent.api_key) as connection:
+            async with ZedAgentConnection(agent_config["command"], api_key=agent_config["api_key"]) as connection:
                 await connection.initialize()
 
                 # Create or load ZedACP session if context is provided
@@ -251,8 +303,8 @@ def create_app() -> FastAPI:
                 # Execute the task
                 result = await task_manager.execute_task(
                     task_id=task.id,
-                    agent_command=agent.command,
-                    api_key=agent.api_key,
+                    agent_command=agent_config["command"],
+                    api_key=agent_config["api_key"],
                     working_directory=os.getcwd(),
                     mcp_servers=[]
                 )

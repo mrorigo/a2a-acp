@@ -15,7 +15,6 @@ from .models import (
     AgentCard, AgentCapabilities, AgentSkill, SecurityScheme,
     APIKeySecurityScheme, HTTPAuthSecurityScheme, TransportProtocol
 )
-from ..a2a_acp.agent_registry import AgentRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +28,17 @@ class AgentCardGenerator:
     """
 
     def __init__(self, config_path: Optional[Path] = None):
-        self.agent_registry = AgentRegistry(config_path)
-        self._base_url = "https://your-server.com"  # TODO: Make configurable
+        # Single agent configuration - use settings instead of registry
+        from ..a2a_acp.settings import get_settings
+        settings = get_settings()
+
+        self.agent_config = {
+            "name": "default-agent",
+            "command": settings.agent_command or "python tests/dummy_agent.py",
+            "api_key": settings.agent_api_key,
+            "description": settings.agent_description or "A2A-ACP Development Agent"
+        }
+        self._base_url = "http://localhost:8001"  # TODO: Make configurable
 
     def generate_agent_card(self, agent_name: str) -> AgentCard:
         """
@@ -42,19 +50,20 @@ class AgentCardGenerator:
         Returns:
             Complete AgentCard with all capabilities and metadata
         """
-        try:
-            agent_config = self.agent_registry.get(agent_name)
-        except KeyError as e:
-            raise ValueError(f"Unknown agent: {agent_name}") from e
+        # For single-agent architecture, only "default-agent" is supported
+        if agent_name != "default-agent":
+            raise ValueError(f"Unknown agent: {agent_name}. Only 'default-agent' is supported in single-agent mode.")
+
+        agent_config = self.agent_config
 
         # Generate base agent information
         card = AgentCard(
             protocolVersion="0.3.0",
-            name=agent_config.name,
-            description=agent_config.description or f"A2A-compatible ZedACP agent '{agent_config.name}'",
-            url=f"{self._base_url}/a2a/{agent_config.name}",
+            name=agent_config["name"],
+            description=agent_config["description"] or f"A2A-compatible ZedACP agent '{agent_config['name']}'",
+            url=f"{self._base_url}/a2a/{agent_config['name']}",
             preferredTransport=TransportProtocol.JSONRPC,
-            version=agent_config.version or "1.0.0",
+            version="1.0.0",  # Single agent doesn't have version in config
             capabilities=self._generate_capabilities(),
             securitySchemes=self._generate_security_schemes(),
             defaultInputModes=["text/plain"],
@@ -74,13 +83,13 @@ class AgentCardGenerator:
             Dictionary mapping agent names to their AgentCards
         """
         cards = {}
-        for agent_config in self.agent_registry.list():
-            try:
-                card = self.generate_agent_card(agent_config.name)
-                cards[agent_config.name] = card
-            except Exception as e:
-                logger.error("Failed to generate AgentCard",
-                           extra={"agent_name": agent_config.name, "error": str(e)})
+        # Single agent only
+        try:
+            card = self.generate_agent_card("default-agent")
+            cards["default-agent"] = card
+        except Exception as e:
+            logger.error("Failed to generate AgentCard",
+                        extra={"agent_name": "default-agent", "error": str(e)})
 
         logger.info("Generated AgentCards for all agents", extra={"count": len(cards)})
         return cards
@@ -169,8 +178,8 @@ class AgentCardGenerator:
         ]
 
         # Add agent-specific skills based on description
-        if agent_config.description:
-            description_lower = agent_config.description.lower()
+        if agent_config["description"]:
+            description_lower = agent_config["description"].lower()
 
             if any(term in description_lower for term in ["code", "programming", "development"]):
                 skills.append(AgentSkill(
@@ -203,7 +212,7 @@ class AgentCardGenerator:
                 ))
 
         logger.debug("Generated agent skills",
-                    extra={"agent_name": agent_config.name, "skills_count": len(skills)})
+                    extra={"agent_name": agent_config["name"], "skills_count": len(skills)})
         return skills
 
 
@@ -262,7 +271,7 @@ class A2AAgentCardManager:
 
     def list_available_agents(self) -> List[str]:
         """List all available agent names."""
-        return [agent.name for agent in self.generator.agent_registry.list()]
+        return [self.generator.agent_config["name"]]
 
 
 # Global Agent Card manager instance

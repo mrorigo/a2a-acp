@@ -17,7 +17,6 @@ from .models import (
     create_context_id, create_message_id, MessageSendParams
 )
 from .translator import translator, a2a_to_zedacp_message, zedacp_to_a2a_message
-from ..a2a_acp.agent_registry import AgentRegistry
 from ..a2a_acp.zed_agent import ZedAgentConnection, PromptCancelled
 
 logger = logging.getLogger(__name__)
@@ -32,7 +31,18 @@ class A2AAgentManager:
     """
 
     def __init__(self, config_path: Optional[Path] = None):
-        self.agent_registry = AgentRegistry(config_path)
+        # Single agent configuration - use settings instead of registry
+        from ..a2a_acp.settings import get_settings
+        settings = get_settings()
+
+        # Store single agent configuration
+        self.agent_config = {
+            "name": "default-agent",
+            "command": settings.agent_command or "python tests/dummy_agent.py",
+            "api_key": settings.agent_api_key,
+            "description": settings.agent_description or "A2A-ACP Development Agent"
+        }
+
         self._connections: Dict[str, ZedAgentConnection] = {}
         self._connection_locks: Dict[str, asyncio.Lock] = {}
         self._active_tasks: Dict[str, Dict[str, Any]] = {}
@@ -50,11 +60,11 @@ class A2AAgentManager:
         if agent_name in self._connections:
             return self._connections[agent_name]
 
-        # Get agent configuration
-        try:
-            agent_config = self.agent_registry.get(agent_name)
-        except KeyError as e:
-            raise ValueError(f"Unknown agent: {agent_name}") from e
+        # For single-agent architecture, only "default-agent" is supported
+        if agent_name != "default-agent":
+            raise ValueError(f"Unknown agent: {agent_name}. Only 'default-agent' is supported in single-agent mode.")
+
+        agent_config = self.agent_config
 
         # Create connection lock for this agent
         if agent_name not in self._connection_locks:
@@ -67,11 +77,11 @@ class A2AAgentManager:
 
             # Create new ZedACP connection
             logger.info("Creating new ZedACP connection",
-                       extra={"agent_name": agent_name, "command": agent_config.command})
+                        extra={"agent_name": agent_name, "command": agent_config["command"]})
 
             connection = ZedAgentConnection(
-                command=agent_config.command,
-                api_key=agent_config.api_key,
+                command=agent_config["command"],
+                api_key=agent_config["api_key"],
                 log=logger.getChild(f"ZedAgent-{agent_name}")
             )
 
@@ -240,7 +250,7 @@ class A2AAgentManager:
 
     def get_available_agents(self) -> List[str]:
         """Get list of available agent names."""
-        return [agent.name for agent in self.agent_registry.list()]
+        return [self.agent_config["name"]]
 
 
 # Global agent manager instance

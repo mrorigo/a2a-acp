@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from ..a2a.models import Task, TaskStatus, TaskState, Message, generate_id, create_task_id, InputRequiredNotification
-from .models import RunMode
+# RunMode removed - using A2A types only
 from .zed_agent import ZedAgentConnection, AgentProcessError, PromptCancelled
 
 logger = logging.getLogger(__name__)

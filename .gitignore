@@ -8,7 +8,6 @@ dist/
 codex-acp
 config/agents.json
 .env
-docs
 **/*.egg-info
 *.db-shm
 *.db-wal

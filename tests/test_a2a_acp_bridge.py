@@ -15,9 +15,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.a2a_acp.main import create_app
-from src.a2a_acp.agent_registry import AgentRegistry
 from src.a2a_acp.database import SessionDatabase, A2AContext, ACPSession
-from src.a2a_acp.models import Run, RunStatus, RunMode
+# A2A-ACP bridge tests - using A2A protocol types exclusively
 from src.a2a_acp.task_manager import A2ATaskManager, a2a_task_manager
 from src.a2a_acp.context_manager import A2AContextManager, a2a_context_manager
 from src.a2a_acp.context_manager import A2AContextManager
@@ -65,56 +64,28 @@ class TestA2ACPBridge:
         # and testing both valid and invalid token scenarios
 
 
-class TestAgentRegistry:
-    """Test the ZedACP agent registry."""
+class TestAgentConfiguration:
+    """Test the streamlined agent configuration."""
 
-    def test_agent_registry_creation(self):
-        """Test that agent registry can be created."""
-        registry = AgentRegistry()
-        assert registry is not None
+    def test_agent_config_function(self):
+        """Test that agent configuration can be loaded."""
+        from src.a2a_acp.main import get_agent_config
 
-    def test_agent_registry_list_agents(self):
-        """Test listing agents from registry."""
-        # Use a temporary config file for testing
-        mock_config = {
-            "test-agent": {
-                "name": "test-agent",
-                "command": ["echo"],
-                "description": "Test agent"
-            }
-        }
+        # This will use fallback defaults since no env vars are set
+        config = get_agent_config()
+        assert config is not None
+        assert "command" in config
+        assert "api_key" in config
+        assert "description" in config
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
-            json.dump(mock_config, tmp)
-            tmp.flush()
+    def test_settings_include_agent_config(self):
+        """Test that settings include agent configuration fields."""
+        from src.a2a_acp.settings import get_settings
 
-            try:
-                registry = AgentRegistry(Path(tmp.name))
-                agents = list(registry.list())  # Convert iterable to list
-                assert len(agents) > 0
-            finally:
-                os.unlink(tmp.name)
-
-    def test_agent_registry_get_agent(self):
-        """Test getting specific agent from registry."""
-        mock_config = {
-            "test-agent": {
-                "name": "test-agent",
-                "command": ["echo"],
-                "description": "Test agent"
-            }
-        }
-
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
-            json.dump(mock_config, tmp)
-            tmp.flush()
-
-            try:
-                registry = AgentRegistry(Path(tmp.name))
-                agent = registry.get("test-agent")
-                assert agent.name == "test-agent"
-            finally:
-                os.unlink(tmp.name)
+        settings = get_settings()
+        assert hasattr(settings, 'agent_command')
+        assert hasattr(settings, 'agent_api_key')
+        assert hasattr(settings, 'agent_description')
 
 
 class TestA2ACPBridgeDatabase:
@@ -161,22 +132,23 @@ class TestTaskManager:
     """Test the A2A task manager functionality."""
 
     def test_task_model_structure(self):
-        """Test that Task model has correct structure."""
-        from datetime import datetime
+        """Test that A2A models are available."""
+        # Test that we can import A2A models for task management
+        from src.a2a.models import Task, TaskState, Message, TextPart
 
-        run = Run(
-            id="test-run",
-            agent="test-agent",
-            status=RunStatus.queued,
-            mode=RunMode.sync,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+        # Verify A2A types are available
+        assert TaskState.SUBMITTED == "submitted"
+        assert TaskState.INPUT_REQUIRED == "input-required"
+
+        # Test A2A message creation
+        message = Message(
+            role="user",
+            parts=[TextPart(kind="text", text="test")],
+            messageId="test-msg"
         )
 
-        assert run.id == "test-run"
-        assert run.agent == "test-agent"
-        assert run.status == RunStatus.queued
-        assert run.mode == RunMode.sync
+        assert message.role == "user"
+        assert len(message.parts) == 1
 
 
 class TestA2ATaskManager:

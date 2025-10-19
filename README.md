@@ -219,23 +219,40 @@ cd a2a-acp
 # Install dependencies
 make dev-install
 
-# Configure your ZedACP agent
-cp config/agents.json.example config/agents.json
-# Edit config/agents.json with your agent details
+# Configure your ZedACP agent (simplified)
+cp .env.example .env
+# Edit .env with your agent details (see configuration section below)
 ```
 
 ### Configuration
 
+A2A-ACP uses **environment variables** for simplified configuration (recommended):
+
+```bash
+# Required: Agent command
+export A2A_AGENT_COMMAND="/usr/local/bin/codex-acp"
+
+# Optional: API key for agent authentication
+export A2A_AGENT_API_KEY="${OPENAI_API_KEY}"
+
+# Optional: Agent description
+export A2A_AGENT_DESCRIPTION="OpenAI Codex for A2A-ACP"
+
+# Optional: Authentication token for A2A-ACP server
+export A2A_AUTH_TOKEN="your-secret-token"
+```
+
+**Alternative:** Legacy JSON configuration (deprecated but supported):
+
 ```json
 {
-  "agents": [
-    {
-      "name": "codex-acp",
-      "description": "OpenAI Codex agent",
-      "command": ["/path/to/codex-acp"],
-      "api_key": "${OPENAI_API_KEY}"
-    }
-  ]
+  "_deprecated": "Use environment variables instead",
+  "codex-acp": {
+    "name": "codex-acp",
+    "command": ["/usr/local/bin/codex-acp"],
+    "api_key": "${OPENAI_API_KEY}",
+    "description": "OpenAI Codex agent"
+  }
 }
 ```
 
@@ -672,26 +689,28 @@ CMD ["uvicorn", "src.a2a_acp.main:create_app", "--host", "0.0.0.0", "--port", "8
 ```
 a2a-acp/
 ├── src/
-│   └── a2a_acp/           # A2A-ACP Main Application
+│   └── a2a_acp/           # A2A-ACP Main Application (Streamlined Single-Agent)
 │       ├── __init__.py     # Package initialization
 │       ├── main.py         # FastAPI application (A2A JSON-RPC server)
 │       ├── database.py     # A2A context and message persistence
-│       ├── agent_registry.py # ZedACP agent configuration
 │       ├── zed_agent.py    # ZedACP subprocess management
-│       ├── settings.py     # Application settings
-│       └── logging_config.py # Structured logging setup
+│       ├── settings.py     # Application settings (environment-based config)
+│       ├── logging_config.py # Structured logging setup
+│       ├── task_manager.py # A2A task lifecycle management
+│       └── context_manager.py # A2A context and state management
 ├── src/a2a/               # A2A Protocol Implementation
 │   ├── __init__.py         # A2A package initialization
 │   ├── server.py           # A2A JSON-RPC 2.0 HTTP server
 │   ├── models.py           # Complete A2A type definitions
 │   ├── translator.py       # A2A ↔ ZedACP translation layer
-│   ├── agent_manager.py    # ZedACP agent connection management
+│   ├── agent_manager.py    # ZedACP agent connection management (single-agent)
 │   └── agent_card.py       # Dynamic Agent Card generation
-├── tests/                  # Comprehensive test suite
-│   ├── test_a2a_server.py  # A2A protocol tests (20 tests)
+├── tests/                  # Comprehensive test suite (56+ tests)
+│   ├── test_a2a_acp_bridge.py # A2A-ACP bridge tests (40+ tests)
+│   ├── test_a2a_server.py  # A2A protocol tests (16+ tests)
 │   └── dummy_agent.py      # Test ZedACP agent
 ├── config/                 # Configuration
-│   └── agents.json         # ZedACP agent definitions
+│   └── agents.json.example # Example configuration (deprecated - use env vars)
 └── docs/                   # Documentation
     ├── A2A_PLAN.md         # Complete A2A implementation plan
     ├── research.md         # Protocol research
@@ -708,14 +727,127 @@ make test
 # Run with coverage
 make test-coverage
 
-# Run A2A-ACP bridge tests only
+# Run A2A-ACP bridge tests (40+ tests)
 python -m pytest tests/test_a2a_acp_bridge.py -v
 
-# Run A2A protocol tests only
+# Run A2A protocol tests (16+ tests)
 python -m pytest tests/test_a2a_server.py -v
 
 # Run specific test
 python -m pytest tests/test_a2a_acp_bridge.py::TestInputRequiredFunctionality -v
+```
+
+### Development Setup
+
+For development with the streamlined single-agent architecture:
+
+```bash
+# Set up your agent
+export A2A_AGENT_COMMAND="python tests/dummy_agent.py"
+export A2A_AGENT_DESCRIPTION="Test agent for development"
+
+# Run tests
+make test
+
+# Run server in development mode
+make run
+```
+
+## Migration Guide: Multi-Agent to Single-Agent
+
+### Why Single-Agent Architecture?
+
+The **single-agent architecture** eliminates unnecessary complexity:
+
+- **Simpler Configuration**: Environment variables instead of JSON files
+- **Faster Startup**: No agent registry loading and parsing
+- **Better A2A Compliance**: A2A expects one agent per endpoint with a clear AgentCard
+- **Easier Deployment**: One agent = one container/service
+- **Reduced Complexity**: No agent routing logic or registry management
+
+### Migration Steps
+
+#### 1. **Environment Variable Configuration**
+
+**Before (Multi-Agent JSON):**
+```json
+{
+  "codex-acp": {
+    "name": "codex-acp",
+    "command": ["/usr/local/bin/codex-acp"],
+    "api_key": "${OPENAI_API_KEY}",
+    "description": "OpenAI Codex agent"
+  }
+}
+```
+
+**After (Single-Agent Environment):**
+```bash
+export A2A_AGENT_COMMAND="/usr/local/bin/codex-acp"
+export A2A_AGENT_API_KEY="${OPENAI_API_KEY}"
+export A2A_AGENT_DESCRIPTION="OpenAI Codex for A2A-ACP"
+export A2A_AUTH_TOKEN="your-secret-token"
+```
+
+#### 2. **Docker Migration**
+
+**Before:**
+```dockerfile
+ENV A2A_AGENTS_CONFIG="config/agents.json"
+```
+
+**After:**
+```dockerfile
+ENV A2A_AGENT_COMMAND="/usr/local/bin/codex-acp"
+ENV A2A_AGENT_API_KEY="${OPENAI_API_KEY}"
+ENV A2A_AUTH_TOKEN="your-secret-token"
+```
+
+#### 3. **Multiple Agents**
+
+If you need multiple agents, run multiple A2A-ACP instances:
+
+```bash
+# Terminal 1: Codex agent
+export A2A_AGENT_COMMAND="/usr/local/bin/codex-acp"
+export A2A_AGENT_API_KEY="${OPENAI_API_KEY}"
+export A2A_AUTH_TOKEN="codex-token"
+make run  # Runs on port 8001
+
+# Terminal 2: Claude agent
+export A2A_AGENT_COMMAND="/usr/local/bin/claude-code-acp"
+export A2A_AGENT_API_KEY="${ANTHROPIC_API_KEY}"
+export A2A_AUTH_TOKEN="claude-token"
+make run PORT=8002  # Runs on port 8002
+```
+
+#### 4. **Reverse Proxy Setup**
+
+Use a reverse proxy to route to different agent instances:
+
+```nginx
+# Nginx configuration
+upstream codex_backend {
+    server localhost:8001;
+}
+
+upstream claude_backend {
+    server localhost:8002;
+}
+
+server {
+    listen 80;
+
+    location /codex {
+        proxy_pass http://codex_backend;
+        proxy_set_header Authorization "Bearer codex-token";
+    }
+
+    location /claude {
+        proxy_pass http://claude_backend;
+        proxy_set_header Authorization "Bearer claude-token";
+    }
+}
 ```
 
 ### Adding New ZedACP Agents
@@ -851,7 +983,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - **Full A2A v0.3.0 Protocol**: Complete implementation with all core methods
 - **ZedACP Integration**: Seamless bridge to existing ZedACP agents
 - **Interactive Conversations**: Full input-required workflow support
-- **Comprehensive Testing**: 37+ tests covering all functionality including input-required
+- **Comprehensive Testing**: 56+ tests covering all functionality including input-required
 - **Production Ready**: Robust error handling and type safety
 - **Type Safety**: Complete Pydantic models with validation
 - **Documentation**: Comprehensive API documentation and examples
