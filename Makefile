@@ -44,7 +44,7 @@ type: dev-install
 
 test: dev-install
 	@echo "--> Running tests..."
-	timeout 60 ./.venv/bin/uv run pytest
+	A2A_AGENT_COMMAND=true timeout 60 ./.venv/bin/uv run python -m pytest --tb=no -q
 
 quality: format lint type test
 

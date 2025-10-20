@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime
 
-from ..a2a.models import Task, Message, generate_id
+from a2a.models import Task, Message, generate_id
 from .database import SessionDatabase, ACPSession
 
 # Global database instance

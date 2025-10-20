@@ -6,6 +6,9 @@ import logging
 from asyncio import StreamReader, StreamWriter
 from typing import Any, Awaitable, Callable, Coroutine, Optional, Sequence
 
+from .bash_executor import get_bash_executor, ToolExecutionResult
+from .sandbox import ExecutionContext
+from .tool_config import get_tool
 
 logger = logging.getLogger(__name__)
 
@@ -421,6 +424,15 @@ class ZedAgentConnection:
 
                     if on_chunk:
                         await on_chunk(input_required_message)
+
+            # Handle tool call updates (ZedACP tool execution results)
+            elif payload.get("method") == "tool_call_update":
+                self._logger.debug("Received tool_call_update notification", extra={
+                    "payload_keys": list(payload.keys())
+                })
+
+                # Tool call updates indicate tool execution results from the agent
+                # These are typically sent when the agent processes tool calls
                 if event == "session/cancelled":
                     self._logger.warning("Agent reported cancellation via session/update")
                     raise PromptCancelled("Agent reported cancellation")
@@ -470,6 +482,11 @@ class ZedAgentConnection:
                 # Prompt completed normally
                 logger.info("Prompt completed normally", extra={"session_id": session_id})
                 result = prompt_task.result()
+
+                # Process any tool calls in the result
+                if result:
+                    result = await self._process_zedacp_tool_calls(result, session_id)
+
                 self._logger.info("Prompt processing completed successfully", extra={
                     "session_id": session_id,
                     "has_result": result is not None,
@@ -482,6 +499,11 @@ class ZedAgentConnection:
                 {"sessionId": session_id, "prompt": prompt},
                 handler=handler,
             )
+
+            # Process any tool calls in the result
+            if result:
+                result = await self._process_zedacp_tool_calls(result, session_id)
+
             return result or {}
 
     async def cancel(self, session_id: str | None = None) -> None:
@@ -494,3 +516,238 @@ class ZedAgentConnection:
     def stderr(self) -> str:
         """Return aggregated stderr output."""
         return "\n".join(self._stderr_buffer)
+
+    async def _process_zedacp_tool_calls(self, response: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+        """Process ZedACP tool calls in agent response.
+
+        ZedACP tool calls come from agent responses in session/prompt.
+        Agent sends: session/update with tool_call updates
+        We need to: execute tools and return results in ZedACP format
+
+        Args:
+            response: ZedACP response that may contain tool calls
+            session_id: Current session ID
+
+        Returns:
+            Modified response with tool call results
+        """
+        if not response:
+            return response
+
+        # Check if response contains tool calls
+        if "toolCalls" not in response:
+            return response
+
+        tool_calls = response["toolCalls"]
+        if not tool_calls or not isinstance(tool_calls, list):
+            return response
+
+        logger.info(f"Processing {len(tool_calls)} ZedACP tool calls", extra={
+            "session_id": session_id,
+            "tool_call_ids": [call.get("id") for call in tool_calls]
+        })
+
+        # Execute each tool call
+        executed_calls = []
+        for tool_call in tool_calls:
+            try:
+                result = await self._execute_zedacp_tool_call(tool_call, session_id)
+                executed_calls.append(result)
+            except Exception as e:
+                logger.error(f"Failed to execute tool call: {tool_call.get('id')}", extra={
+                    "error": str(e),
+                    "tool_call": tool_call
+                })
+
+                # Return error result in ZedACP format
+                executed_calls.append({
+                    "toolCallId": tool_call.get("id"),
+                    "status": "failed",
+                    "content": [{"type": "text", "text": f"Tool execution failed: {str(e)}"}],
+                    "rawOutput": str(e)
+                })
+
+        # Replace toolCalls with executed results
+        response["toolCalls"] = executed_calls
+
+        logger.info(f"Processed {len(executed_calls)} tool call results", extra={
+            "session_id": session_id,
+            "successful": len([r for r in executed_calls if r.get("status") == "completed"])
+        })
+
+        return response
+
+    async def _execute_zedacp_tool_call(self, tool_call: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+        """Execute a single ZedACP tool call.
+
+        Args:
+            tool_call: ZedACP tool call object
+            session_id: Current session ID
+
+        Returns:
+            ZedACP-compatible tool call result
+        """
+        tool_call_id = tool_call.get("id")
+        tool_id = tool_call.get("toolId")
+
+        if not tool_id:
+            raise ValueError("Tool call missing toolId")
+
+        logger.debug(f"Executing ZedACP tool call: {tool_call_id}", extra={
+            "tool_call_id": tool_call_id,
+            "tool_id": tool_id,
+            "session_id": session_id
+        })
+
+        # Get tool configuration
+        tool = await get_tool(tool_id)
+        if not tool:
+            raise ValueError(f"Unknown tool: {tool_id}")
+
+        # Extract parameters from tool call
+        parameters = tool_call.get("parameters", {})
+
+        # Check if tool requires confirmation
+        if tool.config.requires_confirmation:
+            confirmed = await self._request_tool_permission(tool_call, session_id)
+            if not confirmed:
+                return {
+                    "toolCallId": tool_call_id,
+                    "status": "cancelled",
+                    "content": [{"type": "text", "text": "Tool execution cancelled by user"}],
+                    "rawOutput": "Tool execution cancelled by user"
+                }
+
+        # Create execution context
+        context = ExecutionContext(
+            tool_id=tool_id,
+            session_id=session_id,
+            task_id=f"zedacp_{tool_call_id}",
+            user_id="zedacp_user"
+        )
+
+        # Execute the tool
+        executor = get_bash_executor()
+        result = await executor.execute_tool(tool, parameters, context)
+
+        # Convert result to ZedACP format
+        status = "completed" if result.success else "failed"
+        content_text = result.output if result.success else result.error
+
+        zedacp_result = {
+            "toolCallId": tool_call_id,
+            "status": status,
+            "content": [{"type": "text", "text": content_text}],
+            "rawOutput": result.output
+        }
+
+        # Add metadata for successful executions
+        if result.success and result.metadata:
+            zedacp_result["metadata"] = {
+                "execution_time": result.execution_time,
+                "return_code": result.return_code,
+                "output_files": result.output_files
+            }
+
+        logger.debug(f"ZedACP tool call completed: {tool_call_id}", extra={
+            "tool_call_id": tool_call_id,
+            "status": status,
+            "execution_time": result.execution_time
+        })
+
+        return zedacp_result
+
+    async def _request_tool_permission(self, tool_call: Dict[str, Any], session_id: str) -> bool:
+        """Request tool execution permission from ZedACP agent.
+
+        Args:
+            tool_call: The tool call requiring permission
+            session_id: Current session ID
+
+        Returns:
+            True if permission granted, False otherwise
+        """
+        tool_id = tool_call.get("toolId")
+        tool_call_id = tool_call.get("id")
+
+        logger.info(f"Requesting tool permission: {tool_id}", extra={
+            "tool_id": tool_id,
+            "tool_call_id": tool_call_id,
+            "session_id": session_id
+        })
+
+        try:
+            # Get tool to access confirmation message
+            tool = await get_tool(tool_id)
+            confirmation_message = tool.config.confirmation_message if tool else "Execute this tool?"
+
+            # Send permission request to ZedACP agent
+            response = await self.request("session/request_permission", {
+                "sessionId": session_id,
+                "toolCall": tool_call,
+                "options": [
+                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"}
+                ]
+            })
+
+            # Check response
+            outcome = response.get("outcome", {})
+            permitted = outcome.get("optionId") == "allow"
+
+            logger.info(f"Tool permission {'granted' if permitted else 'denied'}: {tool_id}", extra={
+                "tool_id": tool_id,
+                "tool_call_id": tool_call_id,
+                "permitted": permitted,
+                "session_id": session_id
+            })
+
+            return permitted
+
+        except Exception as e:
+            logger.error(f"Permission request failed for tool: {tool_id}", extra={
+                "tool_id": tool_id,
+                "tool_call_id": tool_call_id,
+                "error": str(e),
+                "session_id": session_id
+            })
+            # Default to deny on error
+            return False
+
+    async def execute_bash_tool(
+        self,
+        tool_call: Dict[str, Any],
+        session_id: str
+    ) -> ToolExecutionResult:
+        """Legacy method for executing bash tools (for backward compatibility).
+
+        Args:
+            tool_call: Tool call information
+            session_id: Current session ID
+
+        Returns:
+            Tool execution result
+        """
+        tool_id = tool_call.get("toolId")
+        if not tool_id:
+            raise ValueError("Tool call missing toolId")
+
+        # Get tool configuration
+        tool = await get_tool(tool_id)
+        if not tool:
+            raise ValueError(f"Unknown tool: {tool_id}")
+
+        # Extract parameters
+        parameters = tool_call.get("parameters", {})
+
+        # Create execution context
+        context = ExecutionContext(
+            tool_id=tool_id,
+            session_id=session_id,
+            task_id=f"legacy_{tool_call.get('id', 'unknown')}",
+            user_id="legacy_user"
+        )
+
+        # Execute using bash executor
+        executor = get_bash_executor()
+        return await executor.execute_tool(tool, parameters, context)

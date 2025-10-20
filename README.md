@@ -4,18 +4,25 @@
 
 A complete implementation of the A2A v0.3.0 specification that bridges Zed ACP agents to modern A2A clients.
 
-### Key Features
-- **A2A Protocol Compliance**: Full implementation of A2A v0.3.0 specification
-- **Zed ACP Integration**: Seamless bridge to existing Zed ACP agents
-- **Task Management**: Native A2A task and context lifecycle
-- **Interactive Conversations**: Input-required workflows for multi-turn agent interactions
-- **Push Notifications**: HTTP webhooks with filtering, analytics, and retry logic
-- **Agent Cards**: Dynamic generation of A2A AgentCard manifests
-- **Streaming Support**: Real-time message streaming with Server-Sent Events
-- **Type Safety**: Complete Pydantic models with validation
+## 🚀 Quick Start
+
+Get started in minutes with our streamlined setup:
 
 ```bash
-# A2A JSON-RPC request
+# 1. Install and configure
+git clone https://github.com/mrorigo/acp-squared.git
+cd a2a-acp
+uv sync && uv pip install -e .
+
+# 2. Configure your Zed ACP agent
+export A2A_AGENT_COMMAND="/usr/local/bin/codex-acp"
+export A2A_AGENT_API_KEY="${OPENAI_API_KEY}"
+export A2A_AUTH_TOKEN="your-secret-token"
+
+# 3. Start the server
+make run
+
+# 4. Send your first message
 curl -X POST http://localhost:8001/ \
   -H "Content-Type: application/json" \
   -d '{
@@ -33,8 +40,114 @@ curl -X POST http://localhost:8001/ \
   }'
 ```
 
+**🎉 That's it!** You're now running A2A-ACP with a Zed ACP agent.
 
-A2A-ACP supports **persistent contexts with conversational memory** across multiple tasks, providing a full-featured **stateful agent platform**:
+## 📚 Documentation
+
+For comprehensive documentation, see our [user-docs/](user-docs/) folder:
+
+### 🚀 **Getting Started**
+- **[Quick Start Tutorial](user-docs/quick-start.md)** - Get running in 5 minutes
+- **[Installation Guide](user-docs/installation.md)** - Complete installation instructions
+- **[Configuration Guide](user-docs/configuration.md)** - Environment variables and settings
+
+### 📖 **Core Documentation**
+- **[API Methods Reference](user-docs/api-methods.md)** - Complete JSON-RPC API reference
+- **[Architecture Overview](user-docs/architecture.md)** - System design and components
+- **[A2A Protocol Guide](user-docs/a2a-protocol.md)** - A2A v0.3.0 implementation details
+- **[Zed ACP Integration](user-docs/zed-acp-integration.md)** - Zed ACP agent bridging
+
+### 🛠️ **Advanced Features**
+- **[Tool Execution System](user-docs/tool-execution.md)** - Bash-based tool execution capabilities
+- **[Interactive Conversations](user-docs/interactive-conversations.md)** - Input-required workflows
+- **[Push Notifications](user-docs/push-notifications.md)** - HTTP webhooks and real-time events
+- **[Streaming Support](user-docs/streaming.md)** - Server-Sent Events and real-time updates
+
+### 🚢 **Deployment & Operations**
+- **[Deployment Guide](user-docs/deployment.md)** - Production deployment instructions
+- **[Docker Deployment](user-docs/docker-deployment.md)** - Containerized deployment
+- **[Monitoring & Observability](user-docs/monitoring.md)** - Health checks and metrics
+- **[Troubleshooting](user-docs/troubleshooting.md)** - Common issues and solutions
+
+### 💻 **Development**
+- **[Development Setup](user-docs/development-setup.md)** - Local development environment
+- **[Testing Guide](user-docs/testing.md)** - Running and writing tests (240+ tests)
+- **[Contributing Guide](user-docs/contributing.md)** - How to contribute to the project
+
+## ✨ Key Features
+
+- **🔗 A2A Protocol Compliance**: Full A2A v0.3.0 specification implementation
+- **🤖 Zed ACP Integration**: Seamless bridge to existing Zed ACP agents (`codex-acp`, `claude-code-acp`, etc.)
+- **📋 Task Management**: Native A2A task and context lifecycle management
+- **💬 Interactive Conversations**: Input-required workflows for multi-turn agent interactions
+- **📡 Push Notifications**: HTTP webhooks with filtering, analytics, and retry logic
+- **🎯 Agent Cards**: Dynamic generation of comprehensive agent capability manifests
+- **⚡ Streaming Support**: Real-time message streaming with Server-Sent Events
+- **🛠️ Tool Execution**: Bash-based tool execution with unlimited flexibility
+- **🔒 Enterprise Security**: Comprehensive security with authentication and audit logging
+- **📊 Production Ready**: Robust error handling, monitoring, and comprehensive testing
+
+## 🎯 What Makes A2A-ACP Special?
+
+### **Modern Protocol Bridge**
+A2A-ACP eliminates complexity by providing a **native A2A server** that:
+- Accepts A2A JSON-RPC requests (`message/send`, `tasks/get`, etc.)
+- Translates them to Zed ACP JSON-RPC (`session/prompt`, `initialize`, etc.)
+- Launches and manages Zed ACP agents as subprocesses
+- Translates responses back to A2A format
+- Maintains protocol compliance for both sides
+
+### **Production-Ready Architecture**
+- **✅ 240+ comprehensive tests** covering all functionality
+- **✅ Full A2A v0.3.0 compliance** with input-required workflows
+- **✅ Enterprise-grade security** with audit logging and resource quotas
+- **✅ Bash-based tool execution** with unlimited flexibility
+- **✅ Real-time push notifications** with delivery analytics
+- **✅ Stateful conversations** with context persistence across tasks
+
+### **Developer Experience**
+- **🚀 5-minute setup** with environment variable configuration
+- **📚 Comprehensive documentation** with practical examples
+- **🧪 Extensive test coverage** ensuring reliability
+- **🔧 Simple deployment** with Docker and orchestration support
+- **📈 Production monitoring** with health checks and metrics
+
+## 🤝 Supported Agents
+
+Works with any Zed ACP-compliant agent:
+- ✅ **`codex-acp`** (OpenAI)
+- ✅ **`claude-code-acp`** (Anthropic)
+- ✅ **`gemini-cli`** (Google)
+- ✅ **Any Zed ACP-compliant agent** with session persistence
+
+## 📈 Project Status
+
+### ✅ **Implementation Complete**
+- **A2A Protocol**: Full v0.3.0 implementation with all core methods
+- **Zed ACP Integration**: Seamless bridge to existing Zed ACP agents
+- **Interactive Conversations**: Complete input-required workflow support
+- **Push Notifications**: HTTP webhook system with filtering and analytics
+- **Tool Execution**: Bash-based tool system with unlimited flexibility
+- **Comprehensive Testing**: 240+ tests covering all functionality
+- **Production Ready**: Robust error handling and enterprise security
+
+### 🎯 **Key Achievements**
+- **Protocol Compliance**: Native A2A v0.3.0 server with Zed ACP bridging
+- **Tool System**: Bash-based tool execution with unlimited flexibility
+- **Interactive Workflows**: Multi-turn conversations with pause/resume capability
+- **Real-time Events**: Push notifications with delivery analytics
+- **Enterprise Security**: Comprehensive audit logging and resource controls
+- **Developer Experience**: Simple setup with extensive documentation
+
+---
+
+**Ready to explore?** 📖 Start with the [Quick Start Tutorial](user-docs/quick-start.md) or dive into the [API Methods Reference](user-docs/api-methods.md).
+
+For the complete picture, browse our comprehensive [documentation index](user-docs/index.md).
+
+---
+
+**A2A-ACP** - The native A2A protocol server for modern agent ecosystems! 🤖✨
 
 - 🎯 **Context Persistence**: Maintain conversation context across multiple tasks
 - 💾 **Message History**: Store and retrieve conversation history via A2A API

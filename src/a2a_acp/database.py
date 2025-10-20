@@ -14,7 +14,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from ..a2a.models import Message
+from a2a.models import Message
 
 
 def serialize_dataclass_with_dates(obj: Any) -> Dict[str, Any]:

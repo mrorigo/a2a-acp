@@ -43,3 +43,9 @@ target-version = ["py39"]
 python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
+
+[tool.pytest.ini_options]
+# Exclude script files that shouldn't be run as pytest tests
+testpaths = ["tests"]
+norecursedirs = ["docs", "src", "*.egg", ".git", "__pycache__"]
+addopts = "-v --tb=short"

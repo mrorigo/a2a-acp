@@ -15,6 +15,7 @@ from .models import (
     AgentCard, AgentCapabilities, AgentSkill, SecurityScheme,
     APIKeySecurityScheme, HTTPAuthSecurityScheme, TransportProtocol
 )
+from a2a_acp.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,6 @@ class AgentCardGenerator:
 
     def __init__(self, config_path: Optional[Path] = None):
         # Single agent configuration - use settings instead of registry
-        from ..a2a_acp.settings import get_settings
         settings = get_settings()
 
         self.agent_config = {

@@ -17,7 +17,8 @@ from .models import (
     create_context_id, create_message_id, MessageSendParams
 )
 from .translator import translator, a2a_to_zedacp_message, zedacp_to_a2a_message
-from ..a2a_acp.zed_agent import ZedAgentConnection, PromptCancelled
+from a2a_acp.zed_agent import ZedAgentConnection, PromptCancelled
+from a2a_acp.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,6 @@ class A2AAgentManager:
 
     def __init__(self, config_path: Optional[Path] = None):
         # Single agent configuration - use settings instead of registry
-        from ..a2a_acp.settings import get_settings
         settings = get_settings()
 
         # Store single agent configuration

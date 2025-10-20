@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
 
-from src.a2a_acp.zed_agent import ZedAgentConnection, AgentProcessError, PromptCancelled
+from a2a_acp.zed_agent import ZedAgentConnection, AgentProcessError, PromptCancelled
 
 
 # Proper async mocking without warning suppression

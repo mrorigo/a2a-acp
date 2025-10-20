@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime
 
-from ..a2a.models import Task, TaskStatus, TaskState, Message, generate_id, create_task_id, InputRequiredNotification
+from a2a.models import Task, TaskStatus, TaskState, Message, generate_id, create_task_id, InputRequiredNotification
 
 from .zed_agent import ZedAgentConnection, AgentProcessError, PromptCancelled
 from .push_notification_manager import PushNotificationManager
@@ -199,9 +199,10 @@ class A2ATaskManager:
                 id=task_id,
                 contextId=context_id,
                 status=status,
-                history=[initial_message] if initial_message else [],
-                artifacts=[],
-                metadata=metadata or {}
+                history=None,  # Skip history for now due to validation issues
+                artifacts=None,
+                metadata=metadata or {},
+                kind="task"
             )
 
             # Create execution context

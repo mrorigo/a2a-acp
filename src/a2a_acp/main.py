@@ -28,10 +28,12 @@ from .settings import get_settings
 from .zed_agent import AgentProcessError, PromptCancelled, ZedAgentConnection
 from .push_notification_manager import PushNotificationManager
 from .streaming_manager import StreamingManager
+from .tool_config import get_tool_configuration_manager, BashTool
+from .bash_executor import BashToolExecutor
 
 # Import A2A protocol components
-from ..a2a.models import Message as A2AMessage, MessageSendParams, Task
-from ..a2a.translator import A2ATranslator
+from a2a.models import Message as A2AMessage, MessageSendParams, Task
+from a2a.translator import A2ATranslator
 
 # Import push notification models
 from .models import TaskPushNotificationConfig
@@ -54,19 +56,70 @@ def get_agent_config() -> Dict[str, Any]:
     }
 
 
-def generate_static_agent_card():
+async def generate_static_agent_card():
     """Generate a static AgentCard for the single configured agent."""
-    from ..a2a.models import (
+    from a2a.models import (
         AgentCard, AgentCapabilities, AgentSkill, AgentProvider,
         SecurityScheme, HTTPAuthSecurityScheme
     )
 
     agent_config = get_agent_config()
 
+    # Load available tools and convert to skills
+    tool_manager = get_tool_configuration_manager()
+    available_tools = await tool_manager.load_tools()
+
+    # Convert BashTool objects to AgentSkill objects
+    tool_skills = []
+    for tool in available_tools.values():
+        # Convert tool parameters to examples format
+        examples = tool.examples[:3]  # Limit to 3 examples for the skill
+        if not examples and tool.parameters:
+            # Generate examples from parameters if none provided
+            param_examples = []
+            for param in tool.parameters[:2]:  # Use first 2 parameters for examples
+                if param.required:
+                    param_examples.append(f"{param.name}: <{param.type}>")
+            if param_examples:
+                examples = [f"Execute {tool.name} with {', '.join(param_examples)}"]
+
+        skill = AgentSkill(
+            id=tool.id,
+            name=tool.name,
+            description=tool.description,
+            tags=["bash", "tool"] + tool.tags,
+            examples=examples,
+            inputModes=["text/plain"],
+            outputModes=["text/plain"]
+        )
+        tool_skills.append(skill)
+
+    # Combine with existing core skills
+    all_skills = [
+        AgentSkill(
+            id="code_generation",
+            name="Code Generation",
+            description="Generate and modify code in various programming languages",
+            tags=["coding", "development", "programming"],
+            examples=["Create a Python function to calculate fibonacci numbers"],
+            inputModes=["text/plain"],
+            outputModes=["text/plain"]
+        ),
+        AgentSkill(
+            id="file_system",
+            name="File System Operations",
+            description="Read, write, and modify files in the workspace",
+            tags=["files", "workspace", "io"],
+            examples=["Read the contents of config.json", "Create a new Python script"],
+            inputModes=["text/plain"],
+            outputModes=["text/plain"]
+        )
+    ] + tool_skills
+
     return AgentCard(
         protocolVersion="0.3.0",
         name="a2a-acp-agent",
-        description=agent_config["description"],
+        description=f"{agent_config['description']} (with bash tool execution)",
         url="http://localhost:8000",  # Server URL
         preferredTransport="JSONRPC",
         version="1.0.0",
@@ -85,26 +138,7 @@ def generate_static_agent_card():
         } if get_settings().auth_token else None,
         defaultInputModes=["text/plain"],
         defaultOutputModes=["text/plain"],
-        skills=[
-            AgentSkill(
-                id="code_generation",
-                name="Code Generation",
-                description="Generate and modify code in various programming languages",
-                tags=["coding", "development", "programming"],
-                examples=["Create a Python function to calculate fibonacci numbers"],
-                inputModes=["text/plain"],
-                outputModes=["text/plain"]
-            ),
-            AgentSkill(
-                id="file_system",
-                name="File System Operations",
-                description="Read, write, and modify files in the workspace",
-                tags=["files", "workspace", "io"],
-                examples=["Read the contents of config.json", "Create a new Python script"],
-                inputModes=["text/plain"],
-                outputModes=["text/plain"]
-            )
-        ]
+        skills=all_skills
     )
 
 
@@ -164,6 +198,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Initialize A2A translator
     app.state.a2a_translator = A2ATranslator()
+
+    # Initialize bash executor with push notification manager and task manager for event emission
+    from .bash_executor import BashToolExecutor
+    app.state.bash_executor = BashToolExecutor(
+        push_notification_manager=app.state.push_notification_manager,
+        task_manager=app.state.task_manager
+    )
 
     logger.info("A2A-ACP proxy initialized with A2A ↔ ZedACP translation")
 
@@ -231,8 +272,14 @@ def get_streaming_manager(request: Request) -> StreamingManager:
     return request.app.state.streaming_manager
 
 
-def get_agent_card(request: Request):
+def get_bash_executor(request: Request):
+    return request.app.state.bash_executor
+
+
+async def get_agent_card(request: Request):
     """Get the static AgentCard for this server."""
+    if request.app.state.agent_card is None:
+        request.app.state.agent_card = await generate_static_agent_card()
     return request.app.state.agent_card
 
 
@@ -505,7 +552,8 @@ def create_app() -> FastAPI:
         return metrics
 
     # Store static AgentCard for A2A responses
-    app.state.agent_card = generate_static_agent_card()
+    # Note: We'll initialize this when first accessed since we can't await here
+    app.state.agent_card = None
 
     # A2A JSON-RPC endpoint - delegate to A2A server
     @app.post("/a2a/rpc")
@@ -545,7 +593,7 @@ def create_app() -> FastAPI:
 
             if method == "agent/getAuthenticatedExtendedCard":
                 # Return the static AgentCard
-                agent_card = get_agent_card(request)
+                agent_card = await get_agent_card(request)
                 return {
                     "jsonrpc": "2.0",
                     "id": request_id,
@@ -734,7 +782,7 @@ def create_app() -> FastAPI:
                 zedacp_result = {}  # The task execution result would need to be extracted from the Task object
 
                 # Convert ZedACP response back to A2A format
-                from ..a2a.models import TaskStatus, TaskState
+                from a2a.models import TaskStatus, TaskState
                 a2a_response = translator.zedacp_to_a2a_message(zedacp_result, task.id, task.id)
 
                 # Update task with response
