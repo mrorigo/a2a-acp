@@ -1,0 +1,321 @@
+# Sample Tool Configuration for A2A-ACP Bash Tool Execution
+# This file demonstrates various types of bash-based tools that can be executed
+
+tools:
+  web_request:
+    name: "HTTP Request"
+    description: "Execute HTTP requests via curl"
+    script: |
+      #!/bin/bash
+      # Make HTTP request using curl
+      curl -X {{method}} "{{url}}" \
+           {{#headers}}-H "{{key}}: {{value}}" {{/headers}} \
+           {{#data}}-d '{{data}}' {{/data}} \
+           -H "User-Agent: A2A-ACP-Tool/1.0" \
+           -w "STATUS:%{http_code}\nTIME:%{time_total}\nSIZE:%{size_download}\n" \
+           --max-time {{timeout|default(30)}} \
+           -s
+    parameters:
+      - name: method
+        type: string
+        required: true
+        description: "HTTP method (GET, POST, PUT, DELETE, etc.)"
+        enum: ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+      - name: url
+        type: string
+        required: true
+        description: "Target URL"
+        pattern: "^https?://"
+      - name: headers
+        type: object
+        required: false
+        description: "HTTP headers as key-value pairs"
+      - name: data
+        type: string
+        required: false
+        description: "Request body data"
+      - name: timeout
+        type: number
+        required: false
+        description: "Request timeout in seconds"
+        default: 30
+        minimum: 1
+        maximum: 300
+    sandbox:
+      requires_confirmation: false
+      timeout: 30
+      working_directory: "/tmp/web_requests"
+      environment_variables:
+        CURL_CA_BUNDLE: "/etc/ssl/certs/ca-certificates.crt"
+    tags: ["http", "api", "web", "curl"]
+    examples:
+      - "GET https://api.github.com/user"
+      - "POST https://httpbin.org/post with headers and JSON data"
+    version: "1.0.0"
+    author: "A2A-ACP"
+
+  file_operations:
+    name: "File Operations"
+    description: "Perform file system operations like read, write, search"
+    script: |
+      #!/bin/bash
+      # File operations tool
+      case "{{operation}}" in
+        "read")
+          if [[ "{{path}}" == *.json ]]; then
+            cat "{{path}}" | jq . 2>/dev/null || cat "{{path}}"
+          else
+            cat "{{path}}"
+          fi
+          ;;
+        "write")
+          echo '{{content}}' > "{{path}}"
+          echo "File written: {{path}}"
+          ;;
+        "search")
+          grep -r "{{pattern}}" "{{directory}}" --include="*.{{file_type|default('*')}}" -n
+          ;;
+        "list")
+          find "{{directory}}" -type f {{#extension}}-name "*.{{extension}}" {{/extension}} | head -{{limit|default(50)}}
+          ;;
+        *)
+          echo "Unknown operation: {{operation}}"
+          exit 1
+          ;;
+      esac
+    parameters:
+      - name: operation
+        type: string
+        required: true
+        description: "Operation to perform"
+        enum: ["read", "write", "search", "list"]
+      - name: path
+        type: string
+        required: false
+        description: "File path (required for read/write operations)"
+      - name: directory
+        type: string
+        required: false
+        description: "Directory path (required for search/list operations)"
+      - name: content
+        type: string
+        required: false
+        description: "Content to write (required for write operation)"
+      - name: pattern
+        type: string
+        required: false
+        description: "Search pattern (required for search operation)"
+      - name: file_type
+        type: string
+        required: false
+        description: "File extension filter for search"
+      - name: extension
+        type: string
+        required: false
+        description: "File extension filter for list"
+      - name: limit
+        type: number
+        required: false
+        description: "Maximum number of results to return"
+        default: 50
+    sandbox:
+      requires_confirmation: true
+      confirmation_message: "Allow file system access operation?"
+      timeout: 60
+      working_directory: "/tmp/file_ops"
+      allowed_commands:
+        - "cat"
+        - "echo"
+        - "grep"
+        - "find"
+        - "jq"
+    tags: ["files", "filesystem", "search", "io"]
+    examples:
+      - "Read file contents from /path/to/file.txt"
+      - "Search for 'TODO' in Python files"
+      - "List all JSON files in current directory"
+    version: "1.0.0"
+    author: "A2A-ACP"
+
+  database_query:
+    name: "Database Query"
+    description: "Execute SQL queries via sqlite3"
+    script: |
+      #!/bin/bash
+      # Database query tool using sqlite3
+      if [[ ! -f "{{database}}" ]]; then
+        echo "Database file not found: {{database}}"
+        exit 1
+      fi
+
+      case "{{operation}}" in
+        "query")
+          sqlite3 "{{database}}" "{{query}}" {{#format}}.{{format}}{{/format}}
+          ;;
+        "tables")
+          sqlite3 "{{database}}" ".tables"
+          ;;
+        "schema")
+          sqlite3 "{{database}}" ".schema {{#table}}{{table}}{{/table}}"
+          ;;
+        *)
+          echo "Unknown operation: {{operation}}"
+          exit 1
+          ;;
+      esac
+    parameters:
+      - name: database
+        type: string
+        required: true
+        description: "Path to SQLite database file"
+      - name: operation
+        type: string
+        required: true
+        description: "Database operation to perform"
+        enum: ["query", "tables", "schema"]
+      - name: query
+        type: string
+        required: false
+        description: "SQL query (required for query operation)"
+      - name: table
+        type: string
+        required: false
+        description: "Table name (optional for schema operation)"
+      - name: format
+        type: string
+        required: false
+        description: "Output format (optional)"
+        enum: ["csv", "html", "json", "xml"]
+    sandbox:
+      requires_confirmation: true
+      confirmation_message: "Execute database query? This may modify data."
+      timeout: 30
+      working_directory: "/tmp/db_queries"
+      environment_variables:
+        SQLITE_HISTORY: "/tmp/.sqlite_history"
+    tags: ["database", "sql", "sqlite", "query"]
+    examples:
+      - "List all tables in users.db"
+      - "SELECT * FROM users WHERE active = 1"
+      - "Show schema for users table"
+    version: "1.0.0"
+    author: "A2A-ACP"
+
+  system_info:
+    name: "System Information"
+    description: "Gather system information and statistics"
+    script: |
+      #!/bin/bash
+      # System information gathering tool
+      echo "=== System Information ==="
+      echo "Timestamp: $(date -Iseconds)"
+      echo "Uptime: $(uptime -p)"
+      echo "Load Average: $(uptime | awk -F'load average:' '{print $2}')"
+      echo
+      echo "=== CPU Information ==="
+      lscpu | grep -E "(Model name|CPU\(s\)|Thread\(s\) per core|Core\(s\) per socket)"
+      echo
+      echo "=== Memory Usage ==="
+      free -h
+      echo
+      echo "=== Disk Usage ==="
+      df -h | grep -E "(Filesystem|/dev/)"
+      echo
+      {{#include_network}}echo "=== Network Interfaces ==="
+      ip addr show | grep -E "(inet |state )" | head -10
+      echo{{/include_network}}
+      echo "=== Top Processes ==="
+      ps aux --sort=-%cpu | head -6
+    parameters:
+      - name: include_network
+        type: boolean
+        required: false
+        description: "Include network interface information"
+        default: false
+    sandbox:
+      requires_confirmation: false
+      timeout: 15
+      working_directory: "/tmp/system_info"
+      allowed_commands:
+        - "date"
+        - "uptime"
+        - "lscpu"
+        - "free"
+        - "df"
+        - "ip"
+        - "ps"
+        - "awk"
+        - "grep"
+        - "head"
+    tags: ["system", "monitoring", "info", "diagnostics"]
+    examples:
+      - "Get basic system information"
+      - "Include network interface details"
+    version: "1.0.0"
+    author: "A2A-ACP"
+
+  text_processing:
+    name: "Text Processing"
+    description: "Process and manipulate text data"
+    script: |
+      #!/bin/bash
+      # Text processing tool
+      input_text="{{text}}"
+
+      case "{{operation}}" in
+        "format_json")
+          echo "$input_text" | jq . 2>/dev/null || echo "Invalid JSON"
+          ;;
+        "minify_json")
+          echo "$input_text" | jq -c . 2>/dev/null || echo "Invalid JSON"
+          ;;
+        "extract_urls")
+          echo "$input_text" | grep -oE 'https?://[^\s]+' || echo "No URLs found"
+          ;;
+        "extract_emails")
+          echo "$input_text" | grep -oE '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' || echo "No emails found"
+          ;;
+        "word_count")
+          echo "$input_text" | wc -w
+          ;;
+        "line_count")
+          echo "$input_text" | wc -l
+          ;;
+        "base64_encode")
+          echo "$input_text" | base64 -w 0
+          ;;
+        "base64_decode")
+          echo "$input_text" | base64 -d 2>/dev/null || echo "Invalid base64"
+          ;;
+        *)
+          echo "Unknown operation: {{operation}}"
+          exit 1
+          ;;
+      esac
+    parameters:
+      - name: text
+        type: string
+        required: true
+        description: "Text content to process"
+      - name: operation
+        type: string
+        required: true
+        description: "Text processing operation"
+        enum: ["format_json", "minify_json", "extract_urls", "extract_emails", "word_count", "line_count", "base64_encode", "base64_decode"]
+    sandbox:
+      requires_confirmation: false
+      timeout: 10
+      working_directory: "/tmp/text_processing"
+      allowed_commands:
+        - "echo"
+        - "jq"
+        - "grep"
+        - "base64"
+        - "wc"
+    tags: ["text", "processing", "json", "parsing"]
+    examples:
+      - "Format JSON text for readability"
+      - "Extract all URLs from text"
+      - "Count words in text"
+    version: "1.0.0"
+    author: "A2A-ACP"
