@@ -39,7 +39,7 @@ class JsonFormatter(logging.Formatter):
 
 def configure_logging() -> None:
     """Configure application logging in a consistent way."""
-    level_name = os.getenv("A2A_LOG_LEVEL", "INFO")
+    level_name = os.getenv("LOG_LEVEL", "INFO")
     level = logging.getLevelName(level_name.upper())
 
     root_logger = logging.getLogger()
@@ -49,6 +49,24 @@ def configure_logging() -> None:
     for handler in list(root_logger.handlers):
         root_logger.removeHandler(handler)
 
-    handler = logging.StreamHandler()
-    handler.setFormatter(JsonFormatter())
-    root_logger.addHandler(handler)
+    # Add console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(JsonFormatter())
+    root_logger.addHandler(console_handler)
+
+    # Add file handler if log directory exists or can be created
+    log_file = os.getenv("LOG_FILE")
+    if log_file:
+        try:
+            os.makedirs(os.path.dirname(log_file), exist_ok=True)
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setFormatter(JsonFormatter())
+            root_logger.addHandler(file_handler)
+        except (OSError, IOError) as e:
+            # Log to stderr if file logging fails
+            root_logger.warning(f"Could not set up file logging to {log_file}: {e}")
+
+    # Set specific log levels for noisy libraries
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)

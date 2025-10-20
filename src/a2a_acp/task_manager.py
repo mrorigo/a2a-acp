@@ -14,8 +14,10 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from ..a2a.models import Task, TaskStatus, TaskState, Message, generate_id, create_task_id, InputRequiredNotification
-# RunMode removed - using A2A types only
+
 from .zed_agent import ZedAgentConnection, AgentProcessError, PromptCancelled
+from .push_notification_manager import PushNotificationManager
+from .models import EventType
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +46,136 @@ class A2ATaskManager:
     Provides A2A-compliant task lifecycle while maintaining ZedACP compatibility.
     """
 
-    def __init__(self):
+    def __init__(self, push_notification_manager: Optional[PushNotificationManager] = None):
         self._active_tasks: Dict[str, TaskExecutionContext] = {}
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None
+        self.push_notification_manager = push_notification_manager
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        """Get or create the asyncio lock for thread-safe operations."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+
+    async def _send_task_notification(self, task_id: str, event: str, event_data: Dict[str, Any]) -> None:
+        """Send a push notification for a task event."""
+        if self.push_notification_manager:
+            try:
+                await self.push_notification_manager.send_notification(task_id, {
+                    "event": event,
+                    "task_id": task_id,
+                    **event_data
+                })
+            except Exception as e:
+                logger.error(
+                    "Failed to send task notification",
+                    extra={"task_id": task_id, "event": event, "error": str(e)}
+                )
+
+    async def _handle_task_error(
+        self,
+        task_id: str,
+        old_state: str,
+        error: Exception,
+        context: str = ""
+    ) -> None:
+        """Handle task errors with consistent status update, notification, and cleanup."""
+        try:
+            # Update task status to failed
+            if task_id in self._active_tasks:
+                task = self._active_tasks[task_id].task
+                task.status.state = TaskState.FAILED
+                task.status.timestamp = generate_id("ts_")
+
+            # Send notification for failure
+            error_message = f"{context}: {str(error)}" if context else str(error)
+            asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
+                "old_state": old_state,
+                "new_state": TaskState.FAILED.value,
+                "message": error_message,
+                "error": str(error)
+            }))
+
+            # Clean up notification configs for failed tasks (immediate deletion)
+            if self.push_notification_manager:
+                asyncio.create_task(self.push_notification_manager.cleanup_by_task_state(
+                    task_id, TaskState.FAILED.value
+                ))
+
+            logger.error(f"Task failed: {error_message}", extra={"task_id": task_id, "error": str(error)})
+        except Exception as e:
+            logger.error(
+                "Error in task error handler",
+                extra={"task_id": task_id, "original_error": str(error), "handler_error": str(e)}
+            )
+
+    async def _handle_task_cancellation(self, task_id: str, old_state: str, context: str = "") -> None:
+        """Handle task cancellation with consistent status update and notification."""
+        try:
+            # Update task status to cancelled
+            if task_id in self._active_tasks:
+                task = self._active_tasks[task_id].task
+                task.status.state = TaskState.CANCELLED
+                task.status.timestamp = generate_id("ts_")
+
+            # Send notification for cancellation
+            cancel_message = f"Task was cancelled{': ' + context if context else ''}"
+            asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
+                "old_state": old_state,
+                "new_state": TaskState.CANCELLED.value,
+                "message": cancel_message
+            }))
+
+            logger.info(f"Task cancelled: {cancel_message}", extra={"task_id": task_id})
+        except Exception as e:
+            logger.error(
+                "Error in task cancellation handler",
+                extra={"task_id": task_id, "context": context, "error": str(e)}
+            )
+
+    def _extract_message_content(self, message) -> str:
+        """Extract content from a message for notification purposes."""
+        if message.parts:
+            first_part = message.parts[0]
+            if first_part.kind == "text":
+                return first_part.text
+            elif first_part.kind == "data":
+                return str(first_part.data)
+            elif first_part.kind == "file":
+                return f"File: {first_part.file.name or 'unnamed'}"
+            else:
+                return str(first_part)
+        return ""
+
+    def _is_input_required_from_response(self, response: dict) -> tuple[bool, str]:
+        """Protocol-compliant detection of input-required state using Zed ACP response."""
+        stop_reason = response.get("stopReason")
+        tool_calls = response.get("toolCalls", [])
+
+        if stop_reason == "end_turn" and not tool_calls:
+            return True, "Agent completed turn without actions"
+        return False, f"Turn ended with reason: {stop_reason}"
+
+    def _extract_input_types_from_response(self, response: dict) -> list[str]:
+        """Extract input types from response metadata if available."""
+        # Check for _meta hints in final response for enhanced detection
+        meta = response.get("_meta", {})
+        if isinstance(meta, dict) and "input_types" in meta:
+            return meta["input_types"]
+
+        # Fallback to default types
+        return ["text/plain"]
+
+    async def _send_message_notification(self, task_id: str, message, message_type: str) -> None:
+        """Send a notification for a task message with extracted content."""
+        content = self._extract_message_content(message)
+
+        asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_MESSAGE.value, {
+            "message_role": message.role,
+            "message_content": content,
+            "message_type": message_type
+        }))
 
     async def create_task(
         self,
@@ -56,7 +185,7 @@ class A2ATaskManager:
         metadata: Optional[Dict[str, Any]] = None
     ) -> Task:
         """Create a new A2A task."""
-        async with self._lock:
+        async with self.lock:
             task_id = create_task_id()
 
             # Create initial task status
@@ -82,10 +211,19 @@ class A2ATaskManager:
             )
 
             self._active_tasks[task_id] = context
-
+    
             logger.info("Created A2A task",
                        extra={"task_id": task_id, "context_id": context_id, "agent": agent_name})
-
+    
+            # Send notification for task creation
+            asyncio.create_task(self._send_task_notification(task_id, "task_created", {
+                "old_state": None,
+                "new_state": TaskState.SUBMITTED.value,
+                "context_id": context_id,
+                "agent_name": agent_name,
+                "creation_event": True
+            }))
+    
             return task
 
     async def execute_task(
@@ -97,7 +235,7 @@ class A2ATaskManager:
         mcp_servers: Optional[List[Dict]] = None
     ) -> Task:
         """Execute an A2A task using ZedACP agent with input-required support."""
-        async with self._lock:
+        async with self.lock:
             if task_id not in self._active_tasks:
                 raise ValueError(f"Unknown task: {task_id}")
 
@@ -106,8 +244,16 @@ class A2ATaskManager:
 
             try:
                 # Update status to working
+                old_state = task.status.state.value
                 task.status.state = TaskState.WORKING
                 task.status.timestamp = generate_id("ts_")
+
+                # Send notification for status change
+                asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
+                    "old_state": old_state,
+                    "new_state": TaskState.WORKING.value,
+                    "message": "Task execution started"
+                }))
 
                 # Execute via ZedACP agent
                 async with ZedAgentConnection(agent_command, api_key=api_key) as connection:
@@ -130,37 +276,23 @@ class A2ATaskManager:
                         translator = A2ATranslator()
                         zedacp_parts = translator.a2a_to_zedacp_message(user_message)
 
-                        # Execute the task with input-required support
+                        # Execute the task with protocol-compliant input-required detection
                         cancel_event = context.cancel_event
 
-                        input_required_data = {}
-
+                        # Simplified chunk handler for artifact detection only
                         async def on_chunk(text: str) -> None:
-                            # Check for input-required notifications with enhanced detection
+                            # Only check for artifact creation notifications
                             upper_text = text.upper()
-                            if ("INPUT_REQUIRED:" in upper_text or
-                                "ADDITIONAL INPUT" in upper_text or
-                                "PLEASE PROVIDE" in upper_text or
-                                "I NEED MORE" in upper_text):
+                            if ("ARTIFACT:" in upper_text or
+                                "FILE:" in upper_text or
+                                "CREATED:" in upper_text):
 
-                                # Parse input-required information
-                                logger.info("Input required detected", extra={
-                                    "task_id": task_id,
-                                    "text_length": len(text),
-                                    "text_preview": text[:200]
-                                })
-
-                                input_required_data['detected'] = True
-                                input_required_data['message'] = text
-
-                                # Try to extract input types if provided
-                                if "INPUT_TYPES:" in upper_text:
-                                    try:
-                                        types_start = upper_text.find("INPUT_TYPES:") + len("INPUT_TYPES:")
-                                        types_str = text[types_start:].split('\n')[0].strip()
-                                        input_required_data['input_types'] = [t.strip() for t in types_str.split(',')]
-                                    except:
-                                        input_required_data['input_types'] = ["text/plain"]
+                                # Send notification for potential artifact creation
+                                asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_ARTIFACT.value, {
+                                    "artifact_type": "detected",
+                                    "artifact_name": "processing",
+                                    "detection_text": text[:100]
+                                }))
 
                         result = await connection.prompt(
                             zed_session_id,
@@ -169,27 +301,50 @@ class A2ATaskManager:
                             cancel_event=cancel_event
                         )
 
-                        # Check if input is required
-                        if input_required_data.get('detected'):
-                            # Update task to input-required state
+                        # Protocol-compliant input-required detection using stopReason and toolCalls
+                        is_input_required, reason = self._is_input_required_from_response(result)
+                        logger.info("Protocol analysis of ZedACP response",
+                                   extra={
+                                       "task_id": task_id,
+                                       "stop_reason": result.get("stopReason"),
+                                       "tool_calls_count": len(result.get("toolCalls", [])),
+                                       "is_input_required": is_input_required,
+                                       "reason": reason
+                                   })
+
+                        if is_input_required:
+                            # Update task to input-required state using protocol semantics
+                            old_state = task.status.state.value
                             task.status.state = TaskState.INPUT_REQUIRED
                             task.status.timestamp = generate_id("ts_")
 
-                            # Create input-required notification with enhanced input types
-                            input_types = input_required_data.get('input_types', ["text/plain"])
+                            # Extract input types from response metadata if available
+                            input_types = self._extract_input_types_from_response(result)
+
+                            # Send notification for input required
+                            asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_INPUT_REQUIRED.value, {
+                                "old_state": old_state,
+                                "new_state": TaskState.INPUT_REQUIRED.value,
+                                "message": "Additional input required",
+                                "input_types": input_types,
+                                "detection_method": "protocol_compliant"
+                            }))
+
+                            # Create input-required notification
                             input_notification = InputRequiredNotification(
                                 taskId=task_id,
                                 contextId=task.contextId,
-                                message=input_required_data.get('message', 'Additional input required'),
+                                message="Additional input required",
                                 inputTypes=input_types,
                                 timeout=300  # 5 minutes default timeout
                             )
 
-                            logger.info("Task requires input",
+                            logger.info("Task requires input (protocol-compliant detection)",
                                         extra={
                                             "task_id": task_id,
                                             "notification": input_notification.model_dump(),
-                                            "input_types": input_types
+                                            "input_types": input_types,
+                                            "detection_reason": reason
                                         })
                             return task
 
@@ -199,12 +354,29 @@ class A2ATaskManager:
                         # Add response to task history
                         task.history.append(response_message)
 
+                        # Send notification for new message
+                        asyncio.create_task(self._send_message_notification(task_id, response_message, "agent_response"))
+
                         # Mark as completed
+                        old_state = task.status.state.value
                         task.status.state = TaskState.COMPLETED
                         task.status.timestamp = generate_id("ts_")
 
+                        # Send notification for completion
+                        asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
+                            "old_state": old_state,
+                            "new_state": TaskState.COMPLETED.value,
+                            "message": "Task completed successfully"
+                        }))
+
+                        # Clean up notification configs based on task state
+                        if self.push_notification_manager:
+                            asyncio.create_task(self.push_notification_manager.cleanup_by_task_state(
+                                task_id, TaskState.COMPLETED.value
+                            ))
+
                         logger.info("Task completed successfully",
-                                    extra={"task_id": task_id, "agent": context.agent_name})
+                                   extra={"task_id": task_id, "agent": context.agent_name})
 
                         return task
                     else:
@@ -213,18 +385,15 @@ class A2ATaskManager:
                         return task
 
             except PromptCancelled:
-                task.status.state = TaskState.CANCELLED
-                logger.info("Task cancelled", extra={"task_id": task_id})
+                await self._handle_task_cancellation(task_id, task.status.state.value)
                 return task
 
             except AgentProcessError as e:
-                task.status.state = TaskState.FAILED
-                logger.error("Task failed", extra={"task_id": task_id, "error": str(e)})
+                await self._handle_task_error(task_id, task.status.state.value, e)
                 raise
 
             except Exception as e:
-                task.status.state = TaskState.FAILED
-                logger.exception("Unexpected error executing task", extra={"task_id": task_id})
+                await self._handle_task_error(task_id, task.status.state.value, e, "Unexpected error")
                 raise
 
     async def get_task(self, task_id: str) -> Optional[Task]:
@@ -244,8 +413,16 @@ class A2ATaskManager:
 
         # Update task status
         task = context.task
+        old_state = task.status.state.value
         task.status.state = TaskState.CANCELLED
         task.status.timestamp = generate_id("ts_")
+
+        # Send notification for cancellation
+        asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
+            "old_state": old_state,
+            "new_state": TaskState.CANCELLED.value,
+            "message": "Task was cancelled by user"
+        }))
 
         logger.info("Cancelled A2A task", extra={"task_id": task_id})
         return True
@@ -269,7 +446,7 @@ class A2ATaskManager:
         mcp_servers: Optional[List[Dict]] = None
     ) -> Task:
         """Provide input for an input-required task and continue execution."""
-        async with self._lock:
+        async with self.lock:
             if task_id not in self._active_tasks:
                 raise ValueError(f"Unknown task: {task_id}")
 
@@ -282,8 +459,16 @@ class A2ATaskManager:
 
             try:
                 # Update status back to working
+                old_state = task.status.state.value
                 task.status.state = TaskState.WORKING
                 task.status.timestamp = generate_id("ts_")
+
+                # Send notification for status change back to working
+                asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
+                    "old_state": old_state,
+                    "new_state": TaskState.WORKING.value,
+                    "message": "Task resumed after input provided"
+                }))
 
                 # Ensure task history exists
                 if task.history is None:
@@ -291,6 +476,9 @@ class A2ATaskManager:
 
                 # Add user input to task history
                 task.history.append(user_input)
+
+                # Send notification for user message
+                asyncio.create_task(self._send_message_notification(task_id, user_input, "user_input"))
 
                 # Use existing ZedACP session if available, otherwise create new connection
                 if context.zedacp_session_id and working_directory == context.working_directory:
@@ -326,18 +514,57 @@ class A2ATaskManager:
                             task.history = []
                         task.history.append(response_message)
 
-                        # Check if more input is required
-                        if "INPUT_REQUIRED:" in result.get("text", "").upper():
+                        # Check for artifacts in the response and send notifications
+                        if response_message.parts:
+                            for part in response_message.parts:
+                                if part.kind == "file":
+                                    asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_ARTIFACT.value, {
+                                        "artifact_type": "file",
+                                        "artifact_name": part.file.name or "unnamed",
+                                        "artifact_size": len(part.file.bytes) if hasattr(part.file, 'bytes') and part.file.bytes else 0
+                                    }))
+
+                        # Protocol-compliant check if more input is required
+                        is_input_required, reason = self._is_input_required_from_response(result)
+                        if is_input_required:
+                            old_state = task.status.state.value
                             task.status.state = TaskState.INPUT_REQUIRED
-                            logger.info("Additional input required", extra={"task_id": task_id})
+                            task.status.timestamp = generate_id("ts_")
+
+                            # Extract input types from response metadata if available
+                            input_types = self._extract_input_types_from_response(result)
+
+                            # Send notification for additional input required
+                            asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_INPUT_REQUIRED.value, {
+                                "old_state": old_state,
+                                "new_state": TaskState.INPUT_REQUIRED.value,
+                                "message": "Additional input required after continuation",
+                                "input_types": input_types,
+                                "detection_method": "protocol_compliant"
+                            }))
+
+                            logger.info("Additional input required after continuation",
+                                       extra={
+                                           "task_id": task_id,
+                                           "detection_reason": reason,
+                                           "input_types": input_types
+                                       })
                             return task
 
                         # Mark as completed
+                        old_state = task.status.state.value
                         task.status.state = TaskState.COMPLETED
                         task.status.timestamp = generate_id("ts_")
 
+                        # Send notification for completion
+                        asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
+                            "old_state": old_state,
+                            "new_state": TaskState.COMPLETED.value,
+                            "message": "Task completed after input continuation"
+                        }))
+
                         logger.info("Task completed after input",
-                                  extra={"task_id": task_id, "agent": context.agent_name})
+                                   extra={"task_id": task_id, "agent": context.agent_name})
                         return task
                 else:
                     # Need to restart with new connection
@@ -347,19 +574,15 @@ class A2ATaskManager:
                     )
 
             except PromptCancelled:
-                task.status.state = TaskState.CANCELLED
-                logger.info("Task cancelled during input continuation", extra={"task_id": task_id})
+                await self._handle_task_cancellation(task_id, task.status.state.value, "during input continuation")
                 return task
 
             except AgentProcessError as e:
-                task.status.state = TaskState.FAILED
-                logger.error("Task failed during continuation",
-                           extra={"task_id": task_id, "error": str(e)})
+                await self._handle_task_error(task_id, task.status.state.value, e, "during continuation")
                 raise
 
             except Exception as e:
-                task.status.state = TaskState.FAILED
-                logger.exception("Unexpected error continuing task", extra={"task_id": task_id})
+                await self._handle_task_error(task_id, task.status.state.value, e, "during continuation")
                 raise
 
     async def cleanup_completed_tasks(self) -> int:

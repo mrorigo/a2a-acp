@@ -11,6 +11,9 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "pydantic",
+    "httpx",  # For HTTP notifications
+    "websockets",  # For WebSocket notifications
+    "pydantic-settings",  # For enhanced configuration management
 ]
 
 [project.optional-dependencies]
@@ -20,6 +23,12 @@ dev = [
     "ruff",
     "black",
     "mypy",
+]
+
+notifications = [
+    "httpx",      # HTTP client for webhooks
+    "websockets", # WebSocket client for real-time
+    "pydantic-settings", # Enhanced configuration management
 ]
 
 [tool.ruff]

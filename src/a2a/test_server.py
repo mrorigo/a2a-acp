@@ -6,10 +6,7 @@ Tests basic functionality without requiring a full ZedACP agent setup.
 """
 
 import asyncio
-import json
-import aiohttp
 import sys
-from typing import Dict, Any
 
 from .server import create_a2a_server
 

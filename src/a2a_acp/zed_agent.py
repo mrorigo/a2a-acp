@@ -35,9 +35,17 @@ class ZedAgentConnection:
         self._stdin: Optional[StreamWriter] = None
         self._stderr_buffer: list[str] = []
         self._id_counter = 0
-        self._read_lock = asyncio.Lock()
-        self._write_lock = asyncio.Lock()
+        # Create locks lazily to avoid event loop issues in tests
+        self._read_lock: Optional[asyncio.Lock] = None
+        self._write_lock: Optional[asyncio.Lock] = None
         self._stderr_task: Optional[asyncio.Task[None]] = None
+
+    def _ensure_locks(self) -> None:
+        """Lazily create locks to avoid event loop issues in tests."""
+        if self._read_lock is None:
+            self._read_lock = asyncio.Lock()
+        if self._write_lock is None:
+            self._write_lock = asyncio.Lock()
 
     async def __aenter__(self) -> "ZedAgentConnection":
         await self.start()
@@ -87,6 +95,10 @@ class ZedAgentConnection:
                 # Log stderr output for debugging (but avoid flooding logs)
                 if decoded_line.strip():
                     self._logger.debug("Agent stderr output", extra={"stderr_line": decoded_line})
+        except asyncio.CancelledError:
+            # Handle cancellation gracefully - this is expected during cleanup
+            self._logger.debug("Stderr collection cancelled")
+            raise
         except Exception:  # pragma: no cover - best effort logging
             self._logger.exception("Error collecting agent stderr")
 
@@ -129,6 +141,7 @@ class ZedAgentConnection:
     async def _write_json(self, payload: dict[str, Any]) -> None:
         if not self._stdin:
             raise AgentProcessError("Agent stdin unavailable")
+        self._ensure_locks()
         data = json.dumps(payload)
         async with self._write_lock:
             self._stdin.write(data.encode() + b"\n")
@@ -142,6 +155,8 @@ class ZedAgentConnection:
     async def _read_json(self) -> dict[str, Any]:
         if not self._stdout:
             raise AgentProcessError("Agent stdout unavailable")
+
+        self._ensure_locks()
 
         # Read lines until we find valid JSON
         while True:

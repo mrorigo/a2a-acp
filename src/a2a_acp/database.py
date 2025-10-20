@@ -17,6 +17,31 @@ from typing import Optional, List, Dict, Any
 from ..a2a.models import Message
 
 
+def serialize_dataclass_with_dates(obj: Any) -> Dict[str, Any]:
+    """Convert dataclass to dictionary with proper datetime and metadata handling."""
+    data = asdict(obj)
+    # Handle datetime fields
+    for field_name in ['created_at', 'updated_at']:
+        if field_name in data and isinstance(data[field_name], datetime):
+            data[field_name] = data[field_name].isoformat()
+    # Handle metadata field
+    if 'metadata' in data and data['metadata'] is not None:
+        data['metadata'] = json.dumps(data['metadata'])
+    return data
+
+
+def deserialize_dataclass_with_dates(cls: Any, data: Dict[str, Any]) -> Any:
+    """Create dataclass from dictionary with proper datetime and metadata handling."""
+    # Handle datetime fields
+    for field_name in ['created_at', 'updated_at']:
+        if field_name in data and data[field_name]:
+            data[field_name] = datetime.fromisoformat(data[field_name])
+    # Handle metadata field
+    if 'metadata' in data and data['metadata']:
+        data['metadata'] = json.loads(data['metadata'])
+    return cls(**data)
+
+
 @dataclass
 class A2AContext:
     """Represents an A2A context with ZedACP mapping."""
@@ -32,19 +57,12 @@ class A2AContext:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        data = asdict(self)
-        data['created_at'] = self.created_at.isoformat()
-        data['updated_at'] = self.updated_at.isoformat()
-        data['metadata'] = json.dumps(self.metadata) if self.metadata else None
-        return data
+        return serialize_dataclass_with_dates(self)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'A2AContext':
         """Create from dictionary."""
-        data['created_at'] = datetime.fromisoformat(data['created_at'])
-        data['updated_at'] = datetime.fromisoformat(data['updated_at'])
-        data['metadata'] = json.loads(data['metadata']) if data['metadata'] else None
-        return cls(**data)
+        return deserialize_dataclass_with_dates(cls, data)
 
 
 @dataclass
@@ -62,19 +80,12 @@ class ACPSession:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        data = asdict(self)
-        data['created_at'] = self.created_at.isoformat()
-        data['updated_at'] = self.updated_at.isoformat()
-        data['metadata'] = json.dumps(self.metadata) if self.metadata else None
-        return data
+        return serialize_dataclass_with_dates(self)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ACPSession':
         """Create from dictionary."""
-        data['created_at'] = datetime.fromisoformat(data['created_at'])
-        data['updated_at'] = datetime.fromisoformat(data['updated_at'])
-        data['metadata'] = json.loads(data['metadata']) if data['metadata'] else None
-        return cls(**data)
+        return deserialize_dataclass_with_dates(cls, data)
 
 
 @dataclass
@@ -165,6 +176,39 @@ class SessionDatabase:
                 )
             """)
 
+            # Push notification configuration table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS push_notification_configs (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    token TEXT,
+                    authentication_schemes TEXT,
+                    credentials TEXT,
+                    enabled_events TEXT,
+                    disabled_events TEXT,
+                    quiet_hours_start TEXT,
+                    quiet_hours_end TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Push notification delivery tracking table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS notification_deliveries (
+                    id TEXT PRIMARY KEY,
+                    config_id TEXT NOT NULL REFERENCES push_notification_configs(id),
+                    task_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    delivery_status TEXT NOT NULL,
+                    response_code INTEGER,
+                    response_body TEXT,
+                    attempted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    delivered_at TEXT
+                )
+            """)
+
             # Create indexes for performance
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_a2a_contexts_agent_active
@@ -174,6 +218,22 @@ class SessionDatabase:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_a2a_messages_context
                 ON a2a_messages(context_id, created_at)
+            """)
+
+            # Push notification indexes
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_push_configs_task
+                ON push_notification_configs(task_id)
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_notification_deliveries_config
+                ON notification_deliveries(config_id, attempted_at)
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_notification_deliveries_task_event
+                ON notification_deliveries(task_id, event_type, delivery_status)
             """)
 
             conn.commit()
@@ -359,6 +419,168 @@ class SessionDatabase:
                 DELETE FROM acp_sessions
                 WHERE is_active = 0 AND updated_at < datetime(?, '-' || ? || ' days')
             """, (cutoff_date, days_old))
+            deleted_count = cursor.rowcount
+            conn.commit()
+            return deleted_count
+
+    async def store_push_notification_config(
+        self,
+        config_id: str,
+        task_id: str,
+        url: str,
+        token: Optional[str] = None,
+        authentication_schemes: Optional[Dict[str, Any]] = None,
+        credentials: Optional[str] = None,
+        enabled_events: Optional[List[str]] = None,
+        disabled_events: Optional[List[str]] = None,
+        quiet_hours_start: Optional[str] = None,
+        quiet_hours_end: Optional[str] = None
+    ) -> None:
+        """Store a push notification configuration."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO push_notification_configs
+                (id, task_id, url, token, authentication_schemes, credentials,
+                 enabled_events, disabled_events, quiet_hours_start, quiet_hours_end, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (
+                config_id,
+                task_id,
+                url,
+                token,
+                json.dumps(authentication_schemes) if authentication_schemes else None,
+                credentials,
+                json.dumps(enabled_events) if enabled_events else None,
+                json.dumps(disabled_events) if disabled_events else None,
+                quiet_hours_start,
+                quiet_hours_end
+            ))
+            conn.commit()
+
+    async def get_push_notification_config(self, task_id: str, config_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a push notification configuration."""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("""
+                SELECT * FROM push_notification_configs
+                WHERE task_id = ? AND id = ?
+            """, (task_id, config_id))
+
+            row = cursor.fetchone()
+            if row:
+                config = dict(row)
+                config['authentication_schemes'] = json.loads(config['authentication_schemes']) if config['authentication_schemes'] else None
+                config['enabled_events'] = json.loads(config['enabled_events']) if config['enabled_events'] else None
+                config['disabled_events'] = json.loads(config['disabled_events']) if config['disabled_events'] else None
+                return config
+            return None
+
+    async def list_push_notification_configs(self, task_id: str) -> List[Dict[str, Any]]:
+        """List all push notification configurations for a task."""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("""
+                SELECT * FROM push_notification_configs
+                WHERE task_id = ?
+                ORDER BY created_at DESC
+            """, (task_id,))
+
+            rows = cursor.fetchall()
+            configs = []
+            for row in rows:
+                config = dict(row)
+                config['authentication_schemes'] = json.loads(config['authentication_schemes']) if config['authentication_schemes'] else None
+                config['enabled_events'] = json.loads(config['enabled_events']) if config['enabled_events'] else None
+                config['disabled_events'] = json.loads(config['disabled_events']) if config['disabled_events'] else None
+                configs.append(config)
+
+            return configs
+
+    async def delete_push_notification_config(self, task_id: str, config_id: str) -> bool:
+        """Delete a push notification configuration."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                DELETE FROM push_notification_configs
+                WHERE task_id = ? AND id = ?
+            """, (task_id, config_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    async def track_notification_delivery(
+        self,
+        delivery_id: str,
+        config_id: str,
+        task_id: str,
+        event_type: str,
+        delivery_status: str,
+        response_code: Optional[int] = None,
+        response_body: Optional[str] = None,
+        delivered_at: Optional[str] = None
+    ) -> None:
+        """Track a notification delivery attempt."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT INTO notification_deliveries
+                (id, config_id, task_id, event_type, delivery_status, response_code, response_body, delivered_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                delivery_id,
+                config_id,
+                task_id,
+                event_type,
+                delivery_status,
+                response_code,
+                response_body,
+                delivered_at
+            ))
+            conn.commit()
+
+    async def get_notification_delivery_history(
+        self,
+        task_id: Optional[str] = None,
+        config_id: Optional[str] = None,
+        limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Get notification delivery history with optional filtering."""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            query = "SELECT * FROM notification_deliveries WHERE 1=1"
+            params = []
+
+            if task_id:
+                query += " AND task_id = ?"
+                params.append(task_id)
+
+            if config_id:
+                query += " AND config_id = ?"
+                params.append(config_id)
+
+            query += " ORDER BY attempted_at DESC"
+
+            if limit:
+                query += " LIMIT ?"
+                params.append(str(limit))
+
+            cursor = conn.execute(query, params)
+            rows = cursor.fetchall()
+
+            deliveries = []
+            for row in rows:
+                delivery = dict(row)
+                deliveries.append(delivery)
+
+            return deliveries
+
+    async def cleanup_expired_notification_configs(self) -> int:
+        """Clean up old notification configurations. Returns number of configs deleted."""
+        # For now, implement a simple cleanup strategy
+        # This could be extended with more sophisticated lifecycle management
+        cutoff_date = datetime.utcnow().isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                DELETE FROM push_notification_configs
+                WHERE updated_at < datetime(?, '-24 hours')
+            """, (cutoff_date,))
             deleted_count = cursor.rowcount
             conn.commit()
             return deleted_count

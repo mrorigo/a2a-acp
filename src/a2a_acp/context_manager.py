@@ -54,7 +54,14 @@ class A2AContextManager:
 
     def __init__(self):
         self._active_contexts: Dict[str, ContextState] = {}
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        """Get or create the asyncio lock for thread-safe operations."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     async def create_context(
         self,
@@ -62,7 +69,7 @@ class A2AContextManager:
         metadata: Optional[Dict[str, Any]] = None
     ) -> str:
         """Create a new A2A context."""
-        async with self._lock:
+        async with self.lock:
             context_id = generate_id("ctx_")
 
             # Create ACP session for this context
@@ -113,7 +120,7 @@ class A2AContextManager:
 
     async def add_task_to_context(self, context_id: str, task: Task) -> None:
         """Add a task to an A2A context."""
-        async with self._lock:
+        async with self.lock:
             if context_id not in self._active_contexts:
                 await self.get_context(context_id)  # Load from DB if needed
 
@@ -128,7 +135,7 @@ class A2AContextManager:
 
     async def add_message_to_context(self, context_id: str, message: Message) -> None:
         """Add a message to an A2A context."""
-        async with self._lock:
+        async with self.lock:
             if context_id in self._active_contexts:
                 context_state = self._active_contexts[context_id]
                 if context_state.messages is not None:
@@ -170,7 +177,7 @@ class A2AContextManager:
 
     async def close_context(self, context_id: str) -> bool:
         """Close an A2A context."""
-        async with self._lock:
+        async with self.lock:
             if context_id in self._active_contexts:
                 context_state = self._active_contexts[context_id]
 

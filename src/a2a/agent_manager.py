@@ -13,7 +13,7 @@ from typing import Dict, Optional, Any, List
 from pathlib import Path
 
 from .models import (
-    Message, Task, TaskStatus, TaskState, generate_id, create_task_id,
+    Message, Task, TaskStatus, TaskState, create_task_id,
     create_context_id, create_message_id, MessageSendParams
 )
 from .translator import translator, a2a_to_zedacp_message, zedacp_to_a2a_message

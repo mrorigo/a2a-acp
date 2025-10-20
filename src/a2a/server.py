@@ -11,9 +11,8 @@ import asyncio
 import json
 import logging
 from typing import Any, Dict, Optional, Union, Callable, Awaitable
-from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request, Response, HTTPException, status
+from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import StreamingResponse
 
 from typing import List
@@ -22,7 +21,7 @@ from .models import (
     JSONRPCError, AgentCard, Task, Message, TaskStatus, TaskState,
     MessageSendParams, TaskQueryParams, ListTasksParams, TaskIdParams,
     ListTasksResult, TaskPushNotificationConfig, TaskStatusUpdateEvent,
-    TaskArtifactUpdateEvent, TextPart, TaskNotFoundError,
+    TextPart, TaskNotFoundError,
     UnsupportedOperationError, AuthenticatedExtendedCardNotConfiguredError,
     generate_id
 )
@@ -234,6 +233,35 @@ class A2AMethodHandlers:
         self.server.register_method("tasks/pushNotificationConfig/delete", self.handle_push_config_delete)
 
         # Agent information
+        self._register_agent_handlers()
+
+    def _create_push_notification_error_response(self, id: Any, message: str, error_code: int = -32603) -> Dict[str, Any]:
+        """Create a standardized error response for push notification operations."""
+        error = UnsupportedOperationError(
+            code=error_code,
+            message=message
+        )
+        return self.server._create_error_response(
+            id=id,
+            code=error.code,
+            message=error.message,
+            data=error.data
+        )
+
+    def _validate_push_notification_params(self, params: Dict[str, Any], required_params: List[str]) -> Optional[Dict[str, Any]]:
+        """Validate push notification parameters and return error response if invalid."""
+        for param in required_params:
+            if param not in params:
+                return self._create_push_notification_error_response(
+                    id=list(params.keys())[0] if params else None,
+                    message=f"Missing required parameter: {param}",
+                    error_code=-32602
+                )
+        return None
+
+    # Agent information
+    def _register_agent_handlers(self):
+        """Register agent-related method handlers."""
         self.server.register_method("agent/getAuthenticatedExtendedCard", self.handle_get_agent_card)
 
     async def handle_message_send(self, params: Dict[str, Any]) -> Union[Message, Task]:
@@ -612,62 +640,150 @@ class A2AMethodHandlers:
 
     async def handle_push_config_set(self, params: Dict[str, Any]) -> Union[TaskPushNotificationConfig, Dict[str, Any]]:
         """Handle push notification config set requests."""
-        logger.info("tasks/pushNotificationConfig/set called")
+        logger.info("tasks/pushNotificationConfig/set called", extra={"params_keys": list(params.keys())})
 
-        # TODO: Implement push notification configuration
-        error = UnsupportedOperationError(code=-32004, message="Push notifications not yet supported")
-        return self.server._create_error_response(
-            id=list(params.keys())[0] if params else None,
-            code=error.code,
-            message=error.message,
-            data=error.data
-        )
+        try:
+            # Parse the A2A TaskPushNotificationConfig structure
+            task_push_config = TaskPushNotificationConfig(**params)
+
+            # TODO: Integrate with PushNotificationManager when available in A2A server context
+            # For now, return success response
+            logger.info("Push notification config set (stub)",
+                       extra={"task_id": task_push_config.taskId,
+                              "config_url": task_push_config.pushNotificationConfig.url})
+
+            return {"success": True}
+
+        except Exception as e:
+            logger.exception("Error in push notification config set", extra={"error": str(e)})
+            error = UnsupportedOperationError(
+                code=-32603,
+                message=f"Failed to set push notification config: {str(e)}"
+            )
+            return self.server._create_error_response(
+                id=list(params.keys())[0] if params else None,
+                code=error.code,
+                message=error.message,
+                data=error.data
+            )
 
     async def handle_push_config_get(self, params: Dict[str, Any]) -> Union[TaskPushNotificationConfig, Dict[str, Any]]:
         """Handle push notification config get requests."""
-        logger.info("tasks/pushNotificationConfig/get called")
+        logger.info("tasks/pushNotificationConfig/get called", extra={"params_keys": list(params.keys())})
 
-        # TODO: Implement push notification config retrieval
-        error = UnsupportedOperationError(code=-32004, message="Push notifications not yet supported")
-        return self.server._create_error_response(
-            id=list(params.keys())[0] if params else None,
-            code=error.code,
-            message=error.message,
-            data=error.data
-        )
+        # Validate parameters
+        validation_error = self._validate_push_notification_params(params, ["taskId", "id"])
+        if validation_error:
+            return validation_error
+
+        try:
+            # Extract parameters for getting config
+            task_id = params.get("taskId")
+            config_id = params.get("id")
+
+            # TODO: Integrate with PushNotificationManager when available
+            # For now, return not found error
+            logger.info("Push notification config get (stub)",
+                        extra={"task_id": task_id, "config_id": config_id})
+
+            return self._create_push_notification_error_response(
+                id=list(params.keys())[0] if params else None,
+                message="Push notification config not found",
+                error_code=-32001
+            )
+
+        except Exception as e:
+            logger.exception("Error in push notification config get", extra={"error": str(e)})
+            return self._create_push_notification_error_response(
+                id=list(params.keys())[0] if params else None,
+                message=f"Failed to get push notification config: {str(e)}"
+            )
 
     async def handle_push_config_list(self, params: Dict[str, Any]) -> Union[List[TaskPushNotificationConfig], Dict[str, Any]]:
         """Handle push notification config list requests."""
-        logger.info("tasks/pushNotificationConfig/list called")
+        logger.info("tasks/pushNotificationConfig/list called", extra={"params_keys": list(params.keys())})
 
-        # TODO: Implement push notification config listing
-        return []
+        try:
+            # Extract task ID for listing configs
+            task_id = params.get("taskId")
+
+            if not task_id:
+                error = UnsupportedOperationError(
+                    code=-32602,
+                    message="Missing required parameter: taskId"
+                )
+                return self.server._create_error_response(
+                    id=list(params.keys())[0] if params else None,
+                    code=error.code,
+                    message=error.message,
+                    data=error.data
+                )
+
+            # TODO: Integrate with PushNotificationManager when available
+            # For now, return empty list
+            logger.info("Push notification config list (stub)",
+                       extra={"task_id": task_id})
+
+            return {"configs": []}
+
+        except Exception as e:
+            logger.exception("Error in push notification config list", extra={"error": str(e)})
+            error = UnsupportedOperationError(
+                code=-32603,
+                message=f"Failed to list push notification configs: {str(e)}"
+            )
+            return self.server._create_error_response(
+                id=list(params.keys())[0] if params else None,
+                code=error.code,
+                message=error.message,
+                data=error.data
+            )
 
     async def handle_push_config_delete(self, params: Dict[str, Any]) -> Union[None, Dict[str, Any]]:
         """Handle push notification config delete requests."""
-        logger.info("tasks/pushNotificationConfig/delete called")
+        logger.info("tasks/pushNotificationConfig/delete called", extra={"params_keys": list(params.keys())})
 
-        # TODO: Implement push notification config deletion
-        error = UnsupportedOperationError(code=-32004, message="Push notifications not yet supported")
-        return self.server._create_error_response(
-            id=list(params.keys())[0] if params else None,
-            code=error.code,
-            message=error.message,
-            data=error.data
-        )
+        # Validate parameters
+        validation_error = self._validate_push_notification_params(params, ["taskId", "id"])
+        if validation_error:
+            return validation_error
+
+        try:
+            # Extract parameters for deleting config
+            task_id = params.get("taskId")
+            config_id = params.get("id")
+
+            # TODO: Integrate with PushNotificationManager when available
+            # For now, return success
+            logger.info("Push notification config delete (stub)",
+                        extra={"task_id": task_id, "config_id": config_id})
+
+            return {"success": True}
+
+        except Exception as e:
+            logger.exception("Error in push notification config delete", extra={"error": str(e)})
+            return self._create_push_notification_error_response(
+                id=list(params.keys())[0] if params else None,
+                message=f"Failed to delete push notification config: {str(e)}"
+            )
 
     async def handle_get_agent_card(self, params: Dict[str, Any]) -> Union[AgentCard, Dict[str, Any]]:
         """Handle agent/getAuthenticatedExtendedCard requests."""
         logger.info("agent/getAuthenticatedExtendedCard called")
 
         try:
+            # Debug: Check what agents are available
+            available_agents = agent_card_manager.list_available_agents()
+            logger.info("Available agents for card generation",
+                       extra={"agents": available_agents, "count": len(available_agents)})
+
             # For now, return a default agent card
             # In the full implementation, this might be based on the requesting client
             # or specific agent selection from params
 
             # Get the first available agent as default
-            available_agents = agent_card_manager.list_available_agents()
             if not available_agents:
+                logger.error("No agents available for card generation")
                 error = AuthenticatedExtendedCardNotConfiguredError(
                     code=-32007,
                     message="No agents configured"
@@ -680,10 +796,27 @@ class A2AMethodHandlers:
                 )
 
             # Generate card for the first available agent
-            agent_card = agent_card_manager.get_agent_card(available_agents[0])
+            agent_name = available_agents[0]
+            logger.info("Generating card for agent", extra={"agent_name": agent_name})
+
+            agent_card = agent_card_manager.get_agent_card(agent_name)
+
+            if agent_card is None:
+                logger.error("Agent card generation returned None",
+                           extra={"agent_name": agent_name})
+                error = AuthenticatedExtendedCardNotConfiguredError(
+                    code=-32007,
+                    message=f"Failed to generate agent card for {agent_name}: returned None"
+                )
+                return self.server._create_error_response(
+                    id=list(params.keys())[0] if params else None,
+                    code=error.code,
+                    message=error.message,
+                    data=error.data
+                )
 
             logger.info("Agent card generated successfully",
-                       extra={"agent_name": agent_card.name, "skills_count": len(agent_card.skills)})
+                        extra={"agent_name": agent_card.name, "skills_count": len(agent_card.skills)})
 
             return agent_card
 

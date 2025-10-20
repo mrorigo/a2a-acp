@@ -317,7 +317,7 @@ class TestA2AIntegration:
 
     def test_invalid_json_handling(self, client):
         """Test handling of invalid JSON requests."""
-        response = client.post("/", data="invalid json", headers={"Content-Type": "application/json"})
+        response = client.post("/", content="invalid json", headers={"Content-Type": "application/json"})
         assert response.status_code == 200
 
         response_data = response.json()
@@ -356,7 +356,7 @@ class TestA2AErrorHandling:
 
     def test_empty_request_body(self, client):
         """Test handling of empty request body."""
-        response = client.post("/", data="")
+        response = client.post("/", content="")
         assert response.status_code == 200
 
         response_data = response.json()
