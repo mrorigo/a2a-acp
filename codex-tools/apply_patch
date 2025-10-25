@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""
+apply_patch: Apply a clean, intuitive patch format to the working directory.
+
+Supported operations:
+- create: Creates a new file
+- update: Replaces specified text with new text
+- insert_before: Inserts text before specified marker text
+- insert_after: Inserts text after specified marker text
+- delete: Removes specified text
+
+Usage:
+    cat patchfile | apply_patch
+    apply_patch patchfile
+"""
+
+import sys
+import os
+import re
+import shutil
+from datetime import datetime
+
+def read_patch_input():
+    """Read patch data from file argument or stdin"""
+    if len(sys.argv) == 2:
+        with open(sys.argv[1], "r", encoding="utf-8") as f:
+            return f.read()
+    else:
+        return sys.stdin.read()
+
+def parse_patch_blocks(patch_text):
+    """
+    Parse the patch text into individual patch blocks.
+    Each patch block is contained between "*** Begin Patch" and "*** End Patch".
+    """
+    pattern = re.compile(
+        r"\*\*\* Begin Patch\r?\n([\s\S]*?)\r?\n\*\*\* End Patch",
+        re.MULTILINE
+    )
+    return pattern.findall(patch_text)
+
+def backup_file(filepath):
+    """Create a backup of the file before modifying it"""
+    if os.path.exists(filepath):
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        backup_path = f"{filepath}.{timestamp}.bak"
+        shutil.copy2(filepath, backup_path)
+        print(f"[apply_patch] Created backup: {backup_path}")
+    return True
+
+def create_file(filepath, content):
+    """Create a new file with the specified content"""
+    if os.path.exists(filepath):
+        print(f"[error] File already exists: {filepath}", file=sys.stderr)
+        return False
+    
+    # Create parent directories if they don't exist
+    os.makedirs(os.path.dirname(filepath) or '.', exist_ok=True)
+    
+    # Write content to file
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
+    
+    print(f"[apply_patch] Created file: {filepath}")
+    return True
+
+def update_file(filepath, old_text, new_text):
+    """Replace specified text in a file"""
+    if not os.path.exists(filepath):
+        print(f"[error] File does not exist: {filepath}", file=sys.stderr)
+        return False
+    
+    # Create backup
+    backup_file(filepath)
+    
+    # Read current content
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    # Check if old_text exists
+    if old_text not in content:
+        print(f"[error] Could not find text to update in {filepath}:", file=sys.stderr)
+        print(f"---\n{old_text}\n---", file=sys.stderr)
+        return False
+    
+    # Replace text
+    content = content.replace(old_text, new_text)
+    
+    # Write updated content
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
+    
+    print(f"[apply_patch] Updated text in: {filepath}")
+    return True
+
+def insert_before(filepath, marker_text, insert_text):
+    """Insert text before specified marker text"""
+    if not os.path.exists(filepath):
+        print(f"[error] File does not exist: {filepath}", file=sys.stderr)
+        return False
+    
+    # Create backup
+    backup_file(filepath)
+    
+    # Read current content
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    # Check if marker_text exists
+    if marker_text not in content:
+        print(f"[error] Could not find marker text for insert_before in {filepath}:", file=sys.stderr)
+        print(f"---\n{marker_text}\n---", file=sys.stderr)
+        return False
+    
+    # Insert text
+    content = content.replace(marker_text, insert_text + marker_text)
+    
+    # Write updated content
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
+    
+    print(f"[apply_patch] Inserted text before marker in: {filepath}")
+    return True
+
+def insert_after(filepath, marker_text, insert_text):
+    """Insert text after specified marker text"""
+    if not os.path.exists(filepath):
+        print(f"[error] File does not exist: {filepath}", file=sys.stderr)
+        return False
+    
+    # Create backup
+    backup_file(filepath)
+    
+    # Read current content
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    # Check if marker_text exists
+    if marker_text not in content:
+        print(f"[error] Could not find marker text for insert_after in {filepath}:", file=sys.stderr)
+        print(f"---\n{marker_text}\n---", file=sys.stderr)
+        return False
+    
+    # Insert text
+    content = content.replace(marker_text, marker_text + insert_text)
+    
+    # Write updated content
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
+    
+    print(f"[apply_patch] Inserted text after marker in: {filepath}")
+    return True
+
+def delete_text(filepath, text_to_delete):
+    """Delete specified text from file"""
+    if not os.path.exists(filepath):
+        print(f"[error] File does not exist: {filepath}", file=sys.stderr)
+        return False
+    
+    # Create backup
+    backup_file(filepath)
+    
+    # Read current content
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    # Check if text_to_delete exists
+    if text_to_delete not in content:
+        print(f"[error] Could not find text to delete in {filepath}:", file=sys.stderr)
+        print(f"---\n{text_to_delete}\n---", file=sys.stderr)
+        return False
+    
+    # Delete text
+    content = content.replace(text_to_delete, "")
+    
+    # Write updated content
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
+    
+    print(f"[apply_patch] Deleted text from: {filepath}")
+    return True
+
+def process_patch_block(block_text):
+    """Process a single patch block"""
+    lines = block_text.splitlines()
+    i = 0
+    success = True
+    
+    while i < len(lines):
+        line = lines[i]
+        
+        # Operation markers
+        if line.startswith("*** ") and ":" in line:
+            operation, rest = line[4:].split(":", 1)
+            operation = operation.strip().lower()
+            filepath = rest.strip()
+            
+            # Move to the next line
+            i += 1
+            
+            # Extract content based on the operation
+            if operation == "create":
+                # Collect all content until the next operation or end
+                content_lines = []
+                while i < len(lines) and not lines[i].startswith("*** "):
+                    content_lines.append(lines[i])
+                    i += 1
+                content = "\n".join(content_lines)
+                success &= create_file(filepath, content)
+                
+            elif operation in ["update", "insert_before", "insert_after", "delete"]:
+                # For these operations, we need to find delimiter lines
+                old_text_lines = []
+                new_text_lines = []
+                
+                # Find the "old_text:" marker
+                while i < len(lines) and not lines[i].strip() == "old_text:":
+                    i += 1
+                
+                # If we found it, collect old text lines
+                if i < len(lines):
+                    i += 1  # Move past the marker
+                    while i < len(lines) and not (lines[i].startswith("*** ") or lines[i].strip() == "new_text:"):
+                        old_text_lines.append(lines[i])
+                        i += 1
+                
+                # If this is not a delete operation, look for "new_text:" marker
+                if operation != "delete":
+                    while i < len(lines) and not lines[i].strip() == "new_text:":
+                        i += 1
+                    
+                    # If we found it, collect new text lines
+                    if i < len(lines):
+                        i += 1  # Move past the marker
+                        while i < len(lines) and not lines[i].startswith("*** "):
+                            new_text_lines.append(lines[i])
+                            i += 1
+                
+                # Combine the lines into text blocks
+                old_text = "\n".join(old_text_lines)
+                new_text = "\n".join(new_text_lines)
+                
+                # Apply the appropriate operation
+                if operation == "update":
+                    success &= update_file(filepath, old_text, new_text)
+                elif operation == "insert_before":
+                    success &= insert_before(filepath, old_text, new_text)
+                elif operation == "insert_after":
+                    success &= insert_after(filepath, old_text, new_text)
+                elif operation == "delete":
+                    success &= delete_text(filepath, old_text)
+            else:
+                print(f"[error] Unknown operation: {operation}", file=sys.stderr)
+                i += 1
+                success = False
+        else:
+            i += 1
+    
+    return success
+
+def main():
+    """Main function to process patch input"""
+    patch_text = read_patch_input()
+    blocks = parse_patch_blocks(patch_text)
+    
+    if not blocks:
+        print("[error] No patch blocks found.", file=sys.stderr)
+        sys.exit(2)
+    
+    all_success = True
+    for block in blocks:
+        success = process_patch_block(block)
+        all_success &= success
+    
+    if all_success:
+        print("[apply_patch] Patch applied successfully.")
+    else:
+        print("[error] Some patch operations failed.", file=sys.stderr)
+        sys.exit(2)
+
+if __name__ == "__main__":
+    main()

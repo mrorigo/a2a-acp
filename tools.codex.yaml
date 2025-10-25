@@ -285,8 +285,58 @@ $CONTENT_DELIM
     version: "1.0.0"
     author: "A2A-ACP"
 
-  # functions.apply_patch:
-  #   name: functions.apply_patch
-  #   description: Apply one or more file edits using the apply_patch grammar.
-  #   type: freeform
-  #   input_format: Single string input that must follow the apply_patch grammar (do not wrap in JSON).
+  functions.apply_patch:
+    name: "Apply Patch"
+    description: "Apply a structured patch to the workspace using the Codex apply_patch helper."
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+
+      WORKDIR="{{workdir}}"
+      if [[ -z "$WORKDIR" ]]; then
+        echo "Error: workdir parameter is required." >&2
+        exit 1
+      fi
+
+      if [[ ! -d "$WORKDIR" ]]; then
+        echo "Error: workdir not found: $WORKDIR" >&2
+        exit 2
+      fi
+
+      TEMP_PATCH="$(mktemp)"
+      cleanup() {
+        rm -f "$TEMP_PATCH"
+      }
+      trap cleanup EXIT
+
+      cat <<'__CODEX_PATCH__' > "$TEMP_PATCH"
+{{patch}}
+__CODEX_PATCH__
+
+      if [[ ! -s "$TEMP_PATCH" ]]; then
+        echo "Error: patch content is required." >&2
+        exit 3
+      fi
+
+      ORIGINAL_PWD="$(pwd)"
+      cd "$WORKDIR"
+
+      python3 "$ORIGINAL_PWD/codex-tools/apply_patch" "$TEMP_PATCH"
+    parameters:
+      - name: patch
+        type: string
+        required: true
+        description: "Patch content following the Codex apply_patch grammar."
+      - name: workdir
+        type: string
+        required: true
+        description: "Working directory where the patch should be applied."
+    sandbox:
+      requires_confirmation: false
+      timeout: 60
+      working_directory: "."
+    tags: ["codex", "filesystem", "apply_patch"]
+    examples:
+      - "Apply multi-file patch blob"
+    version: "1.0.0"
+    author: "A2A-ACP"
