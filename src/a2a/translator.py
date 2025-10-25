@@ -8,7 +8,7 @@ It enables seamless communication between A2A clients and ZedACP agents.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from .models import (
     Message, MessageSendParams, Task, TextPart, FilePart, DataPart,
