@@ -511,7 +511,7 @@ class ZedAgentConnection:
 
                 # Add accumulated chunks to the result
                 if accumulated_chunks:
-                    full_text = " ".join(accumulated_chunks)
+                    full_text = "".join(accumulated_chunks)
                     if not result:
                         result = {}
                     if "result" not in result:
@@ -549,7 +549,7 @@ class ZedAgentConnection:
 
             # Add accumulated chunks to the result
             if accumulated_chunks:
-                full_text = " ".join(accumulated_chunks)
+                full_text = "".join(accumulated_chunks)
                 if not result:
                     result = {}
                 if "result" not in result:

@@ -157,13 +157,51 @@ class A2ATaskManager:
                 return str(first_part)
         return ""
 
+    def _response_has_agent_content(self, response: dict) -> bool:
+        """Check whether the agent response includes any textual content."""
+
+        def _has_text(value: Any) -> bool:
+            return isinstance(value, str) and value.strip() != ""
+
+        if not isinstance(response, dict):
+            return False
+
+        # Direct text field (some agents return text at top level)
+        if _has_text(response.get("text")):
+            return True
+
+        result = response.get("result")
+        if isinstance(result, str):
+            return _has_text(result)
+        if isinstance(result, dict):
+            if _has_text(result.get("text")):
+                return True
+
+            content = result.get("content")
+            if isinstance(content, str):
+                return _has_text(content)
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and _has_text(item.get("text")):
+                        return True
+
+        return False
+
     def _is_input_required_from_response(self, response: dict) -> tuple[bool, str]:
         """Protocol-compliant detection of input-required state using Zed ACP response."""
         stop_reason = response.get("stopReason")
         tool_calls = response.get("toolCalls", [])
+        has_agent_content = self._response_has_agent_content(response)
 
-        if stop_reason == "end_turn" and not tool_calls:
+        if stop_reason == "input_required":
+            return True, "Agent explicitly requested additional input"
+
+        if stop_reason == "end_turn" and not tool_calls and not has_agent_content:
             return True, "Agent completed turn without actions"
+
+        if has_agent_content:
+            return False, "Agent provided response content"
+
         return False, f"Turn ended with reason: {stop_reason}"
 
     def _extract_input_types_from_response(self, response: dict) -> list[str]:
@@ -327,7 +365,7 @@ class A2ATaskManager:
 
                         # Add accumulated content to the result
                         if accumulated_content:
-                            full_text = " ".join(accumulated_content)
+                            full_text = "".join(accumulated_content)
                             if "result" not in result:
                                 result["result"] = {}
                             result["result"]["text"] = full_text
@@ -545,7 +583,7 @@ class A2ATaskManager:
 
                         # Add accumulated content to the result
                         if continuation_content:
-                            full_text = " ".join(continuation_content)
+                            full_text = "".join(continuation_content)
                             if "result" not in result:
                                 result["result"] = {}
                             result["result"]["text"] = full_text
