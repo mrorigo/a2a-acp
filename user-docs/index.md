@@ -19,6 +19,7 @@ Get started in minutes with our streamlined setup:
 - **[Interactive Conversations](interactive-conversations.md)** - Input-required workflows
 - **[Push Notifications](push-notifications.md)** - HTTP webhooks and real-time events
 - **[Event System](events.md)** - Comprehensive event emission and consumption
+- **[Tool Execution](tool-execution.md)** - Bash tooling with native Codex tool-call support (read/write/shell today)
 
 ### Advanced Features
 - **[Tool Execution System](tool-execution.md)** - Bash-based tool execution capabilities

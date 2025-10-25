@@ -1,6 +1,6 @@
 # Tool Execution System
 
-A2A-ACP includes a powerful **bash-based tool execution system** that enables Zed ACP agents to execute bash scripts with unlimited flexibility while maintaining enterprise-grade security.
+A2A-ACP includes a powerful **bash-based tool execution system** that enables Zed ACP agents to execute bash scripts with unlimited flexibility while maintaining enterprise-grade security. The same framework now powers **Codex tool calls** for `fs/read_text_file`, `fs/write_text_file`, and `shell`, so Codex CLI sessions can interact with the workspace through A2A-ACP without extra adapters. Additional Codex tools (such as `apply_patch` or multi-edit helpers) will be wired up in future iterations.
 
 ## Overview
 

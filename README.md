@@ -1,6 +1,6 @@
 # A2A-ACP: Native A2A Protocol Server
 
-**A2A-ACP** is a **native A2A protocol server** that exposes Zed ACP agents via the modern **Agent-to-Agent (A2A) protocol** with JSON-RPC 2.0 over HTTP.
+**A2A-ACP** is a **native A2A protocol server** that exposes Zed ACP agents via the modern **Agent-to-Agent (A2A) protocol** with JSON-RPC 2.0 over HTTP. It now supports **Codex tool calls for filesystem reads/writes and shell execution**, so Codex CLI users can run `fs/read_text_file`, `fs/write_text_file`, and `shell` via the bridge with native tooling.
 
 A complete implementation of the A2A v0.3.0 specification that bridges Zed ACP agents to modern A2A clients.
 
@@ -96,6 +96,7 @@ For comprehensive documentation, see our [user-docs/](user-docs/) folder:
 - **🔍 Agent Discovery**: Well-known HTTP endpoint for agent capability advertisement
 - **⚡ Streaming Support**: Real-time message streaming with Server-Sent Events
 - **🛠️ Tool Execution**: Bash-based tool execution with unlimited flexibility
+- **🧰 Codex Tool Calls**: Native handling of Codex `fs/read_text_file`, `fs/write_text_file`, and `shell` requests (other Codex tools coming soon)
 - **🔒 Enterprise Security**: Comprehensive security with authentication and audit logging
 - **📊 Production Ready**: Robust error handling, monitoring, and comprehensive testing
 
