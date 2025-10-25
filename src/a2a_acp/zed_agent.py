@@ -5,6 +5,7 @@ import json
 import logging
 from asyncio import StreamReader, StreamWriter
 from typing import Any, Awaitable, Callable, Coroutine, Optional, Sequence
+from uuid import uuid4
 
 from .bash_executor import get_bash_executor, ToolExecutionResult
 from .sandbox import ExecutionContext
@@ -379,6 +380,12 @@ class ZedAgentConnection:
                 "payload_keys": list(payload.keys())
             })
 
+            # Handle agent-initiated requests (e.g., fs/read_text_file)
+            if payload.get("id") is not None and payload.get("method"):
+                handled = await self._handle_agent_request(payload, session_id)
+                if handled:
+                    return
+
             if payload.get("method") == "session/update":
                 params = payload.get("params", {})
                 update_data = params.get("update", {})
@@ -579,6 +586,131 @@ class ZedAgentConnection:
     def stderr(self) -> str:
         """Return aggregated stderr output."""
         return "\n".join(self._stderr_buffer)
+
+    async def _handle_agent_request(self, payload: dict[str, Any], session_id: str) -> bool:
+        """Handle JSON-RPC requests initiated by the agent."""
+        method = payload.get("method")
+
+        if method == "fs/read_text_file":
+            await self._handle_fs_read_text_file(payload, session_id)
+            return True
+
+        return False
+
+    async def _handle_fs_read_text_file(self, payload: dict[str, Any], session_id: str) -> None:
+        """Execute the Codex filesystem read request via the bash tool."""
+        request_id = payload.get("id")
+        params = payload.get("params") or {}
+
+        if request_id is None:
+            self._logger.warning("fs/read_text_file request missing id", extra={"payload": payload})
+            return
+
+        self._logger.info("Handling fs/read_text_file request", extra={
+            "request_id": request_id,
+            "path": params.get("path"),
+            "line": params.get("line"),
+            "limit": params.get("limit")
+        })
+
+        # Resolve tool configuration
+        tool = await get_tool("functions.acp_fs__read_text_file")
+        if not tool:
+            await self._write_json({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32001,
+                    "message": "Tool functions.acp_fs__read_text_file is not available"
+                }
+            })
+            return
+
+        tool_params: dict[str, Any] = {}
+        path = params.get("path")
+        if not path:
+            await self._write_json({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32602,
+                    "message": "Missing required parameter: path"
+                }
+            })
+            return
+        tool_params["path"] = path
+
+        # Optional parameters with validation
+        if "line" in params and params["line"] is not None:
+            try:
+                tool_params["line"] = int(params["line"])
+            except (TypeError, ValueError):
+                await self._write_json({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32602,
+                        "message": "Invalid line parameter; must be an integer"
+                    }
+                })
+                return
+
+        if "limit" in params and params["limit"] is not None:
+            try:
+                tool_params["limit"] = int(params["limit"])
+            except (TypeError, ValueError):
+                await self._write_json({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32602,
+                        "message": "Invalid limit parameter; must be an integer"
+                    }
+                })
+                return
+
+        # Execute the tool
+        executor = get_bash_executor()
+        exec_session_id = params.get("sessionId") or session_id
+        context = ExecutionContext(
+            tool_id=tool.id,
+            session_id=exec_session_id,
+            task_id=f"fs_read_text_file_{uuid4().hex}",
+            user_id="zedacp_user"
+        )
+
+        result = await executor.execute_tool(tool, tool_params, context)
+
+        if result.success:
+            await self._write_json({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "content": result.output
+                }
+            })
+            self._logger.info("fs/read_text_file completed", extra={
+                "request_id": request_id,
+                "path": path,
+                "line": tool_params.get("line"),
+                "limit": tool_params.get("limit"),
+                "output_length": len(result.output) if result.output else 0
+            })
+        else:
+            await self._write_json({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32002,
+                    "message": result.error or "Tool execution failed"
+                }
+            })
+            self._logger.error("fs/read_text_file failed", extra={
+                "request_id": request_id,
+                "path": path,
+                "error": result.error,
+                "return_code": result.return_code
+            })
 
     async def _process_zedacp_tool_calls(self, response: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         """Process ZedACP tool calls in agent response.

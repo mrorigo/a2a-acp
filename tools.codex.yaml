@@ -1,0 +1,292 @@
+version: 1
+tools:
+  functions.shell:
+    name: "Shell Command"
+    description: "Execute a shell command with optional timeout and working directory."
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+
+      if [[ -z "{{workdir}}" ]]; then
+        echo "Error: workdir parameter is required." >&2
+        exit 2
+      fi
+
+      WORKDIR="{{workdir}}"
+      if [[ ! -d "$WORKDIR" ]]; then
+        echo "Error: workdir not found: $WORKDIR" >&2
+        exit 3
+      fi
+
+      TIMEOUT_MS="{{timeout_ms|default('')}}"
+      JUSTIFICATION="{{justification|default('')}}"
+      ESCALATED="{{with_escalated_permissions|default('false')}}"
+
+      if [[ "$ESCALATED" == "true" || "$ESCALATED" == "True" ]]; then
+        echo "Warning: with_escalated_permissions requested but not supported in this environment." >&2
+      fi
+
+      CMD=()
+      {{#command}}
+      CMD+=("{{.}}")
+      {{/command}}
+
+      if [[ ${#CMD[@]} -eq 0 ]]; then
+        echo "Error: command array must contain at least one element." >&2
+        exit 4
+      fi
+
+      cd "$WORKDIR"
+
+      TEMP_ZDOTDIR=""
+      cleanup() {
+        if [[ -n "$TEMP_ZDOTDIR" && -d "$TEMP_ZDOTDIR" ]]; then
+          rm -rf "$TEMP_ZDOTDIR"
+        fi
+      }
+      trap cleanup EXIT
+
+      if [[ "${CMD[0]}" == "zsh" ]]; then
+        TEMP_ZDOTDIR="$(mktemp -d)"
+        export ZDOTDIR="$TEMP_ZDOTDIR"
+        export ZSH_DISABLE_COMPFIX=1
+      fi
+
+      if [[ -n "$TIMEOUT_MS" ]]; then
+        if ! [[ "$TIMEOUT_MS" =~ ^[0-9]+$ ]]; then
+          echo "Error: timeout_ms must be numeric." >&2
+          exit 5
+        fi
+        TIMEOUT_SEC=$(( (TIMEOUT_MS + 999) / 1000 ))
+        if [[ "$TIMEOUT_SEC" -le 0 ]]; then
+          TIMEOUT_SEC=1
+        fi
+        timeout "$TIMEOUT_SEC" "${CMD[@]}"
+      else
+        "${CMD[@]}"
+      fi
+    parameters:
+      - name: command
+        type: array
+        required: true
+        description: "Executable path plus arguments passed to execvp()."
+      - name: workdir
+        type: string
+        required: true
+        description: "Working directory for the command."
+      - name: timeout_ms
+        type: number
+        required: false
+        description: "Optional timeout in milliseconds."
+        minimum: 1
+      - name: with_escalated_permissions
+        type: boolean
+        required: false
+        description: "Request to bypass sandbox restrictions when true."
+        default: false
+      - name: justification
+        type: string
+        required: false
+        description: "Required when with_escalated_permissions is true: brief reason."
+    sandbox:
+      requires_confirmation: false
+      timeout: 120
+      working_directory: "."
+    tags: ["shell", "command", "execution"]
+    examples:
+      - "Run ls in project root"
+      - "Execute python script with timeout"
+    version: "1.0.0"
+    author: "A2A-ACP"
+
+  # functions.view_image:
+  #   name: functions.view_image
+  #   description: Attach a local image file to the conversation for the current turn.
+  #   type: json_schema
+  #   json_schema:
+  #     type: object
+  #     properties:
+  #       path:
+  #         type: string
+  #         description: Filesystem path to the image.
+  #     required:
+  #       - path
+
+  # functions.acp_fs__edit_text_file:
+  #   name: functions.acp_fs__edit_text_file
+  #   description: Replace a specific string within a text file.
+  #   type: json_schema
+  #   json_schema:
+  #     type: object
+  #     properties:
+  #       new_string:
+  #         type: string
+  #         description: Replacement text.
+  #       old_string:
+  #         type: string
+  #         description: Exact text to replace.
+  #       path:
+  #         type: string
+  #         description: Target file path.
+  #     required:
+  #       - new_string
+  #       - old_string
+  #       - path
+
+  # functions.acp_fs__multi_edit_text_file:
+  #   name: functions.acp_fs__multi_edit_text_file
+  #   description: Apply multiple sequential string replacements to a text file.
+  #   type: json_schema
+  #   json_schema:
+  #     type: object
+  #     properties:
+  #       edits:
+  #         type: array
+  #         description: Sequential edits applied in order.
+  #         items:
+  #           type: object
+  #           properties:
+  #             new_string:
+  #               type: string
+  #             old_string:
+  #               type: string
+  #             replace_all:
+  #               type: boolean
+  #               description: Replace every occurrence of old_string when true; defaults to false.
+  #           required:
+  #             - new_string
+  #             - old_string
+  #       path:
+  #         type: string
+  #         description: Target file path.
+  #     required:
+  #       - edits
+  #       - path
+
+  functions.acp_fs__read_text_file:
+    name: "Read Text File"
+    description: "Read text from a file with optional starting line and line limit."
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+
+      FILE="{{path}}"
+      START_LINE="{{line|default('')}}"
+      LINE_LIMIT="{{limit|default('')}}"
+
+      if [[ -z "$FILE" ]]; then
+        echo "Error: path parameter is required." >&2
+        exit 2
+      fi
+
+      if [[ ! -f "$FILE" ]]; then
+        echo "Error: file not found: $FILE" >&2
+        exit 1
+      fi
+
+      if [[ -n "$START_LINE" ]]; then
+        if ! [[ "$START_LINE" =~ ^[0-9]+$ ]] || [[ "$START_LINE" -le 0 ]]; then
+          echo "Error: line must be a positive integer." >&2
+          exit 3
+        fi
+      fi
+
+      if [[ -n "$LINE_LIMIT" ]]; then
+        if ! [[ "$LINE_LIMIT" =~ ^[0-9]+$ ]] || [[ "$LINE_LIMIT" -le 0 ]]; then
+          echo "Error: limit must be a positive integer." >&2
+          exit 4
+        fi
+      fi
+
+      if [[ -n "$START_LINE" ]]; then
+        START="$START_LINE"
+      else
+        START=1
+      fi
+
+      if [[ -n "$LINE_LIMIT" ]]; then
+        END=$((START + LINE_LIMIT - 1))
+        sed -n "${START},${END}p" "$FILE"
+      elif [[ -n "$START_LINE" ]]; then
+        sed -n "${START},\$p" "$FILE"
+      else
+        cat "$FILE"
+      fi
+    parameters:
+      - name: path
+        type: string
+        required: true
+        description: "File path to read."
+      - name: line
+        type: number
+        required: false
+        description: "Optional 1-indexed starting line."
+        minimum: 1
+      - name: limit
+        type: number
+        required: false
+        description: "Optional number of lines to read."
+        minimum: 1
+    sandbox:
+      requires_confirmation: false
+      timeout: 10
+      working_directory: "."
+    tags: ["codex", "filesystem", "read"]
+    examples:
+      - "Read entire file"
+      - "Read 5 lines starting at line 10"
+    version: "1.0.0"
+    author: "A2A-ACP"
+
+
+  functions.acp_fs__write_text_file:
+    name: "Write Text File"
+    description: "Overwrite a text file with new contents."
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+
+      TARGET="{{path}}"
+      if [[ -z "$TARGET" ]]; then
+        echo "Error: path parameter is required." >&2
+        exit 1
+      fi
+
+      CONTENT_DELIM="__CODEX_WRITE_CONTENT__"
+
+      # Ensure destination directory exists
+      TARGET_DIR=$(dirname "$TARGET")
+      if [[ ! -d "$TARGET_DIR" ]]; then
+        mkdir -p "$TARGET_DIR"
+      fi
+
+      cat <<'$CONTENT_DELIM' > "$TARGET"
+{{content}}
+$CONTENT_DELIM
+
+      echo "Wrote $(wc -l < "$TARGET") lines to $TARGET"
+    parameters:
+      - name: path
+        type: string
+        required: true
+        description: "Destination file path."
+      - name: content
+        type: string
+        required: true
+        description: "Full file contents to write."
+    sandbox:
+      requires_confirmation: false
+      timeout: 30
+      working_directory: "."
+    tags: ["codex", "filesystem", "write"]
+    examples:
+      - "Write updated README.md contents"
+      - "Persist generated configuration file"
+    version: "1.0.0"
+    author: "A2A-ACP"
+
+  # functions.apply_patch:
+  #   name: functions.apply_patch
+  #   description: Apply one or more file edits using the apply_patch grammar.
+  #   type: freeform
+  #   input_format: Single string input that must follow the apply_patch grammar (do not wrap in JSON).

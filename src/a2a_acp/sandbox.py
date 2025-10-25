@@ -321,7 +321,7 @@ class ToolSandbox:
             (r';\s*curl\s+', "Command chaining with curl (potential injection)"),
             (r'>\s*/dev/null', "Output redirection hiding (potential injection)"),
             (r'2>\s*/dev/null', "Error redirection hiding (potential injection)"),
-            (r'\$\(', "Command substitution (potential injection)"),
+            (r'\$\((?!\()', "Command substitution (potential injection)"),
             (r'`.*`', "Backtick command execution (potential injection)"),
             (r';\s*cat\s+', "Command chaining with cat (potential injection)"),
             (r'\|\s*cat\s+', "Pipe to cat (potential injection)"),

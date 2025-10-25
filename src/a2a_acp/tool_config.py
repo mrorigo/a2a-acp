@@ -215,13 +215,24 @@ class ToolConfigurationManager:
             config_paths: List of paths to search for tool configuration files.
                          Defaults to standard locations.
         """
-        self.config_paths = config_paths or [
+        default_paths = [
             "tools.yaml",
             "tools.yml",
             "config/tools.yaml",
             "config/tools.yml",
             "/etc/a2a-acp/tools.yaml"
         ]
+        base_paths = config_paths if config_paths is not None else default_paths
+
+        env_value = os.environ.get("A2A_TOOLS_CONFIG", "")
+        env_paths = [p.strip() for p in env_value.split(os.pathsep) if p.strip()] if env_value else []
+
+        combined_paths: List[str] = []
+        for path in env_paths + base_paths:
+            if path not in combined_paths:
+                combined_paths.append(path)
+
+        self.config_paths = combined_paths or default_paths
         self._tools: Dict[str, BashTool] = {}
         self._config_mtimes: Dict[str, float] = {}
         self._hot_reload_enabled = True
