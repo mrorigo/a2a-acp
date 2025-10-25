@@ -11,3 +11,4 @@ config/agents.json
 **/*.egg-info
 *.db-shm
 *.db-wal
+codex-acp

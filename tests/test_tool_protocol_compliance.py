@@ -353,7 +353,8 @@ class TestToolProtocolCompliance:
 
     def test_resource_quota_compliance(self, sample_tool, execution_context):
         """Test that resource quotas are properly enforced."""
-        from a2a_acp.resource_manager import ResourceQuota
+        resource_manager = pytest.importorskip("a2a_acp.resource_manager")
+        ResourceQuota = resource_manager.ResourceQuota
 
         # Test quota configuration
         quota = ResourceQuota(

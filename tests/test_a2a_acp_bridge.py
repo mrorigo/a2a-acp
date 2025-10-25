@@ -8,12 +8,21 @@ to ZedACP agents. This covers the critical functionality that was previously unt
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
+from typing import Optional, Literal, Union, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import BaseModel, ValidationError
 
+from src.a2a.models import (
+    Message,
+    Task,
+    TaskStatusUpdateEvent,
+    TaskArtifactUpdateEvent,
+)
 from src.a2a_acp.main import create_app
 from src.a2a_acp.database import SessionDatabase, A2AContext, ACPSession
 # A2A-ACP bridge tests - using A2A protocol types exclusively
@@ -21,6 +30,8 @@ from src.a2a_acp.task_manager import A2ATaskManager, a2a_task_manager
 from src.a2a_acp.context_manager import A2AContextManager, a2a_context_manager
 from src.a2a_acp.context_manager import A2AContextManager
 from src.a2a_acp.zed_agent import ZedAgentConnection, AgentProcessError
+
+os.environ.setdefault("A2A_AGENT_COMMAND", "python tests/dummy_agent.py")
 
 
 class TestA2ACPBridge:
@@ -740,6 +751,363 @@ class TestInputRequiredFunctionality:
         input_required_ids = {task.id for task in input_required_tasks}
         expected_ids = {tasks[i].id for i in [0, 2, 4]}
         assert input_required_ids == expected_ids
+
+
+class DummyZedAgentConnection:
+    """Stubbed ZedAgentConnection for streaming tests."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def initialize(self):
+        return None
+
+    async def start_session(self, cwd: str, mcp_servers: Optional[list] = None) -> str:
+        return "session_stub"
+
+
+class JSONRPCError(BaseModel):
+    code: int
+    message: str
+    data: Optional[Any] = None
+
+
+class JSONRPCErrorResponse(BaseModel):
+    id: Union[str, int, None] = None
+    jsonrpc: Literal["2.0"] = "2.0"
+    error: JSONRPCError
+
+
+class JSONRPCSuccessResponse(BaseModel):
+    id: Union[str, int, None] = None
+    jsonrpc: Literal["2.0"] = "2.0"
+
+
+class SendMessageSuccessResponse(JSONRPCSuccessResponse):
+    result: Union[Task, Message]
+
+
+class GetTaskSuccessResponse(JSONRPCSuccessResponse):
+    result: Task
+
+
+class SendStreamingMessageSuccessResponse(JSONRPCSuccessResponse):
+    result: Union[Task, Message, TaskStatusUpdateEvent, TaskArtifactUpdateEvent]
+
+
+def validate_send_message_response(payload: dict) -> Union[SendMessageSuccessResponse, JSONRPCErrorResponse]:
+    try:
+        return SendMessageSuccessResponse.model_validate(payload)
+    except ValidationError:
+        return JSONRPCErrorResponse.model_validate(payload)
+
+
+def validate_get_task_response(payload: dict) -> Union[GetTaskSuccessResponse, JSONRPCErrorResponse]:
+    try:
+        return GetTaskSuccessResponse.model_validate(payload)
+    except ValidationError:
+        return JSONRPCErrorResponse.model_validate(payload)
+
+
+def validate_streaming_response(payload: dict) -> Union[SendStreamingMessageSuccessResponse, JSONRPCErrorResponse]:
+    try:
+        return SendStreamingMessageSuccessResponse.model_validate(payload)
+    except ValidationError:
+        return JSONRPCErrorResponse.model_validate(payload)
+
+
+class TestStreamingCompliance:
+    """Tests for JSON-RPC streaming compliance and serialization."""
+
+    def test_jsonrpc_streaming_emits_spec_events(self, monkeypatch):
+        """Ensure message/stream emits status-update events and final task without null fields."""
+        from src.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
+        from src.a2a_acp.task_manager import A2ATaskManager
+
+        async def fake_execute_task(
+            self,
+            task_id,
+            agent_command,
+            api_key=None,
+            working_directory=".",
+            mcp_servers=None,
+            stream_handler=None,
+        ):
+            task = self._active_tasks[task_id].task
+            if stream_handler:
+                await stream_handler("hello ")
+                await stream_handler("world")
+
+            if task.history is None:
+                task.history = []
+
+            final_message = Message(
+                role="agent",
+                parts=[TextPart(text="hello world")],
+                messageId=create_message_id(),
+                taskId=task.id,
+                contextId=task.contextId,
+            )
+            task.history.append(final_message)
+            task.status.state = TaskState.COMPLETED
+            task.status.timestamp = current_timestamp()
+            return task
+
+        monkeypatch.setattr(
+            "src.a2a_acp.task_manager.A2ATaskManager.execute_task",
+            fake_execute_task,
+        )
+        monkeypatch.setattr(
+            "src.a2a_acp.main.ZedAgentConnection",
+            DummyZedAgentConnection,
+        )
+
+        app = create_app()
+
+        payload = {
+            "jsonrpc": "2.0",
+            "id": "req_stream_1",
+            "method": "message/stream",
+            "params": {
+                "message": {
+                    "role": "user",
+                    "parts": [{"kind": "text", "text": "ping"}],
+                    "messageId": "msg_user_1",
+                }
+            },
+        }
+
+        with TestClient(app) as client:
+            with client.stream("POST", "/a2a/rpc", json=payload) as response:
+                assert response.status_code == 200
+                assert "text/event-stream" in response.headers.get("content-type", "")
+
+                events = []
+                for line in response.iter_lines():
+                    if isinstance(line, bytes):
+                        line = line.decode()
+                    if not line or not line.startswith("data: "):
+                        continue
+                    payload = json.loads(line[len("data: "):])
+                    validate_streaming_response(payload)
+                    events.append(payload)
+
+        assert len(events) == 5, f"Unexpected events: {events}"
+
+
+class TestDummyAgentIntegration:
+    """Integration tests exercising the real dummy agent process."""
+
+    def test_dummy_agent_streams_marker(self):
+        """Ensure the dummy agent's marker token reaches the client stream."""
+        app = create_app()
+        payload = {
+            "message": {
+                "role": "user",
+                "parts": [{"kind": "text", "text": "marker propagation test"}],
+                "messageId": "msg_marker_1",
+            }
+        }
+
+        with TestClient(app) as client:
+            with client.stream("POST", "/a2a/message/stream", json=payload) as response:
+                assert response.status_code == 200
+
+                marker_seen = False
+                final_task_received = False
+                status_updates = 0
+                start = time.time()
+
+                for line in response.iter_lines():
+                    if isinstance(line, bytes):
+                        line = line.decode()
+                    if not line or not line.startswith("data: "):
+                        continue
+
+                    event = json.loads(line[len("data: "):])
+                    result = event.get("result")
+                    if not isinstance(result, dict):
+                        continue
+
+                    kind = result.get("kind")
+
+                    if kind == "status-update":
+                        status_updates += 1
+                        message = (result.get("status") or {}).get("message") or {}
+                        parts = message.get("parts") or []
+                        for part in parts:
+                            text = part.get("text", "")
+                            if "--END-OF-RESPONSE--" in text:
+                                marker_seen = True
+
+                    if kind == "task" and (result.get("status") or {}).get("state") == "completed":
+                        history = result.get("history") or []
+                        for message in history:
+                            for part in message.get("parts") or []:
+                                text = part.get("text", "")
+                                if "--END-OF-RESPONSE--" in text:
+                                    marker_seen = True
+                        final_task_received = True
+                        break
+
+                    if time.time() - start > 15:
+                        break
+
+        assert final_task_received, "Did not receive the completed task payload"
+        assert status_updates > 0, "Expected at least one streaming status update"
+        assert marker_seen, "Marker token was not observed in the streaming output"
+
+    def test_http_streaming_endpoint_matches_spec(self, monkeypatch):
+        """Ensure HTTP /a2a/message/stream SSE responses validate against the spec."""
+        from src.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
+        from src.a2a_acp.task_manager import A2ATaskManager
+
+        async def fake_execute_task(
+            self,
+            task_id,
+            agent_command,
+            api_key=None,
+            working_directory=".",
+            mcp_servers=None,
+            stream_handler=None,
+        ):
+            task = self._active_tasks[task_id].task
+            if stream_handler:
+                await stream_handler("hello ")
+                await stream_handler("world")
+
+            if task.history is None:
+                task.history = []
+
+            final_message = Message(
+                role="agent",
+                parts=[TextPart(text="hello world")],
+                messageId=create_message_id(),
+                taskId=task.id,
+                contextId=task.contextId,
+            )
+            task.history.append(final_message)
+            task.status.state = TaskState.COMPLETED
+            task.status.timestamp = current_timestamp()
+            return task
+
+        monkeypatch.setattr(
+            "src.a2a_acp.task_manager.A2ATaskManager.execute_task",
+            fake_execute_task,
+        )
+        monkeypatch.setattr(
+            "src.a2a_acp.main.ZedAgentConnection",
+            DummyZedAgentConnection,
+        )
+
+        app = create_app()
+        payload = {
+            "message": {
+                "role": "user",
+                "parts": [{"kind": "text", "text": "ping"}],
+                "messageId": "msg_user_1",
+            }
+        }
+
+        with TestClient(app) as client:
+            with client.stream("POST", "/a2a/message/stream", json=payload) as response:
+                assert response.status_code == 200
+                events = []
+                for line in response.iter_lines():
+                    if isinstance(line, bytes):
+                        line = line.decode()
+                    if not line or not line.startswith("data: "):
+                        continue
+                    payload = json.loads(line[len("data: "):])
+                    validate_streaming_response(payload)
+                    events.append(payload)
+
+                assert len(events) == 5, f"Unexpected events: {events}"
+
+
+class TestJSONRPCContract:
+    """Tests ensuring JSON-RPC responses match the SDK models."""
+
+    def test_send_message_and_get_task_responses(self, monkeypatch):
+        from src.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
+        from src.a2a_acp.task_manager import A2ATaskManager
+
+        async def fake_execute_task(
+            self,
+            task_id,
+            agent_command,
+            api_key=None,
+            working_directory=".",
+            mcp_servers=None,
+            stream_handler=None,
+        ):
+            task = self._active_tasks[task_id].task
+            if task.history is None:
+                task.history = []
+
+            final_message = Message(
+                role="agent",
+                parts=[TextPart(text="hello world")],
+                messageId=create_message_id(),
+                taskId=task.id,
+                contextId=task.contextId,
+            )
+            task.history.append(final_message)
+            task.status.state = TaskState.COMPLETED
+            task.status.timestamp = current_timestamp()
+            return task
+
+        monkeypatch.setattr(
+            "src.a2a_acp.task_manager.A2ATaskManager.execute_task",
+            fake_execute_task,
+        )
+        monkeypatch.setattr(
+            "src.a2a_acp.main.ZedAgentConnection",
+            DummyZedAgentConnection,
+        )
+
+        app = create_app()
+        send_payload = {
+            "jsonrpc": "2.0",
+            "id": "req_send_1",
+            "method": "message/send",
+            "params": {
+                "message": {
+                    "role": "user",
+                    "parts": [{"kind": "text", "text": "ping"}],
+                    "messageId": "msg_user_1",
+                }
+            },
+        }
+
+        with TestClient(app) as client:
+            send_response = client.post("/a2a/rpc", json=send_payload)
+            assert send_response.status_code == 200
+            send_data = send_response.json()
+            validated_send = validate_send_message_response(send_data)
+            assert isinstance(validated_send, SendMessageSuccessResponse)
+
+            task_id = validated_send.result.id
+
+            get_payload = {
+                "jsonrpc": "2.0",
+                "id": "req_get_1",
+                "method": "tasks/get",
+                "params": {"id": task_id},
+            }
+
+            get_response = client.post("/a2a/rpc", json=get_payload)
+            assert get_response.status_code == 200
+            get_data = get_response.json()
+            validated_get = validate_get_task_response(get_data)
+            assert isinstance(validated_get, GetTaskSuccessResponse)
+            assert validated_get.result.id == task_id
 
 
 if __name__ == "__main__":

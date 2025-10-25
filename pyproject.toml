@@ -49,3 +49,6 @@ warn_unused_configs = true
 testpaths = ["tests"]
 norecursedirs = ["docs", "src", "*.egg", ".git", "__pycache__"]
 addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore:Pydantic serializer warnings:UserWarning",
+]

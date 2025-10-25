@@ -11,7 +11,7 @@ Understand how A2A-ACP bridges Zed ACP agents to the A2A protocol.
 │ • JSON-RPC/HTTP │    │                  │    │                 │
 │ • Tasks         │    │ • Protocol Bridge│    │ • JSON-RPC/stdio│
 │ • Agent Cards   │    │ • Task Manager   │    │ • Sessions      │
-│ • Tool Calls    │    │ • Tool Executor  │    │ • Tool Calls    │
+│ • Discovery     │    │ • Tool Executor  │    │ • Tool Calls    │
 │ • Streaming     │    │ • Agent Manager  │    │ • initialize    │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
          │                       │                       │
@@ -24,7 +24,7 @@ Understand how A2A-ACP bridges Zed ACP agents to the A2A protocol.
 
 ## Core Components
 
-### 1. A2A Protocol Server (`src/a2a/server.py`)
+### 1. A2A Protocol Server (`src/a2a_acp/main.py`)
 
 **Responsibility**: HTTP server implementing A2A v0.3.0 JSON-RPC 2.0 specification
 
@@ -33,6 +33,7 @@ Understand how A2A-ACP bridges Zed ACP agents to the A2A protocol.
 - **Method Routing**: Routes A2A methods to appropriate handlers
 - **Authentication**: Bearer token and API key authentication
 - **Request Validation**: Comprehensive request validation and sanitization
+- **Agent Discovery**: Well-known HTTP endpoint for capability advertisement
 
 ### 2. Protocol Translator (`src/a2a/translator.py`)
 
@@ -214,6 +215,9 @@ CREATE TABLE contexts (
 - ✅ `tasks/cancel` - Task cancellation
 - ✅ `agent/getAuthenticatedExtendedCard` - Agent capability advertisement
 
+**Discovery**:
+- ✅ `/.well-known/agent-card.json` - HTTP endpoint for agent discovery
+
 **Advanced Features**:
 - ✅ **Input-Required Workflows**: Multi-turn conversations with state management
 - ✅ **Context Persistence**: Conversation continuity across tasks
@@ -314,12 +318,11 @@ Every tool execution is protected by **hard OS-level limits** via `setrlimit()`:
 ```
 a2a-acp/
 ├── src/
-│   ├── a2a/           # A2A Protocol Implementation
-│   │   ├── server.py  # JSON-RPC 2.0 HTTP server
-│   │   ├── models.py  # A2A type definitions
-│   │   └── translator.py # Protocol translation
+│   ├── a2a/           # A2A Protocol Implementation (Essential Components)
+│   │   ├── models.py     # A2A type definitions (shared)
+│   │   └── translator.py # Protocol translation (shared)
 │   └── a2a_acp/       # A2A-ACP Application
-│       ├── main.py    # FastAPI application
+│       ├── main.py    # FastAPI application with A2A JSON-RPC server
 │       ├── task_manager.py # Task lifecycle management
 │       ├── zed_agent.py # Zed ACP subprocess management
 │       ├── tool_config.py # Tool configuration and validation

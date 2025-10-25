@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import json
@@ -27,8 +28,10 @@ def get_current_request() -> Optional[int]:
 
 
 def send(payload: Dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(payload) + "\n")
+    message = json.dumps(payload)
+    sys.stdout.write(message + "\n")
     sys.stdout.flush()
+    print(f"dummy agent: Sending response: {message}", file=sys.stderr, flush=True)
 
 
 def handle_initialize(message: Dict[str, Any]) -> None:
@@ -51,16 +54,25 @@ def handle_session_prompt(message: Dict[str, Any]) -> None:
     if isinstance(prompt_data, list):
         # Handle structured prompt format from ZedACP
         for item in prompt_data:
-            if isinstance(item, dict) and item.get("type") == "text":
-                prompt_text += item.get("text", "")
+            if isinstance(item, dict):
+                if item.get("type") == "text":
+                    prompt_text += item.get("text", "")
+                elif "text" in item:  # Also handle direct text field
+                    prompt_text += item.get("text", "")
+            elif isinstance(item, str):
+                prompt_text += item
+    elif isinstance(prompt_data, str):
+        # Handle string format
+        prompt_text = prompt_data
     else:
-        # Handle legacy string format
+        # Handle other formats
         prompt_text = str(prompt_data)
 
     def worker() -> None:
         try:
             start = time.time()
             words = prompt_text.split()
+            words.append("--END-OF-RESPONSE--")
             check_count = 0
             while True:
                 # Check for cancellation more frequently
@@ -250,10 +262,18 @@ def handle_session_prompt_with_tools(message: Dict[str, Any]) -> None:
     if isinstance(prompt_data, list):
         # Handle structured prompt format from ZedACP
         for item in prompt_data:
-            if isinstance(item, dict) and item.get("type") == "text":
-                prompt_text += item.get("text", "")
+            if isinstance(item, dict):
+                if item.get("type") == "text":
+                    prompt_text += item.get("text", "")
+                elif "text" in item:  # Also handle direct text field
+                    prompt_text += item.get("text", "")
+            elif isinstance(item, str):
+                prompt_text += item
+    elif isinstance(prompt_data, str):
+        # Handle string format
+        prompt_text = prompt_data
     else:
-        # Handle legacy string format
+        # Handle other formats
         prompt_text = str(prompt_data)
 
     # Check if prompt contains tool requests
@@ -357,18 +377,32 @@ HANDLERS = {
 
 
 def main() -> None:
+    print("dummy agent: Starting up", file=sys.stderr, flush=True)
     for raw in sys.stdin:
         raw = raw.strip()
         if not raw:
             continue
-        message = json.loads(raw)
-        method = message.get("method")
-        handler = HANDLERS.get(method)
-        if handler is None:
-            continue
-        handler(message)
-        if method == "session/cancel":
-            break
+
+        try:
+            message = json.loads(raw)
+            method = message.get("method")
+            print(f"dummy agent: Received {method} request: {json.dumps(message)}", file=sys.stderr, flush=True)
+
+            handler = HANDLERS.get(method)
+            if handler is None:
+                print(f"dummy agent: No handler for method {method}", file=sys.stderr, flush=True)
+                continue
+
+            handler(message)
+
+            if method == "session/cancel":
+                print("dummy agent: Received cancel, exiting", file=sys.stderr, flush=True)
+                break
+
+        except json.JSONDecodeError as e:
+            print(f"dummy agent: Failed to parse JSON: {raw}, error: {e}", file=sys.stderr, flush=True)
+        except Exception as e:
+            print(f"dummy agent: Error processing message: {e}", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":

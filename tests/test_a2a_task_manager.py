@@ -904,11 +904,11 @@ class TestA2ATaskManager:
         """Test that Task creation fails with proper validation errors when required fields are missing."""
         # Test missing status field
         with pytest.raises(Exception):  # pydantic validation error
-            from a2a.models import TaskStatus, TaskState, generate_id
+            from a2a.models import TaskStatus, TaskState, current_timestamp
             invalid_task = Task(
                 id="task_123",
                 contextId="ctx_123",
-                status=TaskStatus(state=TaskState.SUBMITTED, timestamp=generate_id("ts_")),
+                status=TaskStatus(state=TaskState.SUBMITTED, timestamp=current_timestamp()),
                 history=None,
                 artifacts=None
             )

@@ -13,12 +13,14 @@ import logging
 import os
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
-from typing import Any, AsyncGenerator, Optional, List, Dict
+from typing import Any, AsyncGenerator, AsyncIterator, Optional, List, Dict, Callable, Tuple
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status, WebSocket
 from fastapi.responses import Response, StreamingResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from .database import SessionDatabase
 from .logging_config import configure_logging
@@ -32,22 +34,302 @@ from .tool_config import get_tool_configuration_manager, BashTool
 from .bash_executor import BashToolExecutor
 
 # Import A2A protocol components
-from a2a.models import Message as A2AMessage, MessageSendParams, Task
+from a2a.models import (
+    Message,
+    MessageSendParams,
+    Task,
+    TextPart,
+    TaskStatusUpdateEvent,
+    TaskStatus,
+    TaskState,
+    create_message_id,
+    current_timestamp,
+)
 from a2a.translator import A2ATranslator
 
 # Import push notification models
 from .models import TaskPushNotificationConfig
 
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+
+def serialize_a2a(obj: Any) -> Any:
+    """Convert Pydantic models (and nested structures) into JSON-serializable dicts without nulls."""
+    if isinstance(obj, BaseModel):
+        return obj.model_dump(exclude_none=True)
+    if isinstance(obj, list):
+        return [serialize_a2a(item) for item in obj]
+    if isinstance(obj, dict):
+        return {key: serialize_a2a(value) for key, value in obj.items() if value is not None}
+    return obj
+
+
+async def iter_streaming_payloads(
+    task_manager: "A2ATaskManager",
+    agent_config: Dict[str, Any],
+    task: Task,
+    *,
+    include_jsonrpc: bool,
+    request_id: Any,
+    stream_id: Optional[str] = None,
+) -> AsyncIterator[Dict[str, Any]]:
+    """
+    Shared streaming iterator that yields formatted payloads for SSE delivery.
+
+    Args:
+        task_manager: Task manager instance handling execution.
+        agent_config: Agent configuration dict.
+        task: Task object to execute.
+        include_jsonrpc: Whether to wrap responses in JSON-RPC envelopes.
+        request_id: JSON-RPC request ID (can be None).
+        stream_id: Optional identifier for correlating log output across layers.
+    """
+    stream_id = stream_id or f"{task.id}:{uuid4().hex[:8]}"
+    logger.debug(
+        "Streaming iterator started",
+        extra={
+            "stream_id": stream_id,
+            "task_id": task.id,
+            "context_id": task.contextId,
+            "include_jsonrpc": include_jsonrpc,
+            "request_id": request_id,
+        },
+    )
+    queue: asyncio.Queue[Tuple[str, Any]] = asyncio.Queue()
+    accumulated_chunks: List[str] = []
+
+    def wrap_result(payload: Any) -> Dict[str, Any]:
+        body = serialize_a2a(payload)
+        if include_jsonrpc:
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": body
+            }
+        return body
+
+    def wrap_error(payload: Dict[str, Any]) -> Dict[str, Any]:
+        if include_jsonrpc:
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": payload
+            }
+        return {"error": payload}
+
+    async def stream_chunk_handler(chunk: str) -> None:
+        chunk_index = len(accumulated_chunks)
+        accumulated_chunks.append(chunk)
+
+        chunk_message = Message(
+            role="agent",
+            parts=[TextPart(text=chunk)],
+            messageId=create_message_id(),
+            taskId=task.id,
+            contextId=task.contextId,
+            metadata={"streaming": True, "chunk_index": chunk_index}
+        )
+
+        chunk_message_payload = chunk_message.model_dump(exclude_none=True)
+
+        status_event = TaskStatusUpdateEvent(
+            taskId=task.id,
+            contextId=task.contextId,
+            status=TaskStatus(
+                state=TaskState.WORKING,
+                timestamp=current_timestamp(),
+                message=chunk_message_payload
+            ),
+            final=False,
+            metadata={"chunk_index": chunk_index}
+        )
+
+        await queue.put(("result", status_event))
+        logger.debug(
+            "Queued streaming chunk event",
+            extra={
+                "stream_id": stream_id,
+                "task_id": task.id,
+                "chunk_index": chunk_index,
+                "chunk_preview": chunk[:80],
+            },
+        )
+
+    async def run_task():
+        try:
+            result_task = await task_manager.execute_task(
+                task_id=task.id,
+                agent_command=agent_config["command"],
+                api_key=agent_config["api_key"],
+                working_directory=os.getcwd(),
+                mcp_servers=[],
+                stream_handler=stream_chunk_handler
+            )
+
+            final_message = result_task.history[-1] if result_task.history else None
+            final_message_payload = (
+                final_message.model_dump(exclude_none=True) if final_message else None
+            )
+
+            final_status_event = TaskStatusUpdateEvent(
+                taskId=result_task.id,
+                contextId=result_task.contextId,
+                status=TaskStatus(
+                    state=result_task.status.state,
+                    timestamp=result_task.status.timestamp or current_timestamp(),
+                    message=final_message_payload
+                ),
+                final=True,
+                metadata={
+                    "total_chunks": len(accumulated_chunks),
+                    "stream_completed": True
+                }
+            )
+
+            await queue.put(("result", final_status_event))
+            logger.debug(
+                "Queued final status event",
+                extra={
+                    "stream_id": stream_id,
+                    "task_id": result_task.id,
+                    "total_chunks": len(accumulated_chunks),
+                    "final_state": result_task.status.state.value if result_task.status else None,
+                },
+            )
+            await queue.put(("result", result_task))
+            logger.debug(
+                "Queued final task payload",
+                extra={
+                    "stream_id": stream_id,
+                    "task_id": result_task.id,
+                    "history_count": len(result_task.history or []),
+                },
+            )
+
+        except AgentProcessError as exc:
+            logger.exception("Agent process failed during streaming", extra={"task_id": task.id})
+            await queue.put(("error", {
+                "code": -32603,
+                "message": f"Agent process failed: {str(exc)}"
+            }))
+            logger.debug(
+                "Queued streaming error payload",
+                extra={
+                    "stream_id": stream_id,
+                    "task_id": task.id,
+                    "error_type": "AgentProcessError",
+                    "error_message": str(exc),
+                },
+            )
+            await task_manager.cancel_task(task.id)
+
+        except Exception as exc:
+            logger.exception("Unexpected error during streaming execution", extra={"task_id": task.id})
+            await queue.put(("error", {
+                "code": -32603,
+                "message": f"Failed to stream message: {str(exc)}"
+            }))
+            logger.debug(
+                "Queued streaming error payload",
+                extra={
+                    "stream_id": stream_id,
+                    "task_id": task.id,
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                },
+            )
+
+        finally:
+            await queue.put(("done", None))
+            logger.debug(
+                "Queued streaming completion sentinel",
+                extra={"stream_id": stream_id, "task_id": task.id},
+            )
+
+    runner = asyncio.create_task(run_task())
+
+    try:
+        initial_payload = wrap_result(task)
+        logger.debug(
+            "Emitting initial streaming payload",
+            extra={
+                "stream_id": stream_id,
+                "task_id": task.id,
+                "payload_type": type(task).__name__,
+                "include_jsonrpc": include_jsonrpc,
+                "result_kind": (
+                    initial_payload.get("result", {}).get("kind")
+                    if isinstance(initial_payload.get("result"), dict)
+                    else None
+                ),
+            },
+        )
+        yield initial_payload
+
+        while True:
+            kind, payload = await queue.get()
+            if kind == "done":
+                logger.debug(
+                    "Streaming iterator received completion sentinel",
+                    extra={"stream_id": stream_id, "task_id": task.id},
+                )
+                break
+            if kind == "result":
+                formatted = wrap_result(payload)
+                result_body = formatted.get("result", formatted if not include_jsonrpc else {})
+                result_kind = None
+                if isinstance(result_body, dict):
+                    result_kind = result_body.get("kind")
+                elif hasattr(payload, "kind"):
+                    result_kind = getattr(payload, "kind")
+
+                logger.debug(
+                    "Emitting streaming payload",
+                    extra={
+                        "stream_id": stream_id,
+                        "task_id": task.id,
+                        "payload_kind": result_kind,
+                        "include_jsonrpc": include_jsonrpc,
+                    },
+                )
+                yield formatted
+            elif kind == "error":
+                formatted_error = wrap_error(payload)
+                logger.debug(
+                    "Emitting streaming error payload",
+                    extra={
+                        "stream_id": stream_id,
+                        "task_id": task.id,
+                        "error_code": payload.get("code"),
+                        "include_jsonrpc": include_jsonrpc,
+                    },
+                )
+                yield formatted_error
+    finally:
+        await runner
+        logger.debug(
+            "Streaming iterator completed",
+            extra={"stream_id": stream_id, "task_id": task.id},
+        )
 
 
 def get_agent_config() -> Dict[str, Any]:
     """Get the single agent configuration from settings."""
+    import shlex
     settings = get_settings()
 
     # For testing/development, provide fallback defaults
-    command = settings.agent_command or "python tests/dummy_agent.py"
+    command_str = settings.agent_command or "python tests/dummy_agent.py"
     description = settings.agent_description or "A2A-ACP Development Agent"
+
+    # Parse command string into argument list for subprocess
+    try:
+        command = shlex.split(command_str)
+    except ValueError as e:
+        # Fallback if parsing fails - convert string to list with shell execution
+        logger.warning(f"Failed to parse command string '{command_str}': {e}. Using as single command.")
+        command = [command_str]
 
     return {
         "command": command,
@@ -120,7 +402,7 @@ async def generate_static_agent_card():
         protocolVersion="0.3.0",
         name="a2a-acp-agent",
         description=f"{agent_config['description']} (with bash tool execution)",
-        url="http://localhost:8000",  # Server URL
+        url="http://localhost:8001/a2a/rpc",
         preferredTransport="JSONRPC",
         version="1.0.0",
         capabilities=AgentCapabilities(
@@ -287,7 +569,7 @@ def handle_push_notification_config_method(
     method_name: str,
     params: Dict[str, Any],
     request_id: Any,
-    handler_func: callable,
+    handler_func: Callable,
     param_requirements: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
@@ -336,6 +618,386 @@ def handle_push_notification_config_method(
                 "message": f"Failed to {method_name}: {str(e)}"
             }
         }
+
+
+async def handle_message_send_jsonrpc(params: Dict[str, Any], request: Request, request_id: Any) -> Dict[str, Any]:
+    """Handle message/send via JSON-RPC."""
+    try:
+        from a2a.models import MessageSendParams
+
+        # Parse MessageSendParams
+        message_params = MessageSendParams(**params)
+
+        # Get dependencies
+        task_manager = get_task_manager(request)
+        context_manager = get_context_manager(request)
+
+        # Get single agent configuration
+        agent_config = get_agent_config()
+
+        # Create A2A context for this task
+        context_id = message_params.message.contextId or await context_manager.create_context("default-agent")
+
+        # Create A2A task
+        task = await task_manager.create_task(
+            context_id=context_id,
+            agent_name="default-agent",
+            initial_message=message_params.message,
+            metadata={"mode": "sync"}
+        )
+
+        try:
+            async with ZedAgentConnection(agent_config["command"], api_key=agent_config["api_key"]) as connection:
+                await connection.initialize()
+
+                # Create or load ZedACP session if context is provided
+                session_id = await connection.start_session(cwd=os.getcwd(), mcp_servers=[])
+
+                # Execute the task (task manager handles translation and history updates)
+                result = await task_manager.execute_task(
+                    task_id=task.id,
+                    agent_command=agent_config["command"],
+                    api_key=agent_config["api_key"],
+                    working_directory=os.getcwd(),
+                    mcp_servers=[]
+                )
+
+                # Add completed task to context
+                await context_manager.add_task_to_context(context_id, result)
+
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": serialize_a2a(result)
+                }
+
+        except AgentProcessError as exc:
+            logger.exception("Agent process failed during A2A message", extra={"task_id": task.id})
+            # Mark task as failed
+            await task_manager.cancel_task(task.id)
+
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32603,
+                    "message": f"Agent process failed: {str(exc)}"
+                }
+            }
+
+    except Exception as e:
+        logger.exception("Error in message/send JSON-RPC handler")
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {
+                "code": -32603,
+                "message": f"Failed to send message: {str(e)}"
+            }
+        }
+
+
+async def handle_tasks_get_jsonrpc(params: Dict[str, Any], request: Request, request_id: Any) -> Dict[str, Any]:
+    """Handle tasks/get via JSON-RPC."""
+    try:
+        from a2a.models import TaskQueryParams
+
+        # Parse TaskQueryParams
+        task_query = TaskQueryParams(**params)
+
+        # Get task from task manager
+        task_manager = get_task_manager(request)
+        task = await task_manager.get_task(task_query.id)
+
+        if task:
+            # Include message history if requested
+            if task_query.historyLength and task_query.historyLength > 0:
+                # Limit history to requested length
+                if task.history and len(task.history) > task_query.historyLength:
+                    task.history = task.history[-task_query.historyLength:]
+
+            logger.info("Task retrieved successfully",
+                       extra={"task_id": task.id, "status": task.status.state.value})
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": serialize_a2a(task)
+            }
+        else:
+            # Task not found
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32001,
+                    "message": "Task not found"
+                }
+            }
+
+    except Exception as e:
+        logger.exception("Error in tasks/get JSON-RPC handler")
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {
+                "code": -32603,
+                "message": f"Failed to get task: {str(e)}"
+            }
+        }
+
+
+async def handle_tasks_list_jsonrpc(params: Dict[str, Any], request: Request, request_id: Any) -> Dict[str, Any]:
+    """Handle tasks/list via JSON-RPC."""
+    try:
+        from a2a.models import ListTasksParams, ListTasksResult
+
+        # Parse ListTasksParams
+        list_params = ListTasksParams(**params)
+
+        # Get active tasks from task manager
+        task_manager = get_task_manager(request)
+        active_tasks = await task_manager.list_tasks()
+
+        # Apply filtering
+        filtered_tasks = active_tasks
+
+        # Filter by context ID if specified
+        if list_params.contextId:
+            filtered_tasks = [t for t in filtered_tasks if t.contextId == list_params.contextId]
+
+        # Filter by status if specified
+        if list_params.status:
+            filtered_tasks = [t for t in filtered_tasks if t.status.state == list_params.status]
+
+        # Apply pagination
+        start_index = 0
+        if list_params.pageToken:
+            try:
+                start_index = int(list_params.pageToken)
+            except (ValueError, TypeError):
+                start_index = 0
+
+        page_size = list_params.pageSize or 50
+        end_index = start_index + page_size
+        paginated_tasks = filtered_tasks[start_index:end_index]
+
+        # Generate next page token if there are more results
+        next_page_token = ""
+        if len(filtered_tasks) > end_index:
+            next_page_token = str(end_index)
+
+        # Create result with history length consideration
+        result_tasks = []
+        for task in paginated_tasks:
+            # Include history if requested
+            if list_params.historyLength and list_params.historyLength > 0:
+                if task.history and len(task.history) > list_params.historyLength:
+                    task.history = task.history[-list_params.historyLength:]
+
+            # Include artifacts if requested
+            if not list_params.includeArtifacts:
+                task.artifacts = None
+
+            result_tasks.append(task)
+
+        result = ListTasksResult(
+            tasks=result_tasks,
+            totalSize=len(filtered_tasks),
+            pageSize=page_size,
+            nextPageToken=next_page_token
+        )
+
+        logger.info("Tasks listed successfully",
+                   extra={"total_tasks": len(filtered_tasks),
+                         "returned_tasks": len(result_tasks),
+                         "next_page_token": next_page_token})
+
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": serialize_a2a(result)
+        }
+
+    except Exception as e:
+        logger.exception("Error in tasks/list JSON-RPC handler")
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {
+                "code": -32603,
+                "message": f"Failed to list tasks: {str(e)}"
+            }
+        }
+
+
+async def handle_tasks_cancel_jsonrpc(params: Dict[str, Any], request: Request, request_id: Any) -> Dict[str, Any]:
+    """Handle tasks/cancel via JSON-RPC."""
+    try:
+        from a2a.models import TaskIdParams
+
+        # Parse TaskIdParams
+        task_id_params = TaskIdParams(**params)
+
+        # Cancel task via task manager
+        task_manager = get_task_manager(request)
+        success = await task_manager.cancel_task(task_id_params.id)
+
+        if success:
+            # Get updated task status
+            task = await task_manager.get_task(task_id_params.id)
+            if task:
+                logger.info("Task cancelled successfully",
+                           extra={"task_id": task_id_params.id})
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": task
+                }
+            else:
+                # Task was cancelled and removed from active tasks
+                from a2a.models import Task, TaskStatus, TaskState
+                cancelled_task = Task(
+                    id=task_id_params.id,
+                    contextId="unknown",
+                    status=TaskStatus(state=TaskState.CANCELLED),
+                    metadata={"cancelled": True}
+                )
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": cancelled_task
+                }
+        else:
+            # Task not found or cancellation failed
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32001,
+                    "message": "Task not found or could not be cancelled"
+                }
+            }
+
+    except Exception as e:
+        logger.exception("Error in tasks/cancel JSON-RPC handler")
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {
+                "code": -32603,
+                "message": f"Failed to cancel task: {str(e)}"
+            }
+        }
+
+
+async def handle_message_stream_jsonrpc(params: Dict[str, Any], request: Request, request_id: Any) -> StreamingResponse:
+    """Handle message/stream via JSON-RPC with SSE streaming support."""
+    try:
+        # Parse MessageSendParams
+        message_params = MessageSendParams(**params)
+
+        # Get dependencies
+        task_manager = get_task_manager(request)
+        context_manager = get_context_manager(request)
+
+        # Get single agent configuration
+        agent_config = get_agent_config()
+
+        # Create A2A context for this task
+        context_id = message_params.message.contextId or await context_manager.create_context("default-agent")
+
+        # Create A2A task
+        task = await task_manager.create_task(
+            context_id=context_id,
+            agent_name="default-agent",
+            initial_message=message_params.message,
+            metadata={"mode": "streaming"}
+        )
+
+        stream_trace_id = f"{task.id}:{uuid4().hex[:8]}"
+        logger.info(
+            "Starting JSON-RPC streaming response",
+            extra={
+                "stream_id": stream_trace_id,
+                "task_id": task.id,
+                "context_id": task.contextId,
+                "request_id": request_id,
+            },
+        )
+
+        async def sse_event_generator():
+            """Generate SSE events for JSON-RPC streaming response."""
+            logger.debug(
+                "JSON-RPC streaming generator started",
+                extra={"stream_id": stream_trace_id, "task_id": task.id},
+            )
+            try:
+                async for payload in iter_streaming_payloads(
+                    task_manager,
+                    agent_config,
+                    task,
+                    include_jsonrpc=True,
+                    request_id=request_id,
+                    stream_id=stream_trace_id,
+                ):
+                    logger.debug(
+                        "Forwarding JSON-RPC streaming payload",
+                        extra={"stream_id": stream_trace_id, "task_id": task.id},
+                    )
+                    yield f"data: {json.dumps(payload)}\n\n"
+            except Exception as e:
+                logger.exception("Error in JSON-RPC streaming event generator")
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32603,
+                        "message": f"Failed to stream message: {str(e)}"
+                    }
+                }
+                yield f"data: {json.dumps(error_response)}\n\n"
+            finally:
+                logger.debug(
+                    "JSON-RPC streaming generator completed",
+                    extra={"stream_id": stream_trace_id, "task_id": task.id},
+                )
+
+        return StreamingResponse(
+            sse_event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Cache-Control",
+            }
+        )
+
+    except Exception as e:
+        logger.exception("Error in message/stream JSON-RPC handler")
+        error_message = f"Failed to stream message: {str(e)}"
+
+        async def error_sse_generator(message: str):
+            error_response = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32603,
+                    "message": message
+                }
+            }
+            yield f"data: {json.dumps(error_response)}\n\n"
+
+        return StreamingResponse(
+            error_sse_generator(error_message),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Cache-Control",
+            }
+        )
 
 
 def create_app() -> FastAPI:
@@ -555,6 +1217,21 @@ def create_app() -> FastAPI:
     # Note: We'll initialize this when first accessed since we can't await here
     app.state.agent_card = None
 
+    # Well-known Agent Card discovery endpoint (publicly accessible)
+    @app.get("/.well-known/agent-card.json")
+    async def get_agent_card_well_known(request: Request) -> Any:
+        """Agent Card discovery endpoint for A2A protocol compatibility.
+
+        This endpoint allows A2A clients to discover agent capabilities
+        without authentication, following well-known URL conventions.
+        """
+        try:
+            agent_card = await get_agent_card(request)
+            return serialize_a2a(agent_card)
+        except Exception as e:
+            logger.error("Error serving well-known agent card", extra={"error": str(e)})
+            raise HTTPException(status_code=500, detail="Failed to generate agent card")
+
     # A2A JSON-RPC endpoint - delegate to A2A server
     @app.post("/a2a/rpc")
     async def a2a_jsonrpc(
@@ -579,7 +1256,12 @@ def create_app() -> FastAPI:
                             "tasks/list", "tasks/cancel", "agent/getAuthenticatedExtendedCard",
                             "tasks/pushNotificationConfig/set", "tasks/pushNotificationConfig/get",
                             "tasks/pushNotificationConfig/list", "tasks/pushNotificationConfig/delete"
-                        ]
+                        ],
+                        "http_endpoints": {
+                            "streaming": "POST /a2a/message/stream (SSE format)",
+                            "non_streaming": "POST /a2a/message/send (JSON response)"
+                        },
+                        "notes": "JSON-RPC message/stream supports streaming via SSE format with proper A2A response objects."
                     }
                 }
 
@@ -591,13 +1273,28 @@ def create_app() -> FastAPI:
             params = body.get("params", {})
             request_id = body.get("id")
 
-            if method == "agent/getAuthenticatedExtendedCard":
+            if method == "message/send":
+                # Handle message/send via JSON-RPC
+                return await handle_message_send_jsonrpc(params, request, request_id)
+            elif method == "message/stream":
+                # Handle message/stream via JSON-RPC
+                return await handle_message_stream_jsonrpc(params, request, request_id)
+            elif method == "tasks/get":
+                # Handle tasks/get via JSON-RPC
+                return await handle_tasks_get_jsonrpc(params, request, request_id)
+            elif method == "tasks/list":
+                # Handle tasks/list via JSON-RPC
+                return await handle_tasks_list_jsonrpc(params, request, request_id)
+            elif method == "tasks/cancel":
+                # Handle tasks/cancel via JSON-RPC
+                return await handle_tasks_cancel_jsonrpc(params, request, request_id)
+            elif method == "agent/getAuthenticatedExtendedCard":
                 # Return the static AgentCard
                 agent_card = await get_agent_card(request)
                 return {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "result": agent_card.model_dump() if hasattr(agent_card, 'model_dump') else agent_card
+                    "result": serialize_a2a(agent_card)
                 }
             elif method == "tasks/pushNotificationConfig/set":
                 # Handle push notification config set
@@ -800,6 +1497,88 @@ def create_app() -> FastAPI:
             # Mark task as failed
             await task_manager.cancel_task(task.id)
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+
+    @app.post("/a2a/message/stream")
+    async def a2a_message_stream(
+        params: MessageSendParams,
+        task_manager: A2ATaskManager = Depends(get_task_manager),
+        context_manager: A2AContextManager = Depends(get_context_manager),
+        authorization: Optional[str] = Header(default=None)
+    ):
+        """Stream an A2A message conversation using Server-Sent Events."""
+        require_authorization(authorization)
+
+        # Get single agent configuration
+        agent_config = get_agent_config()
+
+        # Create A2A context for this task
+        context_id = params.message.contextId or await context_manager.create_context("default-agent")
+
+        # Create A2A task
+        task = await task_manager.create_task(
+            context_id=context_id,
+            agent_name="default-agent",
+            initial_message=params.message,
+            metadata={"mode": "streaming"}
+        )
+
+        stream_trace_id = f"{task.id}:{uuid4().hex[:8]}"
+        logger.info(
+            "Starting HTTP SSE streaming response",
+            extra={
+                "stream_id": stream_trace_id,
+                "task_id": task.id,
+                "context_id": task.contextId,
+            },
+        )
+
+        async def event_generator():
+            """Generate SSE events for the streaming conversation."""
+            logger.debug(
+                "HTTP SSE streaming generator started",
+                extra={"stream_id": stream_trace_id, "task_id": task.id},
+            )
+            try:
+                async for payload in iter_streaming_payloads(
+                    task_manager,
+                    agent_config,
+                    task,
+                    include_jsonrpc=True,
+                    request_id=None,
+                    stream_id=stream_trace_id,
+                ):
+                    logger.debug(
+                        "Forwarding HTTP SSE streaming payload",
+                        extra={"stream_id": stream_trace_id, "task_id": task.id},
+                    )
+                    yield f"data: {json.dumps(payload)}\n\n"
+            except Exception as e:
+                logger.exception("Error in streaming event generator")
+                error_event = {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {
+                        "code": -32603,
+                        "message": f"Failed to stream message: {str(e)}"
+                    }
+                }
+                yield f"data: {json.dumps(error_event)}\n\n"
+            finally:
+                logger.debug(
+                    "HTTP SSE streaming generator completed",
+                    extra={"stream_id": stream_trace_id, "task_id": task.id},
+                )
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Cache-Control",
+            }
+        )
 
     # Real-time streaming endpoints
     @app.websocket("/streaming/websocket")

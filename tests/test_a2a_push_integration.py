@@ -495,9 +495,9 @@ class TestEndToEndWorkflows:
                 assert len(creation_notifications) >= 1
 
                 # Update task status to working (should trigger status change notification)
-                from src.a2a.models import generate_id
+                from src.a2a.models import current_timestamp
                 task.status.state = TaskState.WORKING
-                task.status.timestamp = generate_id("ts_")
+                task.status.timestamp = current_timestamp()
 
                 await push_mgr.send_notification(task.id, {
                     "event": "status_change",
@@ -511,7 +511,7 @@ class TestEndToEndWorkflows:
 
                 # Complete the task (should trigger completion notification and cleanup)
                 task.status.state = TaskState.COMPLETED
-                task.status.timestamp = generate_id("ts_")
+                task.status.timestamp = current_timestamp()
 
                 await push_mgr.send_notification(task.id, {
                     "event": "status_change",

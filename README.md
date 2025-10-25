@@ -19,6 +19,9 @@ export A2A_AGENT_COMMAND="/usr/local/bin/codex-acp"
 export A2A_AGENT_API_KEY="${OPENAI_API_KEY}"
 export A2A_AUTH_TOKEN="your-secret-token"
 
+# (Optional) Try the bundled dummy agent for local development
+# export A2A_AGENT_COMMAND="python tests/dummy_agent.py"
+
 # 3. Start the server
 make run
 
@@ -73,6 +76,14 @@ For comprehensive documentation, see our [user-docs/](user-docs/) folder:
 - **[Development Setup](user-docs/development-setup.md)** - Local development environment
 - **[Testing Guide](user-docs/testing.md)** - Running and writing tests (240+ tests)
 - **[Contributing Guide](user-docs/contributing.md)** - How to contribute to the project
+- **Streaming Health Check**
+  ```bash
+  # Validate JSON-RPC + HTTP streaming against the spec
+  PYTHONPATH=. uv run pytest tests/test_a2a_acp_bridge.py::TestStreamingCompliance
+
+  # Exercise the real dummy agent and confirm streamed markers arrive at the client
+  PYTHONPATH=. uv run pytest tests/test_a2a_acp_bridge.py::TestDummyAgentIntegration::test_dummy_agent_streams_marker
+  ```
 
 ## ✨ Key Features
 
@@ -82,6 +93,7 @@ For comprehensive documentation, see our [user-docs/](user-docs/) folder:
 - **💬 Interactive Conversations**: Input-required workflows for multi-turn agent interactions
 - **📡 Push Notifications**: HTTP webhooks with filtering, analytics, and retry logic
 - **🎯 Agent Cards**: Dynamic generation of comprehensive agent capability manifests
+- **🔍 Agent Discovery**: Well-known HTTP endpoint for agent capability advertisement
 - **⚡ Streaming Support**: Real-time message streaming with Server-Sent Events
 - **🛠️ Tool Execution**: Bash-based tool execution with unlimited flexibility
 - **🔒 Enterprise Security**: Comprehensive security with authentication and audit logging
@@ -452,7 +464,7 @@ make run
 # Ping the server (health check)
 curl -X GET http://localhost:8000/health
 
-# Get agent capabilities
+# Get agent capabilities (JSON-RPC)
 curl -X POST http://localhost:8001/ \
   -H "Content-Type: application/json" \
   -d '{
@@ -461,6 +473,9 @@ curl -X POST http://localhost:8001/ \
     "id": "card_001",
     "params": {}
   }'
+
+# Get agent capabilities (HTTP well-known endpoint)
+curl -X GET http://localhost:8001/.well-known/agent-card.json
 
 # Send a message
 curl -X POST http://localhost:8001/ \

@@ -9,11 +9,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Callable, Awaitable
 from dataclasses import dataclass
 from datetime import datetime
 
-from a2a.models import Task, TaskStatus, TaskState, Message, generate_id, create_task_id, InputRequiredNotification
+from a2a.models import (
+    Task,
+    TaskStatus,
+    TaskState,
+    Message,
+    generate_id,
+    create_task_id,
+    InputRequiredNotification,
+    current_timestamp,
+)
 
 from .zed_agent import ZedAgentConnection, AgentProcessError, PromptCancelled
 from .push_notification_manager import PushNotificationManager
@@ -86,7 +95,7 @@ class A2ATaskManager:
             if task_id in self._active_tasks:
                 task = self._active_tasks[task_id].task
                 task.status.state = TaskState.FAILED
-                task.status.timestamp = generate_id("ts_")
+                task.status.timestamp = current_timestamp()
 
             # Send notification for failure
             error_message = f"{context}: {str(error)}" if context else str(error)
@@ -117,7 +126,7 @@ class A2ATaskManager:
             if task_id in self._active_tasks:
                 task = self._active_tasks[task_id].task
                 task.status.state = TaskState.CANCELLED
-                task.status.timestamp = generate_id("ts_")
+                task.status.timestamp = current_timestamp()
 
             # Send notification for cancellation
             cancel_message = f"Task was cancelled{': ' + context if context else ''}"
@@ -191,15 +200,19 @@ class A2ATaskManager:
             # Create initial task status
             status = TaskStatus(
                 state=TaskState.SUBMITTED,
-                timestamp=generate_id("ts_")
+                timestamp=current_timestamp()
             )
 
             # Create A2A task
+            history = None
+            if initial_message:
+                history = [Message(**initial_message.model_dump(exclude_none=True))]
+
             task = Task(
                 id=task_id,
                 contextId=context_id,
                 status=status,
-                history=None,  # Skip history for now due to validation issues
+                history=history,
                 artifacts=None,
                 metadata=metadata or {},
                 kind="task"
@@ -233,7 +246,8 @@ class A2ATaskManager:
         agent_command: List[str],
         api_key: Optional[str] = None,
         working_directory: str = ".",
-        mcp_servers: Optional[List[Dict]] = None
+        mcp_servers: Optional[List[Dict]] = None,
+        stream_handler: Optional[Callable[[str], Awaitable[None]]] = None
     ) -> Task:
         """Execute an A2A task using ZedACP agent with input-required support."""
         async with self.lock:
@@ -247,7 +261,7 @@ class A2ATaskManager:
                 # Update status to working
                 old_state = task.status.state.value
                 task.status.state = TaskState.WORKING
-                task.status.timestamp = generate_id("ts_")
+                task.status.timestamp = current_timestamp()
 
                 # Send notification for status change
                 asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
@@ -280,9 +294,18 @@ class A2ATaskManager:
                         # Execute the task with protocol-compliant input-required detection
                         cancel_event = context.cancel_event
 
-                        # Simplified chunk handler for artifact detection only
+                        # Chunk handler that accumulates content and handles artifacts
+                        accumulated_content = []
+
                         async def on_chunk(text: str) -> None:
-                            # Only check for artifact creation notifications
+                            # Accumulate all chunks for the final response
+                            accumulated_content.append(text)
+
+                            # Forward to streaming handler if provided
+                            if stream_handler:
+                                await stream_handler(text)
+
+                            # Also check for artifact creation notifications
                             upper_text = text.upper()
                             if ("ARTIFACT:" in upper_text or
                                 "FILE:" in upper_text or
@@ -302,6 +325,15 @@ class A2ATaskManager:
                             cancel_event=cancel_event
                         )
 
+                        # Add accumulated content to the result
+                        if accumulated_content:
+                            full_text = " ".join(accumulated_content)
+                            if "result" not in result:
+                                result["result"] = {}
+                            result["result"]["text"] = full_text
+                            logger.debug("Added accumulated content to result",
+                                       extra={"content_length": len(full_text), "chunks": len(accumulated_content)})
+
                         # Protocol-compliant input-required detection using stopReason and toolCalls
                         is_input_required, reason = self._is_input_required_from_response(result)
                         logger.info("Protocol analysis of ZedACP response",
@@ -317,7 +349,7 @@ class A2ATaskManager:
                             # Update task to input-required state using protocol semantics
                             old_state = task.status.state.value
                             task.status.state = TaskState.INPUT_REQUIRED
-                            task.status.timestamp = generate_id("ts_")
+                            task.status.timestamp = current_timestamp()
 
                             # Extract input types from response metadata if available
                             input_types = self._extract_input_types_from_response(result)
@@ -361,7 +393,7 @@ class A2ATaskManager:
                         # Mark as completed
                         old_state = task.status.state.value
                         task.status.state = TaskState.COMPLETED
-                        task.status.timestamp = generate_id("ts_")
+                        task.status.timestamp = current_timestamp()
 
                         # Send notification for completion
                         asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
@@ -416,7 +448,7 @@ class A2ATaskManager:
         task = context.task
         old_state = task.status.state.value
         task.status.state = TaskState.CANCELLED
-        task.status.timestamp = generate_id("ts_")
+        task.status.timestamp = current_timestamp()
 
         # Send notification for cancellation
         asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
@@ -462,7 +494,7 @@ class A2ATaskManager:
                 # Update status back to working
                 old_state = task.status.state.value
                 task.status.state = TaskState.WORKING
-                task.status.timestamp = generate_id("ts_")
+                task.status.timestamp = current_timestamp()
 
                 # Send notification for status change back to working
                 asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
@@ -496,7 +528,11 @@ class A2ATaskManager:
 
                         cancel_event = context.cancel_event
 
+                        # Chunk handler for continuation that accumulates content
+                        continuation_content = []
+
                         async def on_chunk(text: str) -> None:
+                            continuation_content.append(text)
                             logger.debug("Continue task output chunk",
                                        extra={"task_id": task_id, "chunk": text[:100]})
 
@@ -506,6 +542,15 @@ class A2ATaskManager:
                             on_chunk=on_chunk,
                             cancel_event=cancel_event
                         )
+
+                        # Add accumulated content to the result
+                        if continuation_content:
+                            full_text = " ".join(continuation_content)
+                            if "result" not in result:
+                                result["result"] = {}
+                            result["result"]["text"] = full_text
+                            logger.debug("Added continuation content to result",
+                                       extra={"content_length": len(full_text), "chunks": len(continuation_content)})
 
                         # Convert response back to A2A message
                         response_message = translator.zedacp_to_a2a_message(result, task.contextId, task_id)
@@ -530,7 +575,7 @@ class A2ATaskManager:
                         if is_input_required:
                             old_state = task.status.state.value
                             task.status.state = TaskState.INPUT_REQUIRED
-                            task.status.timestamp = generate_id("ts_")
+                            task.status.timestamp = current_timestamp()
 
                             # Extract input types from response metadata if available
                             input_types = self._extract_input_types_from_response(result)
@@ -555,7 +600,7 @@ class A2ATaskManager:
                         # Mark as completed
                         old_state = task.status.state.value
                         task.status.state = TaskState.COMPLETED
-                        task.status.timestamp = generate_id("ts_")
+                        task.status.timestamp = current_timestamp()
 
                         # Send notification for completion
                         asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {

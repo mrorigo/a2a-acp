@@ -8,12 +8,13 @@ A2A protocol implementation.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
+from typing_extensions import Annotated
 
 
 # ===== FOUNDATIONAL TYPES =====
@@ -277,7 +278,7 @@ class DataPart(PartBase):
     data: Dict[str, Any]
 
 
-# Union type for all parts
+# Union type for all parts (simple union without discriminator)
 Part = Union[TextPart, FilePart, DataPart]
 
 
@@ -519,6 +520,11 @@ def create_context_id() -> str:
 def create_message_id() -> str:
     """Generate a unique message ID."""
     return generate_id("msg_")
+
+
+def current_timestamp() -> str:
+    """Return an ISO-8601 UTC timestamp, as required by the A2A spec."""
+    return datetime.now(timezone.utc).isoformat()
 
 
 def create_artifact_id() -> str:

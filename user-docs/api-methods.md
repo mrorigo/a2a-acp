@@ -183,6 +183,49 @@ Cancel a running task.
 }
 ```
 
+## HTTP Endpoints
+
+### `GET /.well-known/agent-card.json`
+
+**Agent Discovery Endpoint** - Standard well-known URL for A2A agent discovery.
+
+This endpoint allows A2A clients to discover agent capabilities without authentication, following well-known URL conventions.
+
+**Request:**
+```bash
+curl -X GET http://localhost:8001/.well-known/agent-card.json
+```
+
+**Response:**
+```json
+{
+  "protocolVersion": "0.3.0",
+  "name": "a2a-acp-agent",
+  "description": "A2A-ACP Development Agent (with bash tool execution)",
+  "url": "http://localhost:8001",
+  "preferredTransport": "JSONRPC",
+  "version": "1.0.0",
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": true,
+    "stateTransitionHistory": true
+  },
+  "securitySchemes": {
+    "bearer": {
+      "type": "http",
+      "scheme": "bearer",
+      "description": "JWT bearer token authentication",
+      "bearerFormat": "JWT"
+    }
+  },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
+  "skills": [...]
+}
+```
+
+**Authentication**: Not required (public discovery endpoint)
+
 ## Agent Methods
 
 ### `agent/getAuthenticatedExtendedCard`

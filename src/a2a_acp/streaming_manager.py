@@ -237,9 +237,22 @@ class StreamingManager:
 
         async def event_generator():
             """Generate SSE events for the connection."""
+            logger.debug(
+                "SSE event generator started",
+                extra={"connection_id": connection_id, "task_filter": list(connection.task_filter)},
+            )
             try:
                 # Send initial connection event
-                yield f"data: {json.dumps({'type': 'connection_established', 'connection_id': connection_id, 'timestamp': connection.connected_at.isoformat()})}\n\n"
+                initial_event = {
+                    "type": "connection_established",
+                    "connection_id": connection_id,
+                    "timestamp": connection.connected_at.isoformat()
+                }
+                logger.debug(
+                    "Sending SSE connection established event",
+                    extra={"connection_id": connection_id},
+                )
+                yield f"data: {json.dumps(initial_event)}\n\n"
 
                 # Keep connection alive and listen for events
                 while True:
@@ -258,7 +271,15 @@ class StreamingManager:
                     # Send heartbeat every 30 seconds
                     current_time = datetime.utcnow()
                     if (current_time - connection.last_activity).seconds >= 30:
-                        yield f"data: {json.dumps({'type': 'heartbeat', 'timestamp': current_time.isoformat()})}\n\n"
+                        heartbeat_event = {
+                            "type": "heartbeat",
+                            "timestamp": current_time.isoformat()
+                        }
+                        logger.debug(
+                            "Sending SSE heartbeat",
+                            extra={"connection_id": connection_id},
+                        )
+                        yield f"data: {json.dumps(heartbeat_event)}\n\n"
 
             except Exception as e:
                 logger.error(
@@ -267,6 +288,10 @@ class StreamingManager:
                 )
             finally:
                 await self.unregister_sse_connection(connection_id)
+                logger.debug(
+                    "SSE event generator completed",
+                    extra={"connection_id": connection_id},
+                )
 
         return StreamingResponse(
             event_generator(),
@@ -282,6 +307,14 @@ class StreamingManager:
     async def broadcast_notification(self, task_id: str, event: Dict[str, Any]) -> None:
         """Broadcast a notification to all connected streaming clients."""
         # Broadcast to WebSocket connections
+        logger.debug(
+            "Broadcasting streaming notification",
+            extra={
+                "task_id": task_id,
+                "event_type": event.get("event"),
+                "keys": list(event.keys()),
+            },
+        )
         await self._broadcast_to_websockets(task_id, event)
 
         # Note: SSE broadcasting would need a different mechanism

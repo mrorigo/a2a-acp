@@ -64,14 +64,19 @@ class ZedAgentConnection:
         self._logger.debug("Starting agent process", extra={"command": self._command})
 
         # Set up environment variables
+        import os
         env = None
         if self._api_key:
-            import os
             env = os.environ.copy()
             env["OPENAI_API_KEY"] = self._api_key
             self._logger.debug("Setting OPENAI_API_KEY environment variable", extra={"key_length": len(self._api_key)})
         else:
             self._logger.debug("No API key provided for agent authentication")
+
+        # Always copy environment to ensure proper inheritance
+        if env is None:
+            env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"  # Ensure immediate stdout/stderr flushing
 
         process = await asyncio.create_subprocess_exec(
             *self._command,
@@ -97,7 +102,7 @@ class ZedAgentConnection:
                 self._stderr_buffer.append(decoded_line)
                 # Log stderr output for debugging (but avoid flooding logs)
                 if decoded_line.strip():
-                    self._logger.debug("Agent stderr output", extra={"stderr_line": decoded_line})
+                    self._logger.info("Agent stderr output", extra={"stderr_line": decoded_line})
         except asyncio.CancelledError:
             # Handle cancellation gracefully - this is expected during cleanup
             self._logger.debug("Stderr collection cancelled")
@@ -149,10 +154,11 @@ class ZedAgentConnection:
         async with self._write_lock:
             self._stdin.write(data.encode() + b"\n")
             await self._stdin.drain()
-        self._logger.debug("Sent JSON-RPC message to agent", extra={
+        self._logger.info("Sent JSON-RPC message to agent", extra={
             "method": payload.get("method"),
             "id": payload.get("id"),
-            "params": payload.get("params")
+            "payload": payload,
+            "raw_message": data
         })
 
     async def _read_json(self) -> dict[str, Any]:
@@ -187,15 +193,15 @@ class ZedAgentConnection:
 
             try:
                 payload = json.loads(decoded)
-                self._logger.debug("Received JSON-RPC message from agent", extra={
+                self._logger.info("Received JSON-RPC message from agent", extra={
                     "method": payload.get("method"),
                     "id": payload.get("id"),
                     "has_result": "result" in payload,
                     "has_error": "error" in payload,
                     "result": payload.get("result"),
-                    "error": payload.get("error")
+                    "error": payload.get("error"),
+                    "full_payload": payload
                 })
-                self._logger.debug("Parsed JSON payload", extra={"payload": payload})
                 return payload
             except json.JSONDecodeError as e:
                 # If it's not valid JSON, skip it and continue reading
@@ -364,6 +370,9 @@ class ZedAgentConnection:
         })
         """Send a session/prompt request and return the final result."""
 
+        # Accumulate chunks for the final result
+        accumulated_chunks: list[str] = []
+
         async def handler(payload: dict[str, Any]) -> None:
             self._logger.debug("Handling notification during prompt", extra={
                 "method": payload.get("method"),
@@ -392,12 +401,22 @@ class ZedAgentConnection:
                         "content_keys": list(content.keys()),
                         "update_keys": list(update_data.keys())
                     })
-                    if text and on_chunk:
-                        self._logger.debug("Processing agent message chunk", extra={
-                            "text_length": len(text),
-                            "text_preview": text[:100] + "..." if len(text) > 100 else text
+                    if text:
+                        # Accumulate chunk for final result
+                        accumulated_chunks.append(text)
+                        self._logger.debug("Accumulated chunk", extra={
+                            "chunk_length": len(text),
+                            "total_chunks": len(accumulated_chunks),
+                            "text_preview": text[:50] + "..." if len(text) > 50 else text
                         })
-                        await on_chunk(text)
+
+                        # Also call external chunk handler if provided
+                        if on_chunk:
+                            self._logger.debug("Processing agent message chunk", extra={
+                                "text_length": len(text),
+                                "text_preview": text[:100] + "..." if len(text) > 100 else text
+                            })
+                            await on_chunk(text)
                     elif on_chunk:
                         self._logger.warning("Received agent_message_chunk but no text content or no on_chunk handler", extra={
                             "has_text": text is not None,
@@ -424,6 +443,9 @@ class ZedAgentConnection:
 
                     if on_chunk:
                         await on_chunk(input_required_message)
+
+                    # Also accumulate input required message for consistency
+                    accumulated_chunks.append(input_required_message)
 
             # Handle tool call updates (ZedACP tool execution results)
             elif payload.get("method") == "tool_call_update":
@@ -487,10 +509,31 @@ class ZedAgentConnection:
                 if result:
                     result = await self._process_zedacp_tool_calls(result, session_id)
 
+                # Add accumulated chunks to the result
+                if accumulated_chunks:
+                    full_text = " ".join(accumulated_chunks)
+                    if not result:
+                        result = {}
+                    if "result" not in result:
+                        result["result"] = {}
+                    result["result"]["text"] = full_text
+                    self._logger.info("Added accumulated chunks to result", extra={
+                        "chunks": len(accumulated_chunks),
+                        "total_length": len(full_text),
+                        "result_keys": list(result.keys()),
+                        "text_preview": full_text[:100] + "..." if len(full_text) > 100 else full_text
+                    })
+                else:
+                    self._logger.info("No chunks accumulated, final result", extra={
+                        "result": result,
+                        "result_keys": list(result.keys()) if result else "empty"
+                    })
+
                 self._logger.info("Prompt processing completed successfully", extra={
                     "session_id": session_id,
                     "has_result": result is not None,
-                    "result_keys": list(result.keys()) if result else []
+                    "result_keys": list(result.keys()) if result else [],
+                    "chunks_accumulated": len(accumulated_chunks)
                 })
                 return result or {}
         else:
@@ -503,6 +546,26 @@ class ZedAgentConnection:
             # Process any tool calls in the result
             if result:
                 result = await self._process_zedacp_tool_calls(result, session_id)
+
+            # Add accumulated chunks to the result
+            if accumulated_chunks:
+                full_text = " ".join(accumulated_chunks)
+                if not result:
+                    result = {}
+                if "result" not in result:
+                    result["result"] = {}
+                result["result"]["text"] = full_text
+                self._logger.info("Added accumulated chunks to result", extra={
+                    "chunks": len(accumulated_chunks),
+                    "total_length": len(full_text),
+                    "result_keys": list(result.keys()),
+                    "text_preview": full_text[:100] + "..." if len(full_text) > 100 else full_text
+                })
+            else:
+                self._logger.info("No chunks accumulated, final result", extra={
+                    "result": result,
+                    "result_keys": list(result.keys()) if result else "empty"
+                })
 
             return result or {}
 

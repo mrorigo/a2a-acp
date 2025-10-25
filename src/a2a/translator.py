@@ -11,9 +11,20 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from .models import (
-    Message, MessageSendParams, Task, TextPart, FilePart, DataPart,
-    TaskStatus, TaskState, generate_id, create_task_id, create_context_id,
-    create_message_id, MessageSendConfiguration
+    Message,
+    MessageSendParams,
+    Task,
+    TextPart,
+    FilePart,
+    DataPart,
+    TaskStatus,
+    TaskState,
+    generate_id,
+    create_task_id,
+    create_context_id,
+    create_message_id,
+    MessageSendConfiguration,
+    current_timestamp,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,12 +55,12 @@ class A2ATranslator:
         zedacp_parts = []
 
         for part in a2a_message.parts:
-            if isinstance(part, TextPart):
+            if part.kind == "text":
                 zedacp_parts.append({
                     "type": "text",
                     "text": part.text
                 })
-            elif isinstance(part, FilePart):
+            elif part.kind == "file":
                 # Handle file content translation
                 if hasattr(part.file, 'bytes') and part.file.bytes:
                     # File with bytes content
@@ -65,15 +76,12 @@ class A2ATranslator:
                         "name": part.file.name or "unnamed_file",
                         "uri": part.file.uri
                     })
-            elif isinstance(part, DataPart):
+            elif part.kind == "data":
                 # Handle structured data
                 zedacp_parts.append({
                     "type": "data",
                     "data": part.data
                 })
-
-        logger.debug("Converted A2A message to ZedACP format",
-                    extra={"parts_count": len(zedacp_parts)})
         return zedacp_parts
 
     def zedacp_to_a2a_message(self, zedacp_response: Dict[str, Any],
@@ -92,30 +100,54 @@ class A2ATranslator:
         # Extract text content from ZedACP response
         text_content = ""
 
+        logger.debug("Translator received ZedACP response", extra={
+            "response_keys": list(zedacp_response.keys()) if isinstance(zedacp_response, dict) else "non-dict",
+            "full_response": zedacp_response
+        })
+
         if isinstance(zedacp_response, dict):
             # Try different possible response formats
             if "result" in zedacp_response:
                 result = zedacp_response["result"]
+                logger.debug("Found result in response", extra={"result_type": type(result), "result_keys": list(result.keys()) if isinstance(result, dict) else "non-dict"})
+
                 if isinstance(result, str):
                     text_content = result
-                elif isinstance(result, dict) and "text" in result:
-                    text_content = result["text"]
-                elif isinstance(result, dict) and "content" in result:
-                    content = result["content"]
-                    if isinstance(content, str):
-                        text_content = content
-                    elif isinstance(content, list):
-                        # Concatenate multiple content parts
-                        for item in content:
-                            if isinstance(item, dict) and "text" in item:
-                                text_content += item["text"]
+                elif isinstance(result, dict):
+                    if "text" in result:
+                        text_content = result["text"]
+                        logger.debug("Found text in result", extra={"text_length": len(text_content)})
+                    elif "content" in result:
+                        content = result["content"]
+                        if isinstance(content, str):
+                            text_content = content
+                        elif isinstance(content, list):
+                            # Concatenate multiple content parts
+                            for item in content:
+                                if isinstance(item, dict) and "text" in item:
+                                    text_content += item["text"]
+                        logger.debug("Processed content", extra={"text_length": len(text_content)})
+                    else:
+                        logger.debug("No text or content found in result", extra={"result": result})
+                else:
+                    logger.debug("Result is not string or dict", extra={"result": result})
+
             elif "text" in zedacp_response:
                 text_content = zedacp_response["text"]
+            elif "stopReason" in zedacp_response:
+                # Handle case where we only have stopReason
+                text_content = f"Task completed (reason: {zedacp_response['stopReason']})"
+                logger.debug("Using stopReason fallback", extra={"text_content": text_content})
             elif isinstance(zedacp_response, str):
                 text_content = zedacp_response
 
+        # Final fallback if no text content found but we have a response
+        if not text_content and zedacp_response:
+            text_content = "Task completed successfully"
+            logger.debug("Using final fallback", extra={"text_content": text_content})
+
         # Create A2A message parts
-        parts: List[Any] = [TextPart(kind="text", text=text_content)] if text_content else []
+        parts: List[Any] = [TextPart(text=text_content)] if text_content else []
 
         message = Message(
             role="agent",
@@ -127,7 +159,7 @@ class A2ATranslator:
         )
 
         logger.debug("Converted ZedACP response to A2A message",
-                    extra={"text_length": len(text_content)})
+                     extra={"text_length": len(text_content), "zedacp_response": zedacp_response})
         return message
 
     def create_a2a_task_from_zedacp_session(self, session_id: str,
@@ -150,7 +182,7 @@ class A2ATranslator:
             contextId=context_id,
             status=TaskStatus(
                 state=TaskState.SUBMITTED,
-                timestamp=generate_id("ts_")
+                timestamp=current_timestamp()
             ),
             metadata={
                 "zedacp_session_id": session_id,
@@ -209,7 +241,7 @@ class A2ATranslator:
             contextId=context_id,
             status=TaskStatus(
                 state=status_state,
-                timestamp=generate_id("ts_")
+                timestamp=current_timestamp()
             ),
             metadata={"zedacp_result": zedacp_result}
         )
