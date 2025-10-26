@@ -183,6 +183,43 @@ Cancel a running task.
 }
 ```
 
+### `tasks/provideInputAndContinue`
+
+Resume an `input-required` task by supplying additional content or by selecting a permission decision.
+
+**Request (textual input):**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tasks/provideInputAndContinue",
+  "id": "continue_001",
+  "params": {
+    "taskId": "task_123",
+    "input": {
+      "role": "user",
+      "parts": [{"kind": "text", "text": "Here are the missing details..."}],
+      "messageId": "input_msg_001"
+    }
+  }
+}
+```
+
+**Request (permission decision):**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tasks/provideInputAndContinue",
+  "id": "continue_perm_001",
+  "params": {
+    "taskId": "task_123",
+    "permissionOptionId": "approved"
+  }
+}
+```
+
+- When `permissionOptionId` is supplied the `input` field must be omitted; the option must match one of the `permission_options` advertised in the input-required notification.
+- If no permission prompt is pending and `permissionOptionId` is provided, the request fails with a validation error.
+
 ## HTTP Endpoints
 
 ### `GET /.well-known/agent-card.json`
@@ -225,6 +262,52 @@ curl -X GET http://localhost:8001/.well-known/agent-card.json
 ```
 
 **Authentication**: Not required (public discovery endpoint)
+
+### `GET /a2a/tasks/{task_id}/governor/history`
+
+Fetch the full governance audit trail for a task, including auto-approval decisions, outstanding permission prompts, and governor feedback.
+
+**Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+     http://localhost:8001/a2a/tasks/task_123/governor/history
+```
+
+**Response:**
+```json
+{
+  "permissionDecisions": [
+    {
+      "toolCallId": "tool-1",
+      "source": "policy:docs",
+      "optionId": "approved",
+      "governorsInvolved": [],
+      "timestamp": "2024-01-15T10:31:00Z",
+      "metadata": {
+        "summary": ["Auto-approved docs/** change"]
+      }
+    }
+  ],
+  "pendingPermissions": [],
+  "governorFeedback": [
+    {
+      "phase": "post_run",
+      "timestamp": "2024-01-15T10:32:00Z",
+      "summary": ["[code-reviewer] Needs attention: add tests"],
+      "results": [
+        {
+          "governorId": "code-reviewer",
+          "status": "needs_attention",
+          "messages": ["Add coverage for error handling"],
+          "followUpPrompt": "Please include unit tests for the new endpoint."
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Authentication**: Required; same headers as the main A2A RPC endpoint.
 
 ## Agent Methods
 

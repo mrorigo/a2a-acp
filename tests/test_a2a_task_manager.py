@@ -13,6 +13,13 @@ from datetime import datetime
 from src.a2a.models import Task, TaskStatus, TaskState, Message, TextPart, generate_id
 from src.a2a_acp.task_manager import A2ATaskManager, TaskExecutionContext
 from src.a2a_acp.models import EventType
+from src.a2a_acp.governor_manager import (
+    PermissionEvaluationResult,
+    GovernorResult,
+    AutoApprovalDecision,
+    PostRunEvaluationResult,
+)
+from src.a2a_acp.zed_agent import ToolPermissionRequest
 
 
 class TestA2ATaskManager:
@@ -913,6 +920,129 @@ class TestA2ATaskManager:
                 artifacts=None
             )
 
+    @pytest.mark.asyncio
+    async def test_handle_tool_permission_creates_pending(self, task_manager):
+        task = await task_manager.create_task("ctx_perm", "agent")
+        context = task_manager._active_tasks[task.id]
+
+        permission_result = PermissionEvaluationResult(
+            policy_decision=None,
+            governor_results=[],
+            selected_option_id=None,
+            decision_source=None,
+            requires_manual=True,
+            summary_lines=["Manual review required"],
+        )
+
+        request = ToolPermissionRequest(
+            session_id="sess-1",
+            tool_call={"id": "tool-1", "toolId": "write"},
+            options=[
+                {"optionId": "allow", "kind": "allow_once"},
+                {"optionId": "deny", "kind": "reject_once"},
+            ],
+        )
+
+        with patch.object(task_manager.governor_manager, "evaluate_permission", new=AsyncMock(return_value=permission_result)):
+            with patch.object(task_manager, "_send_task_notification", new=AsyncMock()) as notification_mock:
+                decision = await task_manager._handle_tool_permission(task.id, context, request)
+
+        await asyncio.sleep(0)
+
+        assert decision.future is not None
+        assert not decision.future.done()
+        assert task.status.state == TaskState.INPUT_REQUIRED
+        assert "tool-1" in context.pending_permissions
+        notification_mock.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_provide_input_and_continue_permission_option(self, task_manager):
+        task = await task_manager.create_task("ctx_perm2", "agent")
+        context = task_manager._active_tasks[task.id]
+
+        permission_result = PermissionEvaluationResult(
+            policy_decision=None,
+            governor_results=[],
+            selected_option_id=None,
+            decision_source=None,
+            requires_manual=True,
+            summary_lines=["Governor review"],
+        )
+
+        request = ToolPermissionRequest(
+            session_id="sess-2",
+            tool_call={"id": "tool-2", "toolId": "write"},
+            options=[
+                {"optionId": "allow", "kind": "allow_once"},
+                {"optionId": "deny", "kind": "reject_once"},
+            ],
+        )
+
+        with patch.object(task_manager.governor_manager, "evaluate_permission", new=AsyncMock(return_value=permission_result)):
+            with patch.object(task_manager, "_send_task_notification", new=AsyncMock()):
+                await task_manager._handle_tool_permission(task.id, context, request)
+
+        pending = context.pending_permissions["tool-2"]
+        assert not pending.decision_future.done()
+
+        with patch.object(task_manager, "_send_task_notification", new=AsyncMock()) as notification_mock:
+            result_task = await task_manager.provide_input_and_continue(
+                task.id,
+                user_input=None,
+                agent_command=["echo"],
+                permission_option_id="allow",
+            )
+
+        await asyncio.sleep(0)
+
+        assert pending.decision_future.done()
+        assert context.pending_permissions == {}
+        assert result_task.status.state == TaskState.WORKING
+        notification_mock.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_run_post_run_governors_followup(self, task_manager):
+        task = await task_manager.create_task("ctx_post", "agent")
+        context = task_manager._active_tasks[task.id]
+        translator = MagicMock()
+        translator.a2a_to_zedacp_message.return_value = [{"type": "text", "text": "follow"}]
+        connection = AsyncMock()
+        connection.prompt = AsyncMock(return_value={"result": {"text": "ok"}})
+
+        evaluations = [
+            PostRunEvaluationResult(
+                governor_results=[GovernorResult(governor_id="review", status="needs_attention", follow_up_prompt="Add tests")],
+                blocked=False,
+                follow_up_prompts=[("review", "Add tests")],
+                summary_lines=["Needs follow-up"],
+            ),
+            PostRunEvaluationResult(
+                governor_results=[GovernorResult(governor_id="review", status="approve")],
+                blocked=False,
+                follow_up_prompts=[],
+                summary_lines=["Looks good"],
+            ),
+        ]
+
+        async def fake_eval_post_run(**kwargs):
+            return evaluations.pop(0)
+
+        task_manager.governor_manager.evaluate_post_run = AsyncMock(side_effect=fake_eval_post_run)
+
+        result, blocked = await task_manager._run_post_run_governors(
+            task.id,
+            context,
+            connection,
+            "session-xyz",
+            {"result": {"text": "draft"}},
+            translator,
+        )
+
+        assert blocked is False
+        assert connection.prompt.await_count == 1
+        assert context.task.history is not None
+        assert any(msg.metadata and msg.metadata.get("governorId") == "review" for msg in context.task.history)
+
 
 class TestA2ATaskManagerIntegration:
     """Integration tests for A2ATaskManager with real components."""
@@ -974,6 +1104,7 @@ class TestA2ATaskManagerIntegration:
             mock_connection_instance.start_session.assert_called_once()
             call_kwargs = mock_connection_instance.start_session.call_args[1]
             assert call_kwargs["mcp_servers"] == mcp_servers
+
 
 
 if __name__ == "__main__":

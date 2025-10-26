@@ -1,8 +1,13 @@
 # A2A-ACP: Native A2A Protocol Server
 
-**A2A-ACP** is a **native A2A protocol server** that exposes Zed ACP agents via the modern **Agent-to-Agent (A2A) protocol** with JSON-RPC 2.0 over HTTP. It now supports **Codex tool calls for filesystem reads/writes and shell execution**, so Codex CLI users can run `fs/read_text_file`, `fs/write_text_file`, and `shell` via the bridge with native tooling.
+**A2A-ACP** is a **native A2A protocol server** that exposes Zed ACP agents over the modern **Agent-to-Agent (A2A) protocol** with JSON-RPC 2.0 over HTTP. It elevates ACP agents to first-class citizens in enterprise coding workflows—where governance, explainability, and auditability are mandatory—while retaining streaming, tool execution, and session state fidelity.
 
-A complete implementation of the A2A v0.3.0 specification that bridges Zed ACP agents to modern A2A clients.
+At its core is an enterprise-grade **governance and auto-approval platform**:
+- **Policy engine** for declarative allow/deny decisions (path globs, tool IDs, command prefixes, time windows, and more).
+- **Programmable governors** (script, Python, or HTTP) that inspect permission prompts and post-run outputs, inject follow-up prompts, or block unsafe replies with rationale.
+- **Comprehensive auditing** via structured decision logs, `task_governor_followup` / `task_feedback_required` events, and the `GET /a2a/tasks/{id}/governor/history` endpoint for downstream compliance systems.
+
+Together with native **Codex tool call** support (`fs/read_text_file`, `fs/write_text_file`, `shell`), A2A-ACP delivers a verifiable, explainable execution fabric for software delivery teams that need to orchestrate ACP agents under strict controls. It fully implements the A2A v0.3.0 specification while embracing the compliance needs of modern platform organizations.
 
 ## 🚀 Quick Start
 
@@ -45,6 +50,8 @@ curl -X POST http://localhost:8001/ \
 
 **🎉 That's it!** You're now running A2A-ACP with a Zed ACP agent.
 
+> 💡 **Enable governance:** drop YAML files at `config/governors.yaml` and `config/auto_approval_policies.yaml` (or set `A2A_GOVERNORS_FILE` / `A2A_AUTO_APPROVAL_FILE`) to activate auto-approval policies and programmable governors for tool permissions and post-run reviews.
+
 ## 📚 Documentation
 
 For comprehensive documentation, see our [user-docs/](user-docs/) folder:
@@ -63,6 +70,7 @@ For comprehensive documentation, see our [user-docs/](user-docs/) folder:
 ### 🛠️ **Advanced Features**
 - **[Tool Execution System](user-docs/tool-execution.md)** - Bash-based tool execution capabilities
 - **[Interactive Conversations](user-docs/interactive-conversations.md)** - Input-required workflows
+- **[Governance & Permissions](user-docs/events.md#governor-follow-up-events)** - Auto-approvals, governors, and review events
 - **[Push Notifications](user-docs/push-notifications.md)** - HTTP webhooks and real-time events
 - **[Streaming Support](user-docs/streaming.md)** - Server-Sent Events and real-time updates
 
@@ -87,8 +95,9 @@ For comprehensive documentation, see our [user-docs/](user-docs/) folder:
 
 ## ✨ Key Features
 
+- **🛡️ Enterprise Governance**: Auto-approval policies, programmable governors, and end-to-end auditing for explainable workflows
 - **🔗 A2A Protocol Compliance**: Full A2A v0.3.0 specification implementation
-- **🤖 Zed ACP Integration**: Seamless bridge to existing Zed ACP agents (`codex-acp`, `claude-code-acp`, etc.)
+- **🤖 Zed ACP Integration**: Seamless bridge to ACP agents (`codex-acp`, `claude-code-acp`, `gemini-cli`, ...)
 - **📋 Task Management**: Native A2A task and context lifecycle management
 - **💬 Interactive Conversations**: Input-required workflows for multi-turn agent interactions
 - **📡 Push Notifications**: HTTP webhooks with filtering, analytics, and retry logic
@@ -97,7 +106,7 @@ For comprehensive documentation, see our [user-docs/](user-docs/) folder:
 - **⚡ Streaming Support**: Real-time message streaming with Server-Sent Events
 - **🛠️ Tool Execution**: Bash-based tool execution with unlimited flexibility
 - **🧰 Codex Tool Calls**: Native handling of Codex `fs/read_text_file`, `fs/write_text_file`, and `shell` requests (other Codex tools coming soon)
-- **🔒 Enterprise Security**: Comprehensive security with authentication and audit logging
+- **🔒 Enterprise Security**: Authentication, quota controls, and immutable audit logs
 - **📊 Production Ready**: Robust error handling, monitoring, and comprehensive testing
 
 ## 🎯 What Makes A2A-ACP Special?
@@ -113,7 +122,7 @@ A2A-ACP eliminates complexity by providing a **native A2A server** that:
 ### **Production-Ready Architecture**
 - **✅ 240+ comprehensive tests** covering all functionality
 - **✅ Full A2A v0.3.0 compliance** with input-required workflows
-- **✅ Enterprise-grade security** with audit logging and resource quotas
+- **✅ Enterprise-grade security** with audit logging, resource quotas, and governed approvals
 - **✅ Bash-based tool execution** with unlimited flexibility
 - **✅ Real-time push notifications** with delivery analytics
 - **✅ Stateful conversations** with context persistence across tasks
@@ -149,6 +158,7 @@ Works with any Zed ACP-compliant agent:
 - **Tool System**: Bash-based tool execution with unlimited flexibility
 - **Interactive Workflows**: Multi-turn conversations with pause/resume capability
 - **Real-time Events**: Push notifications with delivery analytics
+- **Governed Execution**: Auto-approval policies, governor follow-ups, and full audit trails
 - **Enterprise Security**: Comprehensive audit logging and resource controls
 - **Developer Experience**: Simple setup with extensive documentation
 
@@ -843,6 +853,16 @@ curl -X POST http://localhost:8001/ \
 #   "old_state": "submitted",
 #   "new_state": "working"
 # }
+```
+
+## 🧪 Governance Regression Tests
+
+After configuring auto-approval policies or governors, run the focused checks alongside the main suite:
+
+```bash
+PYTHONPATH=src uv run python -m pytest \
+  tests/test_governor_manager.py \
+  tests/test_a2a_task_manager.py::TestA2ATaskManager::test_handle_tool_permission_creates_pending
 ```
 
 #### Advanced Filtering with Quiet Hours

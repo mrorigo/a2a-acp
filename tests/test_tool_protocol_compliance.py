@@ -313,7 +313,7 @@ class TestToolProtocolCompliance:
     def test_cache_invalidation_on_tool_update(self, sample_tool):
         """Test that cache is invalidated when tool version changes."""
         # This test verifies that cache keys include tool version
-        from a2a_acp.bash_executor import BashToolExecutor
+        # from a2a_acp.bash_executor import BashToolExecutor
 
         # Mock the entire executor to avoid initialization issues
         with patch('a2a_acp.bash_executor.BashToolExecutor') as mock_executor_class:
@@ -349,7 +349,7 @@ class TestToolProtocolCompliance:
 
         # Test filesystem controls
         assert restrictive_config.working_directory == "/tmp"
-        assert restrictive_config.caching_enabled == True
+        assert restrictive_config.caching_enabled
 
     def test_resource_quota_compliance(self, sample_tool, execution_context):
         """Test that resource quotas are properly enforced."""

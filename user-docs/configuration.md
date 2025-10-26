@@ -143,6 +143,60 @@ export MAX_REQUEST_SIZE_MB=10
 export CORS_ORIGINS="https://your-domain.com,https://app.your-domain.com"
 ```
 
+### Governance Settings
+
+Configure policy-driven auto-approvals and governor pipelines through YAML files. Both files are optional; if omitted no automatic decisions or external governors are executed.
+
+```bash
+# Override default locations
+export A2A_GOVERNORS_FILE="config/governors.yaml"
+export A2A_AUTO_APPROVAL_FILE="config/auto_approval_policies.yaml"
+```
+
+#### `governors.yaml`
+
+```yaml
+permission_governors:
+  - id: security-diff-check
+    type: script
+    command: ["python3", "governors/security.py"]
+    timeout_ms: 5000
+
+output_governors:
+  - id: code-reviewer
+    type: http
+    url: https://governor.example.com/review
+    headers:
+      Authorization: Bearer ${GOVERNOR_TOKEN}
+
+permission_settings:
+  stop_on_first_reject: true
+  auto_decision: all_approve
+
+output_settings:
+  max_iterations: 3
+```
+
+#### `auto_approval_policies.yaml`
+
+```yaml
+auto_approval_policies:
+  - id: docs-edits
+    applies_to: ["functions.acp_fs__write_text_file"]
+    include_paths: ["docs/**", "*.md"]
+    decision:
+      type: approve
+      optionId: approved
+
+  - id: safe-shell
+    applies_to: ["functions.shell"]
+    parameters:
+      command_prefix: ["git", "status"]
+    decision:
+      type: approve
+      optionId: approved
+```
+
 ## Runtime Configuration
 
 ### Health Check Endpoint

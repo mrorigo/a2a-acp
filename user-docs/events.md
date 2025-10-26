@@ -60,6 +60,13 @@ A2A-ACP emits structured events throughout the system lifecycle, enabling **real
 - `task_manager.py`: Protocol-compliant input detection
 - `bash_executor.py`: Tool confirmation requests
 
+When the input request originates from a tool permission prompt, the notification `data` includes:
+
+- `permission_options`: list of available actions the client may choose
+- `tool_call`: structured description of the requested tool call, including diff previews and parameters
+- `governor_summary`: bullet-point feedback from all governors that reviewed the request
+- `policy_decision`: information about any auto-approval rule that applied
+
 **Event structure**:
 ```json
 {
@@ -69,7 +76,52 @@ A2A-ACP emits structured events throughout the system lifecycle, enabling **real
   "data": {
     "prompt": "Please provide database credentials...",
     "input_types": ["text/plain"],
-    "detection_method": "protocol_compliant"
+    "detection_method": "protocol_compliant",
+    "permission_options": [
+      {"optionId": "approved", "name": "Approve"},
+      {"optionId": "abort", "name": "Reject"}
+    ],
+    "governor_summary": ["[security-diff-check] Needs attention: file touches secrets.env"],
+    "tool_call": {"toolId": "functions.acp_fs__write_text_file", "path": "config/secrets.env"}
+  }
+}
+```
+
+#### Governor Follow-up Events
+**Emitted when**: A post-run governor injects an automatic follow-up prompt back into the Codex session.
+
+**Trigger locations**:
+- `task_manager.py`: `_run_post_run_governors` when evaluating governor responses
+
+**Event structure**:
+```json
+{
+  "event": "task_governor_followup",
+  "task_id": "task_123",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "data": {
+    "governor_id": "code-reviewer",
+    "prompt": "Please include unit tests for the new API endpoint.",
+    "iteration": 0
+  }
+}
+```
+
+#### Governor Feedback Required Events
+**Emitted when**: Post-run governors block the final response and require a human override.
+
+**Trigger locations**:
+- `task_manager.py`: `_run_post_run_governors` when a governor returns `status="reject"`
+
+**Event structure**:
+```json
+{
+  "event": "task_feedback_required",
+  "task_id": "task_123",
+  "timestamp": "2024-01-15T10:32:00Z",
+  "data": {
+    "message": "Governor blocked final response",
+    "summary": ["[compliance-http] Reject: response references internal API keys"]
   }
 }
 ```

@@ -29,6 +29,8 @@ class EventType(Enum):
     TASK_INPUT_REQUIRED = "task_input_required"
     TASK_COMPLETED = "task_completed"
     TASK_FAILED = "task_failed"
+    TASK_GOVERNOR_FOLLOWUP = "task_governor_followup"
+    TASK_FEEDBACK_REQUIRED = "task_feedback_required"
 
 
 @dataclass

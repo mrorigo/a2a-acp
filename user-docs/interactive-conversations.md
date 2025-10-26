@@ -88,7 +88,7 @@ def _is_input_required_from_response(self, response: dict) -> tuple[bool, str]:
 
     if stop_reason == "end_turn" and not tool_calls:
         return True, "Agent completed turn without actions"
-    return False, f"Turn ended with reason: {stop_reason}"
+        return False, f"Turn ended with reason: {stop_reason}"
 ```
 
 ### Event Emission for Input Required
@@ -109,6 +109,28 @@ def _is_input_required_from_response(self, response: dict) -> tuple[bool, str]:
   }
 }
 ```
+
+### Tool Permission Decisions
+
+When the agent pauses because a tool requires confirmation, A2A-ACP supplies the available options in the input-required metadata. Instead of free-form text, clients respond with a permission decision:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tasks/provideInputAndContinue",
+  "id": "input_permission_001",
+  "params": {
+    "taskId": "task_123",
+    "permissionOptionId": "approved"
+  }
+}
+```
+
+- `permissionOptionId` **must** match one of the options published in the input-required payload (`approved`, `abort`, etc.).
+- If multiple permission prompts are pending, the earliest unresolved request is assumed.
+- When a permission option is supplied, any textual `input` is ignored and rejected to prevent ambiguous intent.
+
+Auto-approval policies may resolve simple cases automatically; in those scenarios the task immediately resumes without entering `input-required`.
 
 ### State Management
 
@@ -158,6 +180,8 @@ Require confirmation for dangerous operations:
 # Agent proceeds with operation
 "Deleting production data..."
 ```
+
+When a governor blocks the response (for example, a safety reviewer rejects the output), the task re-enters `input-required` with a `task_feedback_required` event. The user can either provide additional context, ask the agent to revise, or cancel the task entirely.
 
 ### 3. Multi-Step Workflows
 

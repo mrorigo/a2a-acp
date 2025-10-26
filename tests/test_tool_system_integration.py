@@ -6,12 +6,8 @@ Tests the entire tool execution pipeline from ZedACP tool calls through
 A2A event emission and protocol compliance verification.
 """
 
-import asyncio
-import json
 import subprocess
-import time
 import pytest
-from typing import Dict, Any, List, Optional
 from pathlib import Path
 
 

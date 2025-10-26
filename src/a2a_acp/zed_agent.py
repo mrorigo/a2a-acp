@@ -4,7 +4,8 @@ import asyncio
 import json
 import logging
 from asyncio import StreamReader, StreamWriter
-from typing import Any, Awaitable, Callable, Coroutine, Optional, Sequence
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Coroutine, Dict, Optional, Sequence
 from uuid import uuid4
 
 from .bash_executor import get_bash_executor, ToolExecutionResult
@@ -25,10 +26,37 @@ class PromptCancelled(AgentProcessError):
 NotificationHandler = Callable[[dict], Awaitable[None]]
 
 
+@dataclass
+class ToolPermissionRequest:
+    """Information about a tool permission prompt."""
+
+    session_id: str
+    tool_call: Dict[str, Any]
+    options: Sequence[Dict[str, Any]]
+
+
+@dataclass
+class ToolPermissionDecision:
+    """Decision returned by a permission handler."""
+
+    option_id: Optional[str] = None
+    future: Optional[asyncio.Future[str]] = None
+
+
+PermissionHandler = Callable[[ToolPermissionRequest], Awaitable[ToolPermissionDecision]]
+
+
 class ZedAgentConnection:
     """Manage a single agent subprocess lifecycle."""
 
-    def __init__(self, command: Sequence[str], *, api_key: str | None = None, log: logging.Logger | None = None) -> None:
+    def __init__(
+        self,
+        command: Sequence[str],
+        *,
+        api_key: str | None = None,
+        log: logging.Logger | None = None,
+        permission_handler: PermissionHandler | None = None,
+    ) -> None:
         if not command:
             raise ValueError("Agent command cannot be empty")
         self._command = list(command)
@@ -43,6 +71,7 @@ class ZedAgentConnection:
         self._read_lock: Optional[asyncio.Lock] = None
         self._write_lock: Optional[asyncio.Lock] = None
         self._stderr_task: Optional[asyncio.Task[None]] = None
+        self._permission_handler = permission_handler
 
     def _ensure_locks(self) -> None:
         """Lazily create locks to avoid event loop issues in tests."""
@@ -872,30 +901,64 @@ class ZedAgentConnection:
         })
 
         try:
-            # Get tool to access confirmation message
-            tool = await get_tool(tool_id)
-            confirmation_message = tool.config.confirmation_message if tool else "Execute this tool?"
+            options: list[dict[str, Any]] = [
+                {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                {"optionId": "deny", "name": "Deny", "kind": "reject_once"}
+            ]
 
-            # Send permission request to ZedACP agent
-            response = await self.request("session/request_permission", {
-                "sessionId": session_id,
-                "toolCall": tool_call,
-                "options": [
-                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"}
-                ]
-            })
+            option_id: Optional[str] = None
 
-            # Check response
-            outcome = response.get("outcome", {})
-            permitted = outcome.get("optionId") == "allow"
+            if self._permission_handler:
+                try:
+                    decision = await self._permission_handler(
+                        ToolPermissionRequest(
+                            session_id=session_id,
+                            tool_call=tool_call,
+                            options=options,
+                        )
+                    )
+                except Exception as exc:
+                    self._logger.error(
+                        "Permission handler failed",
+                        extra={
+                            "tool_call_id": tool_call_id,
+                            "tool_id": tool_id,
+                            "error": str(exc),
+                        },
+                    )
+                    decision = ToolPermissionDecision(option_id=None)
 
-            logger.info(f"Tool permission {'granted' if permitted else 'denied'}: {tool_id}", extra={
-                "tool_id": tool_id,
-                "tool_call_id": tool_call_id,
-                "permitted": permitted,
-                "session_id": session_id
-            })
+                if decision.future:
+                    option_id = await decision.future
+                else:
+                    option_id = decision.option_id
+
+            if option_id is None:
+                # Fall back to agent-provided decision
+                response = await self.request("session/request_permission", {
+                    "sessionId": session_id,
+                    "toolCall": tool_call,
+                    "options": options
+                })
+                outcome = response.get("outcome", {})
+                option_id = outcome.get("optionId")
+
+            selected_option = next((opt for opt in options if opt.get("optionId") == option_id), None)
+            permitted = False
+            if selected_option:
+                kind = selected_option.get("kind", "")
+                permitted = kind.startswith("allow")
+
+            logger.info(
+                "Tool permission decision",
+                extra={
+                    "tool_id": tool_id,
+                    "tool_call_id": tool_call_id,
+                    "selected_option": option_id,
+                    "permitted": permitted,
+                    "session_id": session_id,
+                },
+            )
 
             return permitted
 

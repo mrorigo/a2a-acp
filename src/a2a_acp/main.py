@@ -1580,6 +1580,22 @@ def create_app() -> FastAPI:
             }
         )
 
+    @app.get("/a2a/tasks/{task_id}/governor/history")
+    async def a2a_task_governor_history(
+        task_id: str,
+        task_manager: A2ATaskManager = Depends(get_task_manager),
+        authorization: Optional[str] = Header(default=None),
+    ):
+        """Return governor and permission history for a task."""
+        require_authorization(authorization)
+
+        try:
+            data = await task_manager.get_task_audit_data(task_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+
+        return data
+
     # Real-time streaming endpoints
     @app.websocket("/streaming/websocket")
     async def websocket_notifications(
