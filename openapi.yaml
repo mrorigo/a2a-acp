@@ -1,0 +1,643 @@
+openapi: 3.0.1
+info:
+  title: A2A-ACP Public API
+  version: 0.1.0
+  description: |
+    HTTP interface for the A2A-ACP gateway. The API exposes health checks,
+    governance audit history, streaming utilities, and an A2A JSON-RPC bridge
+    to governed Zed ACP agents.
+servers:
+  - url: https://api.example.com
+    description: Production server (example)
+  - url: http://localhost:8001
+    description: Local development server
+paths:
+  /ping:
+    get:
+      summary: Lightweight health probe
+      tags: [Observability]
+      responses:
+        '200':
+          description: Service is reachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PingResponse'
+  /health:
+    get:
+      summary: Comprehensive health information
+      tags: [Observability]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Health snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+  /metrics/push-notifications:
+    get:
+      summary: Push notification delivery metrics
+      tags: [Observability]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Aggregated webhook metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushNotificationMetrics'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+  /metrics/system:
+    get:
+      summary: System metrics and background task status
+      tags: [Observability]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: System metrics payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemMetrics'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+  /.well-known/agent-card.json:
+    get:
+      summary: Public A2A Agent Card
+      tags: [Discovery]
+      responses:
+        '200':
+          description: A2A Agent Card descriptor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentCard'
+        '500':
+          description: Failed to generate agent card
+  /a2a/rpc:
+    post:
+      summary: A2A JSON-RPC gateway
+      description: >-
+        Accepts JSON-RPC 2.0 requests for A2A operations (message/send,
+        tasks/get, push notification configuration, etc.).
+      tags: [A2A]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JsonRpcRequest'
+      responses:
+        '200':
+          description: JSON-RPC response payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonRpcResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+  /a2a/message/send:
+    post:
+      summary: Execute a single A2A task (non-streaming)
+      tags: [A2A]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageSendRequest'
+      responses:
+        '200':
+          description: Task result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task:
+                    $ref: '#/components/schemas/Task'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '502':
+          description: Downstream agent error
+  /a2a/message/stream:
+    post:
+      summary: Execute an A2A task with server-sent events
+      tags: [A2A]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageSendRequest'
+      responses:
+        '200':
+          description: Event stream containing task updates
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Server-sent events stream
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+  /a2a/tasks/{task_id}/governor/history:
+    get:
+      summary: Governance decision history for a task
+      tags: [Governance]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Aggregated permission and governor history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GovernorHistoryResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          description: Task not found
+  /streaming/sse:
+    get:
+      summary: Subscribe to task events via SSE
+      tags: [Streaming]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: task_filter
+          in: query
+          required: false
+          schema:
+            type: string
+            description: Comma-separated task identifiers to filter on
+      responses:
+        '200':
+          description: Server-sent events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+  /streaming/stats:
+    get:
+      summary: Streaming connection statistics
+      tags: [Streaming]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current connection counts and limits
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+  /streaming/cleanup:
+    post:
+      summary: Remove stale streaming connections
+      tags: [Streaming]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Cleanup summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamingCleanupResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    UnauthorizedError:
+      description: Missing or invalid authorization token
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                type: string
+  schemas:
+    PingResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+      required: [status]
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        services:
+          type: object
+          properties:
+            database:
+              type: string
+            push_notifications:
+              type: string
+            streaming:
+              type: string
+        version:
+          type: string
+      required: [status, timestamp, services]
+    PushNotificationMetrics:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        delivery_stats:
+          type: object
+          properties:
+            total_deliveries:
+              type: integer
+            successful_deliveries:
+              type: integer
+            failed_deliveries:
+              type: integer
+            success_rate:
+              type: number
+              format: float
+        configuration_stats:
+          type: object
+          properties:
+            total_configs:
+              type: integer
+            active_configs:
+              type: integer
+            expired_configs:
+              type: integer
+        performance_stats:
+          type: object
+          properties:
+            average_response_time:
+              type: number
+              description: Average webhook response time in milliseconds.
+            requests_per_minute:
+              type: number
+            error_rate:
+              type: number
+        error:
+          type: string
+      required: [timestamp, delivery_stats, configuration_stats, performance_stats]
+    SystemMetrics:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        streaming_connections:
+          type: object
+          properties:
+            websocket:
+              $ref: '#/components/schemas/ConnectionMetrics'
+            sse:
+              $ref: '#/components/schemas/ConnectionMetrics'
+        push_notifications:
+          type: object
+          properties:
+            queue_depth:
+              type: integer
+            retry_pending:
+              type: integer
+            last_delivery:
+              type: string
+              format: date-time
+        background_tasks:
+          type: object
+          properties:
+            cleanup_running:
+              type: boolean
+        error:
+          type: string
+      required: [timestamp]
+    ConnectionMetrics:
+      type: object
+      properties:
+        active:
+          type: integer
+        limit:
+          type: integer
+        stale:
+          type: integer
+      required: [active]
+    AgentCard:
+      type: object
+      properties:
+        protocolVersion:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        url:
+          type: string
+          format: uri
+        preferredTransport:
+          type: string
+        capabilities:
+          type: object
+          description: Declares runtime capabilities exposed by the agent.
+          properties:
+            streaming:
+              type: boolean
+            pushNotifications:
+              type: boolean
+            stateTransitionHistory:
+              type: boolean
+          additionalProperties:
+            type: boolean
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentSkill'
+      required: [protocolVersion, name, description, url, capabilities, skills]
+    AgentSkill:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        examples:
+          type: array
+          items:
+            type: string
+      required: [id, name, description, tags]
+    JsonRpcRequest:
+      type: object
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+          nullable: true
+        method:
+          type: string
+        params:
+          type: object
+          description: Method-specific parameters; structure depends on the target JSON-RPC method.
+          additionalProperties: true
+      required: [jsonrpc, method]
+    JsonRpcResponse:
+      type: object
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+          nullable: true
+        result:
+          type: object
+          description: Method-specific result payload returned by the downstream agent.
+          additionalProperties: true
+        error:
+          type: object
+          properties:
+            code:
+              type: integer
+            message:
+              type: string
+            data:
+              type: object
+              description: Optional structured error context supplied by the agent.
+              additionalProperties: true
+      required: [jsonrpc]
+    MessageSendRequest:
+      type: object
+      properties:
+        message:
+          $ref: '#/components/schemas/AgentMessage'
+        metadata:
+          type: object
+          additionalProperties: true
+      required: [message]
+    AgentMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [user, agent]
+        parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessagePart'
+        messageId:
+          type: string
+        contextId:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+      required: [role, parts, messageId]
+    MessagePart:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [text, file, data]
+        text:
+          type: string
+        file:
+          type: object
+          additionalProperties: true
+        data:
+          type: object
+          additionalProperties: true
+      required: [kind]
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        contextId:
+          type: string
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentMessage'
+        artifacts:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+      required: [id, contextId, status]
+    TaskStatus:
+      type: object
+      properties:
+        state:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          $ref: '#/components/schemas/AgentMessage'
+      required: [state]
+    GovernorHistoryResponse:
+      type: object
+      properties:
+        permissionDecisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionDecisionEntry'
+        pendingPermissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PendingPermissionEntry'
+        governorFeedback:
+          type: array
+          items:
+            $ref: '#/components/schemas/GovernorFeedbackEntry'
+      required: [permissionDecisions, pendingPermissions, governorFeedback]
+    PermissionDecisionEntry:
+      type: object
+      properties:
+        toolCallId:
+          type: string
+        source:
+          type: string
+          description: Origin of the decision (policy:<id>, governor:<id>, user).
+        optionId:
+          type: string
+        governorsInvolved:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          description: Additional decision context (diff summaries, policy rationale).
+          additionalProperties: true
+      required: [toolCallId, source, optionId, timestamp]
+    PendingPermissionEntry:
+      type: object
+      properties:
+        toolCallId:
+          type: string
+        toolCall:
+          type: object
+          description: Original tool call payload awaiting approval.
+          additionalProperties: true
+        options:
+          type: array
+          items:
+            type: object
+            properties:
+              optionId:
+                type: string
+              name:
+                type: string
+              kind:
+                type: string
+            required: [optionId, kind]
+        summary:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+      required: [toolCallId, toolCall, options, created_at]
+    GovernorFeedbackEntry:
+      type: object
+      properties:
+        phase:
+          type: string
+          description: Permission or post_run phase indicator.
+        timestamp:
+          type: string
+          format: date-time
+        summary:
+          type: array
+          items:
+            type: string
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/GovernorResultEntry'
+      required: [phase, timestamp, results]
+    GovernorResultEntry:
+      type: object
+      properties:
+        governorId:
+          type: string
+        status:
+          type: string
+        optionId:
+          type: string
+        score:
+          type: number
+        messages:
+          type: array
+          items:
+            type: string
+        followUpPrompt:
+          type: string
+        metadata:
+          type: object
+          description: Governor-specific structured data.
+          additionalProperties: true
+      required: [governorId, status]
+    StreamingCleanupResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        cleaned_connections:
+          type: integer
+        message:
+          type: string
+      required: [success, cleaned_connections]
