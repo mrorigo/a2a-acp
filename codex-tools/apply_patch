@@ -39,28 +39,20 @@ def parse_patch_blocks(patch_text):
     )
     return pattern.findall(patch_text)
 
-def backup_file(filepath):
-    """Create a backup of the file before modifying it"""
-    if os.path.exists(filepath):
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        backup_path = f"{filepath}.{timestamp}.bak"
-        shutil.copy2(filepath, backup_path)
-        print(f"[apply_patch] Created backup: {backup_path}")
-    return True
 
 def create_file(filepath, content):
     """Create a new file with the specified content"""
     if os.path.exists(filepath):
         print(f"[error] File already exists: {filepath}", file=sys.stderr)
         return False
-    
+
     # Create parent directories if they don't exist
     os.makedirs(os.path.dirname(filepath) or '.', exist_ok=True)
     
     # Write content to file
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(content)
-    
+
     print(f"[apply_patch] Created file: {filepath}")
     return True
 
@@ -69,14 +61,11 @@ def update_file(filepath, old_text, new_text):
     if not os.path.exists(filepath):
         print(f"[error] File does not exist: {filepath}", file=sys.stderr)
         return False
-    
-    # Create backup
-    backup_file(filepath)
-    
+
     # Read current content
     with open(filepath, "r", encoding="utf-8") as f:
         content = f.read()
-    
+
     # Check if old_text exists
     if old_text not in content:
         print(f"[error] Could not find text to update in {filepath}:", file=sys.stderr)
@@ -98,10 +87,7 @@ def insert_before(filepath, marker_text, insert_text):
     if not os.path.exists(filepath):
         print(f"[error] File does not exist: {filepath}", file=sys.stderr)
         return False
-    
-    # Create backup
-    backup_file(filepath)
-    
+
     # Read current content
     with open(filepath, "r", encoding="utf-8") as f:
         content = f.read()
@@ -128,9 +114,6 @@ def insert_after(filepath, marker_text, insert_text):
         print(f"[error] File does not exist: {filepath}", file=sys.stderr)
         return False
     
-    # Create backup
-    backup_file(filepath)
-    
     # Read current content
     with open(filepath, "r", encoding="utf-8") as f:
         content = f.read()
@@ -156,10 +139,7 @@ def delete_text(filepath, text_to_delete):
     if not os.path.exists(filepath):
         print(f"[error] File does not exist: {filepath}", file=sys.stderr)
         return False
-    
-    # Create backup
-    backup_file(filepath)
-    
+
     # Read current content
     with open(filepath, "r", encoding="utf-8") as f:
         content = f.read()
