@@ -10,7 +10,7 @@ Get started in minutes with our streamlined setup:
 
 ```bash
 # 1. Install and configure
-git clone https://github.com/mrorigo/acp-squared.git
+git clone https://github.com/mrorigo/a2a-acp.git
 cd a2a-acp
 uv sync && uv pip install -e .
 
