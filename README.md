@@ -340,7 +340,7 @@ Robust storage layer for A2A state:
 
 ```bash
 # Clone the repository
-git clone https://github.com/mrorigo/acp-squared.git
+git clone https://github.com/mrorigo/a2a-acp.git
 cd a2a-acp
 
 # Install dependencies
