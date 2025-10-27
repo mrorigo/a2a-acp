@@ -96,30 +96,41 @@ class ToolSandbox:
 
     async def prepare_environment(self, tool: BashTool, context: ExecutionContext) -> Dict[str, str]:
         """Prepare the execution environment for a tool.
-
+    
         Args:
             tool: The tool to prepare environment for
             context: Execution context information
-
+    
         Returns:
             Dictionary of environment variables for the tool
         """
         # Start with current environment
         env = os.environ.copy()
-
+    
         # Apply tool-specific configuration
         config = tool.config
-
-        # Set working directory
+    
+        working_dir = None
         if config.working_directory:
-            working_dir = await self._prepare_working_directory(config.working_directory, context)
+            if config.use_temp_isolation:
+                # Create isolated temp directory
+                working_dir = await self._prepare_working_directory(config.working_directory, context)
+            else:
+                # Use configured working directory directly
+                working_dir_path = Path(config.working_directory).resolve()
+                if not working_dir_path.exists():
+                    raise SandboxError(f"Working directory does not exist: {working_dir_path}")
+                working_dir = str(working_dir_path)
+                # Set allowed paths for validation when not isolated
+                self.allowed_paths = config.allowed_paths
+    
             env["TOOL_WORKING_DIR"] = working_dir
             env["PWD"] = working_dir
-
+    
         # Inject tool-specific environment variables
         if config.environment_variables:
             env.update(config.environment_variables)
-
+    
         # Add execution context metadata
         env.update({
             "TOOL_ID": tool.id,
@@ -130,17 +141,18 @@ class ToolSandbox:
             "EXECUTION_TIMESTAMP": context.timestamp.isoformat() if context.timestamp else datetime.now().isoformat(),
             "TEMP": env.get("TOOL_WORKING_DIR", tempfile.gettempdir()),
             "TMPDIR": env.get("TOOL_WORKING_DIR", tempfile.gettempdir()),
+            "ISOLATION_ENABLED": str(config.use_temp_isolation).lower(),
         })
-
+    
         # Security: Restrict dangerous environment variables
         await self._sanitize_environment(env)
-
+    
         # Apply filesystem access controls
         await self._apply_filesystem_controls(env, config)
-
+    
         # Apply network access controls
         await self._apply_network_controls(env, config)
-
+    
         return env
 
     async def _prepare_working_directory(self, base_dir: str, context: ExecutionContext) -> str:
@@ -501,7 +513,7 @@ class ToolSandbox:
             Execution result with output and metadata
         """
         start_time = datetime.now()
-        working_dir = env.get("TOOL_WORKING_DIR", tempfile.gettempdir())
+        working_dir = env.get("TOOL_WORKING_DIR", os.getcwd())
 
         try:
             # Enhanced script security validation
@@ -552,8 +564,10 @@ class ToolSandbox:
                 if len(stderr.encode('utf-8')) > self.max_output_size:
                     raise SandboxError(f"Error output size exceeds limit of {self.max_output_size} bytes")
 
-                # Collect any output files created
-                output_files = await self._collect_output_files(working_dir)
+                # Collect any output files created (skip for non-isolated executions to avoid scanning project dir)
+                output_files = []
+                if tool_config and tool_config.use_temp_isolation:
+                    output_files = await self._collect_output_files(working_dir)
 
                 logger.info(f"Script executed", extra={
                     "success": process.returncode == 0,
@@ -756,4 +770,5 @@ async def managed_sandbox(
     try:
         yield env, working_dir
     finally:
-        await sandbox.cleanup_sandbox(working_dir, context)
+        if tool.config.use_temp_isolation:
+            await sandbox.cleanup_sandbox(working_dir, context)

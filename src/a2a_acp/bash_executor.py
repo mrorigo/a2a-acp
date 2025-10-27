@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 from string import Template
 
 from .tool_config import BashTool, ToolParameter
-from .sandbox import ToolSandbox, ExecutionContext, ExecutionResult, get_sandbox_manager
+from .sandbox import ToolSandbox, ExecutionContext, ExecutionResult, get_sandbox_manager, managed_sandbox
 from .push_notification_manager import PushNotificationManager
 from .audit import get_audit_logger, AuditEventType
 from a2a.models import InputRequiredNotification, TaskState
@@ -228,20 +228,19 @@ class BashToolExecutor:
                         output_files=[]
                     )
 
-            # Render the bash script with parameters
-            rendered_script = await self.render_script(tool.script, parameters, context)
+            # Use managed sandbox for automatic cleanup
+            async with managed_sandbox(tool, context) as (environment, working_dir):
+                # Render the bash script with parameters
+                rendered_script = await self.render_script(tool.script, parameters, context)
 
-            # Prepare execution environment
-            environment = await self.sandbox.prepare_environment(tool, context)
-
-            # Execute the script
-            execution_result = await self.sandbox.execute_in_sandbox(
-                script=rendered_script,
-                env=environment,
-                context=context,
-                timeout=tool.config.timeout,
-                tool_config=tool.config
-            )
+                # Execute the script
+                execution_result = await self.sandbox.execute_in_sandbox(
+                    script=rendered_script,
+                    env=environment,
+                    context=context,
+                    timeout=tool.config.timeout,
+                    tool_config=tool.config
+                )
 
             # Convert to tool result
             tool_result = ToolExecutionResult.from_execution_result(tool.id, execution_result)

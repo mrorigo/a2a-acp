@@ -92,6 +92,7 @@ tools:
       requires_confirmation: false
       timeout: 120
       working_directory: "."
+      use_temp_isolation: true
     tags: ["shell", "command", "execution"]
     examples:
       - "Run ls in project root"
@@ -231,6 +232,8 @@ tools:
       requires_confirmation: false
       timeout: 10
       working_directory: "."
+      use_temp_isolation: false
+      allowed_paths: ["."]
     tags: ["codex", "filesystem", "read"]
     examples:
       - "Read entire file"
@@ -278,6 +281,8 @@ tools:
       requires_confirmation: false
       timeout: 30
       working_directory: "."
+      use_temp_isolation: false
+      allowed_paths: ["."]
     tags: ["codex", "filesystem", "write"]
     examples:
       - "Write updated README.md contents"
@@ -335,6 +340,8 @@ tools:
       requires_confirmation: false
       timeout: 60
       working_directory: "."
+      use_temp_isolation: false
+      allowed_paths: ["."]
     tags: ["codex", "filesystem", "apply_patch"]
     examples:
       - "Apply multi-file patch blob"

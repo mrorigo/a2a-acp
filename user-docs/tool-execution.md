@@ -19,8 +19,8 @@ The tool execution system transforms A2A-ACP from a **protocol bridge** into a *
 │   ZedACP Agent  │───▶│  Tool Interceptor│───▶│  Bash Executor  │
 │   (Tool Calls)  │    │  (Route & Auth)  │    │  (Safe Execute) │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
-         │                       │                       │
-         ▼                       ▼                       ▼
+          │                       │                       │
+          ▼                       ▼                       ▼
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   A2A Events    │    │   Tool Config    │    │   Audit Logs    │
 │   (Emitted)     │    │   (YAML-based)   │    │   (Security)    │
@@ -65,11 +65,13 @@ tools:
       - name: timeout
         type: number
         required: false
+        description: "Timeout in seconds"
         default: 30
     sandbox:
       requires_confirmation: false
       timeout: 30
       working_directory: "/tmp"
+      use_temp_isolation: true  # Creates isolated temp subdirectory for execution
       environment_variables:
         API_KEY: "sk-1234567890abcdef"
         BASE_URL: "https://api.example.com/v1"
@@ -110,6 +112,40 @@ export TMPDIR=/tmp/safe-workspace
 - **Environment Variable Injection**: Secure credential management
 - **Timeout Enforcement**: Prevent runaway processes (configurable per tool, default 30s)
 - **Input Validation**: Parameter sanitization and type checking
+
+### Optional Temporary Isolation
+
+To prevent accumulation of empty temporary directories (especially for simple filesystem tools like read/write operations), the sandbox supports optional temporary isolation:
+
+- **use_temp_isolation: true** (default for risky tools like `shell`): Creates a unique temporary subdirectory in the configured `working_directory` for each execution. This provides strong isolation but can leave empty directories if cleanup fails. The system automatically cleans up via the `managed_sandbox` context manager.
+- **use_temp_isolation: false** (recommended for low-risk filesystem tools): Executes directly in the configured `working_directory` without creating temp subdirectories. Security is maintained via `allowed_paths` (e.g., `["."]` for project root access) and script validation. This avoids empty directory buildup.
+
+Example for a filesystem tool:
+
+```yaml
+functions.acp_fs__read_text_file:
+  name: "Read Text File"
+  description: "Read text from a file"
+  script: |
+    #!/bin/bash
+    cat "{{path}}"
+  parameters:
+    - name: path
+      type: string
+      required: true
+      description: "File path to read"
+  sandbox:
+    requires_confirmation: false
+    timeout: 10
+    working_directory: "."  # Project root
+    use_temp_isolation: false  # Direct execution, no temp dir created
+    allowed_paths: ["."]  # Restrict to project root
+```
+
+**Benefits**:
+- **No Empty Dirs**: Filesystem tools like `read_text_file` and `write_text_file` execute without temp overhead.
+- **Cleanup Guarantee**: Isolated tools (e.g., `shell`) use context managers for automatic cleanup.
+- **Security Balance**: Non-isolated tools still undergo script validation and path restrictions.
 
 ### Process-Level Security Limits
 
@@ -529,6 +565,7 @@ Zed ACP agents execute tools via standard tool calls:
 2. **Input Validation**: Validate all parameters before use
 3. **Secure Defaults**: Use safe defaults for timeouts and resource limits
 4. **Audit Logging**: Log all executions for security monitoring
+5. **Temp Isolation**: Set `use_temp_isolation: false` for low-risk tools to avoid empty directories; use `true` for isolation in risky operations.
 
 ### Performance
 
@@ -575,6 +612,10 @@ ps aux | grep "tool_process"
 # Validate parameter types match template expectations
 ```
 
----
+**"Empty temporary directories accumulating"**
+- Ensure `use_temp_isolation: false` for filesystem tools in `sandbox` config.
+- Verify cleanup via `managed_sandbox` context manager for isolated tools.
+- Check logs for cleanup errors in `sandbox.py`.
 
+---
 **Tool execution configured!** 🛠️ For more examples, see the `tools.yaml` file in the project root.

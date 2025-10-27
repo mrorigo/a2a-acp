@@ -70,8 +70,10 @@ class ToolConfig:
     confirmation_message: str = ""
     timeout: int = 30
     working_directory: str = "/tmp"
+    use_temp_isolation: bool = False  # New: Whether to create isolated temp directory
     environment_variables: Optional[Dict[str, str]] = None
     allowed_commands: Optional[List[str]] = None  # Command allowlist for security
+    allowed_paths: List[str] = field(default_factory=list)  # Paths allowed when not using temp isolation
     resource_limits: Optional[Dict[str, Any]] = None
     caching_enabled: bool = True
     cache_ttl_seconds: int = 3600  # 1 hour default
@@ -180,6 +182,8 @@ class BashTool:
                 "confirmation_message": self.config.confirmation_message,
                 "timeout": self.config.timeout,
                 "working_directory": self.config.working_directory,
+                "use_temp_isolation": self.config.use_temp_isolation,
+                "allowed_paths": self.config.allowed_paths,
                 "environment_variables": self.config.environment_variables,
                 "allowed_commands": self.config.allowed_commands,
                 "caching_enabled": self.config.caching_enabled,
@@ -386,6 +390,8 @@ class ToolConfigurationManager:
                 confirmation_message=sandbox_config.get("confirmation_message", ""),
                 timeout=sandbox_config.get("timeout", 30),
                 working_directory=sandbox_config.get("working_directory", "/tmp"),
+                use_temp_isolation=sandbox_config.get("use_temp_isolation", False),
+                allowed_paths=sandbox_config.get("allowed_paths", []),
                 environment_variables=sandbox_config.get("environment_variables"),
                 allowed_commands=sandbox_config.get("allowed_commands"),
                 caching_enabled=sandbox_config.get("caching_enabled", True),
