@@ -15,8 +15,8 @@ Configure A2A-ACP using environment variables for simple, secure, and flexible s
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `A2A_AGENT_API_KEY` | API key for agent authentication | `${OPENAI_API_KEY}` |
-| `A2A_AGENT_DESCRIPTION` | Human-readable agent description | `OpenAI Codex for A2A-ACP` |
+| `A2A_AGENT_API_KEY` | API key for agent authentication | `${OPENAI_API_KEY}` or `${GEMINI_API_KEY}` |
+| `A2A_AGENT_DESCRIPTION` | Human-readable agent description | `OpenAI Codex for A2A-ACP` or `Gemini CLI for A2A-ACP` |
 
 ### Optional Settings
 
@@ -25,6 +25,18 @@ Configure A2A-ACP using environment variables for simple, secure, and flexible s
 | `HOST` | Server bind address | `0.0.0.0` |
 | `PORT` | Server port | `8000` |
 | `LOG_LEVEL` | Logging level | `INFO` |
+
+## Supported Agents
+
+A2A-ACP supports multiple Zed ACP-compliant agents:
+
+| Agent | Authentication Method | Environment Variable | Description |
+|-------|----------------------|---------------------|-------------|
+| `codex-acp` | `apikey` | `${OPENAI_API_KEY}` | OpenAI Codex agent |
+| `claude-code-acp` | `apikey` | `${ANTHROPIC_API_KEY}` | Anthropic Claude agent |
+| `gemini-cli` | `gemini-api-key` | `${GEMINI_API_KEY}` | Google Gemini agent |
+
+The server automatically detects the authentication method based on the agent's capabilities and uses the appropriate API key.
 
 ## Environment File Setup
 
@@ -37,10 +49,16 @@ cp .env.example .env
 ### 2. Edit Configuration
 
 ```bash
-# Open .env and configure:
+# Open .env and configure for OpenAI Codex:
 A2A_AGENT_COMMAND="/usr/local/bin/codex-acp"
 A2A_AGENT_API_KEY="${OPENAI_API_KEY}"
 A2A_AGENT_DESCRIPTION="OpenAI Codex for A2A-ACP"
+A2A_AUTH_TOKEN="your-secure-secret-token"
+
+# Or for Gemini CLI:
+A2A_AGENT_COMMAND="/opt/homebrew/bin/gemini --experimental-acp"
+A2A_AGENT_API_KEY="${GEMINI_API_KEY}"
+A2A_AGENT_DESCRIPTION="Gemini CLI for A2A-ACP"
 A2A_AUTH_TOKEN="your-secure-secret-token"
 ```
 
@@ -73,16 +91,39 @@ services:
       - A2A_AUTH_TOKEN=${A2A_AUTH_TOKEN}
       - LOG_LEVEL=INFO
     restart: unless-stopped
+
+  # Alternative configuration for Gemini CLI
+  # a2a-acp-gemini:
+  #   build: .
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     - A2A_AGENT_COMMAND=/opt/homebrew/bin/gemini --experimental-acp
+  #     - A2A_AGENT_API_KEY=${GEMINI_API_KEY}
+  #     - A2A_AUTH_TOKEN=${A2A_AUTH_TOKEN}
+  #     - LOG_LEVEL=INFO
+  #   restart: unless-stopped
 ```
 
 ### Docker Run
 
 ```bash
+# For OpenAI Codex
 docker run -d \
-  --name a2a-acp \
+  --name a2a-acp-codex \
   -p 8000:8000 \
   -e A2A_AGENT_COMMAND="/usr/local/bin/codex-acp" \
   -e A2A_AGENT_API_KEY="${OPENAI_API_KEY}" \
+  -e A2A_AUTH_TOKEN="your-secret-token" \
+  -e LOG_LEVEL=INFO \
+  your-registry/a2a-acp:latest
+
+# For Gemini CLI
+docker run -d \
+  --name a2a-acp-gemini \
+  -p 8001:8000 \
+  -e A2A_AGENT_COMMAND="/opt/homebrew/bin/gemini --experimental-acp" \
+  -e A2A_AGENT_API_KEY="${GEMINI_API_KEY}" \
   -e A2A_AUTH_TOKEN="your-secret-token" \
   -e LOG_LEVEL=INFO \
   your-registry/a2a-acp:latest

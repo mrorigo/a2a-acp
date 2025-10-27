@@ -98,8 +98,11 @@ class ZedAgentConnection:
         env = None
         if self._api_key:
             env = os.environ.copy()
+            # Set environment variable based on agent type - this will be updated after authentication
+            # For now, set both to be compatible with different agent types
             env["OPENAI_API_KEY"] = self._api_key
-            self._logger.debug("Setting OPENAI_API_KEY environment variable", extra={"key_length": len(self._api_key)})
+            env["GEMINI_API_KEY"] = self._api_key
+            self._logger.debug("Setting API key environment variables", extra={"key_length": len(self._api_key)})
         else:
             self._logger.debug("No API key provided for agent authentication")
 
@@ -276,7 +279,13 @@ class ZedAgentConnection:
     async def initialize(self) -> dict[str, Any] | None:
         """Send initialize request."""
         # Try the exact format from the user's example first
-        params = {"protocolVersion": "v1", "clientName": "cli", "capabilities": {}}
+        params = {"protocolVersion": 1, "clientName": "cli", "clientCapabilities": {      
+            "fs": {
+                "readTextFile": True,
+                "writeTextFile": True
+            },
+            "terminal": True
+            }}
         self._logger.info("=== INITIALIZE PHASE ===")
         self._logger.debug("Sending initialize request", extra={"params": params})
         try:
@@ -288,16 +297,21 @@ class ZedAgentConnection:
             if auth_methods:
                 self._logger.info("Authentication required", extra={"auth_methods": [m.get("id") for m in auth_methods]})
 
-                # Look for API key authentication method
+                # Look for API key authentication method (support multiple agent types)
                 api_key_method = None
+                api_key_method_id = None
+                supported_api_key_methods = ["apikey", "gemini-api-key"]  # Support both codex and gemini
+
                 for method in auth_methods:
-                    if method.get("id") == "apikey":
+                    method_id = method.get("id")
+                    if method_id in supported_api_key_methods:
                         api_key_method = method
+                        api_key_method_id = method_id
                         break
 
-                if api_key_method and self._api_key:
-                    self._logger.info("Using API key authentication", extra={"method_id": "apikey"})
-                    await self.authenticate("apikey", self._api_key)
+                if api_key_method and self._api_key and api_key_method_id:
+                    self._logger.info("Using API key authentication", extra={"method_id": api_key_method_id})
+                    await self.authenticate(api_key_method_id, self._api_key)
                 elif api_key_method:
                     raise AgentProcessError("Agent requires API key authentication but no API key provided")
                 else:

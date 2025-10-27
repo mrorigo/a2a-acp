@@ -13,9 +13,9 @@ cd a2a-acp
 uv sync && uv pip install -e .
 
 # 2. Point at your ACP agent
-export A2A_AGENT_COMMAND="/usr/local/bin/codex-acp"
-export A2A_AGENT_API_KEY="${OPENAI_API_KEY}"    # optional
-export A2A_AUTH_TOKEN="your-secret-token"       # optional
+export A2A_AGENT_COMMAND="/usr/local/bin/codex-acp"    # or "/opt/homebrew/bin/gemini --experimental-acp"
+export A2A_AGENT_API_KEY="${OPENAI_API_KEY}"           # or "${GEMINI_API_KEY}"
+export A2A_AUTH_TOKEN="your-secret-token"             # optional
 
 # 3. Launch the gateway
 make run
