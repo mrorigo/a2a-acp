@@ -628,6 +628,14 @@ class A2ATaskManager:
             async def permission_handler(request: ToolPermissionRequest) -> ToolPermissionDecision:
                 return await self._handle_tool_permission(task_id, context, request)
 
+            # Provide a built-in stub agent when no external command is configured
+            if not agent_command or agent_command == ["true"]:
+                logger.info(
+                    "Executing task via built-in stub agent",
+                    extra={"task_id": task_id, "agent_command": agent_command},
+                )
+                return await self._execute_stub_agent(task_id, context, stream_handler)
+
             # Execute via ZedACP agent
             async with ZedAgentConnection(
                 agent_command,
@@ -787,6 +795,78 @@ class A2ATaskManager:
         except Exception as e:
             await self._handle_task_error(task_id, task.status.state.value, e, "Unexpected error")
             raise
+
+    async def _execute_stub_agent(
+        self,
+        task_id: str,
+        context: TaskExecutionContext,
+        stream_handler: Optional[Callable[[str], Awaitable[None]]],
+    ) -> Task:
+        """Simulate agent execution when no external command is available."""
+        chunk_text = "--END-OF-RESPONSE--"
+        user_message = context.task.history[0] if context.task.history else None
+        if user_message and user_message.parts:
+            user_summary = self._extract_message_content(user_message).strip()
+            if user_summary:
+                chunk_text = f"{user_summary.strip()} --END-OF-RESPONSE--"
+
+        # Emit streaming chunk for clients
+        if stream_handler:
+            await stream_handler(chunk_text + " ")
+
+        from a2a.translator import A2ATranslator  # Local import to avoid circular dependency
+
+        stub_response = {
+            "stopReason": "end_turn",
+            "result": {"text": chunk_text + " "},
+            "toolCalls": [],
+        }
+
+        translator = A2ATranslator()
+        response_message = translator.zedacp_to_a2a_message(
+            stub_response,
+            context.task.contextId,
+            task_id,
+        )
+
+        # Tag stub output for auditing
+        metadata = response_message.metadata or {}
+        metadata["source"] = metadata.get("source", "zedacp")
+        metadata["stubAgent"] = True
+        response_message.metadata = metadata
+
+        async with context.lock:
+            if context.task.history is None:
+                context.task.history = []
+            context.task.history.append(response_message)
+
+            previous_state = context.task.status.state.value
+            context.task.status.state = TaskState.COMPLETED
+            context.task.status.timestamp = current_timestamp()
+
+        asyncio.create_task(self._send_message_notification(task_id, response_message, "agent_response"))
+        asyncio.create_task(
+            self._send_task_notification(
+                task_id,
+                EventType.TASK_STATUS_CHANGE.value,
+                {
+                    "old_state": previous_state,
+                    "new_state": TaskState.COMPLETED.value,
+                    "message": "Task execution completed via stub agent",
+                },
+            )
+        )
+
+        logger.info(
+            "Stub agent generated response",
+            extra={
+                "task_id": task_id,
+                "chunk_length": len(chunk_text),
+                "history_length": len(context.task.history or []),
+            },
+        )
+
+        return context.task
 
     async def get_task(self, task_id: str) -> Optional[Task]:
         """Retrieve a task by ID."""

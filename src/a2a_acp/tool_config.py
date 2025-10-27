@@ -292,7 +292,7 @@ class ToolConfigurationManager:
                    tools = await self._parse_tools_config(tools_config, str(path))
                    updated_tools.update(tools)
                    self._config_mtimes[config_path] = current_mtime
-                   logger.info(f"Loaded {len(tools)} tools from {config_path}")
+                #    logger.info(f"Loaded {len(tools)} tools from {config_path}")
 
             except Exception as e:
                 logger.error(f"Failed to load tools from {config_path}", extra={"error": str(e)})

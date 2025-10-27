@@ -10,11 +10,20 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
+from typing import List
 from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
 
-from a2a_acp.zed_agent import ZedAgentConnection, AgentProcessError, PromptCancelled
+from a2a_acp.zed_agent import (
+    ZedAgentConnection,
+    AgentProcessError,
+    PromptCancelled,
+    ToolPermissionRequest,
+    ToolPermissionDecision,
+)
+from a2a_acp.bash_executor import ToolExecutionResult
 
 
 # Proper async mocking without warning suppression
@@ -1043,6 +1052,109 @@ class TestZedAgentErrorHandling:
 
         # Verify writes were serialized (all write calls completed)
         assert mock_process.stdin.write.call_count == 5
+
+
+class TestZedAgentFilesystemGovernance:
+    """Ensure direct filesystem RPC helpers honor governance pipeline."""
+
+    @pytest.mark.asyncio
+    async def test_fs_read_text_file_permission_denied(self, monkeypatch):
+        recorded = {}
+
+        async def fake_write_json(payload):
+            recorded["payload"] = payload
+
+        permission_calls: List[ToolPermissionRequest] = []
+
+        async def permission_handler(request: ToolPermissionRequest) -> ToolPermissionDecision:
+            permission_calls.append(request)
+            return ToolPermissionDecision(option_id="deny")
+
+        async def fake_execute_tool(*_args, **_kwargs):  # pragma: no cover - should not be invoked
+            recorded["executed"] = True
+            return ToolExecutionResult(
+                tool_id="functions.acp_fs__read_text_file",
+                success=True,
+                output="",
+                error="",
+                return_code=0,
+                execution_time=0.0,
+                metadata={},
+                output_files=[],
+            )
+
+        class DummyExecutor:
+            async def execute_tool(self, tool, params, context):
+                return await fake_execute_tool(tool, params, context)
+
+        class DummyTool:
+            id = "functions.acp_fs__read_text_file"
+            config = SimpleNamespace(requires_confirmation=False)
+
+        conn = ZedAgentConnection(["python", "-V"], permission_handler=permission_handler)
+        conn._write_json = fake_write_json  # type: ignore[assignment]
+
+        async def fake_get_tool(tool_id):
+            return DummyTool()
+
+        monkeypatch.setattr("a2a_acp.zed_agent.get_tool", fake_get_tool)
+        monkeypatch.setattr("a2a_acp.zed_agent.get_bash_executor", lambda: DummyExecutor())
+
+        await conn._handle_fs_read_text_file({"id": 1, "params": {"path": "README.md"}}, "sess_1")
+
+        assert permission_calls, "Expected governance permission handler to run"
+        payload = recorded.get("payload")
+        assert payload and payload["error"]["code"] == -32003
+        assert "executed" not in recorded
+
+    @pytest.mark.asyncio
+    async def test_fs_write_text_file_permission_allow(self, monkeypatch):
+        recorded = {}
+
+        async def fake_write_json(payload):
+            recorded.setdefault("payloads", []).append(payload)
+
+        async def permission_handler(request: ToolPermissionRequest) -> ToolPermissionDecision:
+            return ToolPermissionDecision(option_id="allow")
+
+        async def fake_execute_tool(tool, params, context):
+            recorded["executed_params"] = params
+            return ToolExecutionResult(
+                tool_id=tool.id,
+                success=True,
+                output="ok",
+                error="",
+                return_code=0,
+                execution_time=0.0,
+                metadata={},
+                output_files=[],
+            )
+
+        class DummyExecutor:
+            async def execute_tool(self, tool, params, context):
+                return await fake_execute_tool(tool, params, context)
+
+        class DummyTool:
+            id = "functions.acp_fs__write_text_file"
+            config = SimpleNamespace(requires_confirmation=False)
+
+        conn = ZedAgentConnection(["python", "-V"], permission_handler=permission_handler)
+        conn._write_json = fake_write_json  # type: ignore[assignment]
+
+        async def fake_get_tool(tool_id):
+            return DummyTool()
+
+        monkeypatch.setattr("a2a_acp.zed_agent.get_tool", fake_get_tool)
+        monkeypatch.setattr("a2a_acp.zed_agent.get_bash_executor", lambda: DummyExecutor())
+
+        await conn._handle_fs_write_text_file(
+            {"id": 2, "params": {"path": "README.md", "content": "hi"}},
+            "sess_2",
+        )
+
+        assert recorded.get("executed_params") == {"path": "README.md", "content": "hi"}
+        payloads = recorded.get("payloads", [])
+        assert payloads and payloads[-1]["result"]["content"] == "ok"
 
 
 class TestZedAgentRealSubprocess:

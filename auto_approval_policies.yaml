@@ -1,0 +1,15 @@
+auto_approval_policies:
+  - id: docs-edits
+    applies_to: ["functions.acp_fs__write_text_file"]
+    include_paths: ["docs/**", "*.md"]
+    decision:
+      type: approve
+      optionId: approved
+      reason: "Documentation edits auto-approved"
+  - id: code-edits
+    applies_to: ["functions.acp_fs__edit_text_file", "functions.acp_fs__multi_edit_text_file", "functions.acp_fs__write_text_file"]
+    include_paths: ["src/**", "lib/**"]
+    decision:
+      type: approve
+      optionId: approved
+      reason: "Code edits auto-approved"

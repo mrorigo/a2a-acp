@@ -57,4 +57,4 @@ clean:
 
 run: dev-install
 	@echo "--> Starting A2A-ACP Server..."
-	./.venv/bin/uv run uvicorn src.a2a_acp.main:create_app --port $(or $(PORT),8000) --host "0.0.0.0" | jq
+	./.venv/bin/uv run uvicorn src.a2a_acp.main:create_app --port $(or $(PORT),8000) --host "0.0.0.0"

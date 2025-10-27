@@ -261,8 +261,8 @@ tools:
       fi
 
       cat <<'$CONTENT_DELIM' > "$TARGET"
-{{content}}
-$CONTENT_DELIM
+      {{content}}
+      $CONTENT_DELIM
 
       echo "Wrote $(wc -l < "$TARGET") lines to $TARGET"
     parameters:
@@ -310,8 +310,8 @@ $CONTENT_DELIM
       trap cleanup EXIT
 
       cat <<'__CODEX_PATCH__' > "$TEMP_PATCH"
-{{patch}}
-__CODEX_PATCH__
+      {{patch}}
+      __CODEX_PATCH__
 
       if [[ ! -s "$TEMP_PATCH" ]]; then
         echo "Error: patch content is required." >&2

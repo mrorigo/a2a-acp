@@ -1219,6 +1219,7 @@ def create_app() -> FastAPI:
 
     # Well-known Agent Card discovery endpoint (publicly accessible)
     @app.get("/.well-known/agent-card.json")
+    @app.get("/.well-known/agent.json")
     async def get_agent_card_well_known(request: Request) -> Any:
         """Agent Card discovery endpoint for A2A protocol compatibility.
 
@@ -1234,6 +1235,7 @@ def create_app() -> FastAPI:
 
     # A2A JSON-RPC endpoint - delegate to A2A server
     @app.post("/a2a/rpc")
+    @app.post("/")
     async def a2a_jsonrpc(
         request: Request,
         authorization: Optional[str] = Header(default=None)

@@ -402,6 +402,43 @@ class ZedAgentConnection:
 
         # Accumulate chunks for the final result
         accumulated_chunks: list[str] = []
+        executed_tool_calls: list[dict[str, Any]] = []
+
+        def _record_tool_call_update(update: dict[str, Any]) -> None:
+            """Normalize and store tool_call_update payloads for the final response."""
+            cleaned_update = {
+                key: value for key, value in update.items()
+                if key != "sessionUpdate"
+            }
+            executed_tool_calls.append(cleaned_update)
+            self._logger.info(
+                "Recorded tool_call_update notification",
+                extra={
+                    "tool_call_id": cleaned_update.get("toolCallId"),
+                    "status": cleaned_update.get("status"),
+                    "title": cleaned_update.get("title"),
+                },
+            )
+
+        def _merge_tool_call_results(response: dict[str, Any] | None) -> dict[str, Any]:
+            """Merge collected tool call updates into the response."""
+            if response is None:
+                response = {}
+
+            if not executed_tool_calls:
+                return response
+
+            existing_calls = response.get("toolCalls")
+            merged_calls: list[dict[str, Any]] = []
+            if isinstance(existing_calls, list):
+                for call in existing_calls:
+                    if isinstance(call, dict):
+                        merged_calls.append(call)
+                    else:
+                        merged_calls.append({"raw": call})
+            merged_calls.extend(executed_tool_calls)
+            response["toolCalls"] = merged_calls
+            return response
 
         async def handler(payload: dict[str, Any]) -> None:
             self._logger.debug("Handling notification during prompt", extra={
@@ -483,6 +520,13 @@ class ZedAgentConnection:
                     # Also accumulate input required message for consistency
                     accumulated_chunks.append(input_required_message)
 
+                elif event == "tool_call_update":
+                    self._logger.debug("Received tool_call_update session/update", extra={
+                        "update_keys": list(update_data.keys())
+                    })
+                    if isinstance(update_data, dict):
+                        _record_tool_call_update(update_data)
+
             # Handle tool call updates (ZedACP tool execution results)
             elif payload.get("method") == "tool_call_update":
                 self._logger.debug("Received tool_call_update notification", extra={
@@ -491,9 +535,9 @@ class ZedAgentConnection:
 
                 # Tool call updates indicate tool execution results from the agent
                 # These are typically sent when the agent processes tool calls
-                if event == "session/cancelled":
-                    self._logger.warning("Agent reported cancellation via session/update")
-                    raise PromptCancelled("Agent reported cancellation")
+                update_data = payload.get("params", {})
+                if isinstance(update_data, dict):
+                    _record_tool_call_update(update_data)
             elif payload.get("method") == "session/cancelled":
                 self._logger.warning("Agent reported direct cancellation")
                 raise PromptCancelled("Agent reported cancellation")
@@ -544,6 +588,7 @@ class ZedAgentConnection:
                 # Process any tool calls in the result
                 if result:
                     result = await self._process_zedacp_tool_calls(result, session_id)
+                result = _merge_tool_call_results(result)
 
                 # Add accumulated chunks to the result
                 if accumulated_chunks:
@@ -582,6 +627,7 @@ class ZedAgentConnection:
             # Process any tool calls in the result
             if result:
                 result = await self._process_zedacp_tool_calls(result, session_id)
+            result = _merge_tool_call_results(result)
 
             # Add accumulated chunks to the result
             if accumulated_chunks:
@@ -622,6 +668,10 @@ class ZedAgentConnection:
 
         if method == "fs/read_text_file":
             await self._handle_fs_read_text_file(payload, session_id)
+            return True
+
+        if method == "fs/write_text_file":
+            await self._handle_fs_write_text_file(payload, session_id)
             return True
 
         return False
@@ -698,7 +748,41 @@ class ZedAgentConnection:
                 })
                 return
 
-        # Execute the tool
+        tool_call = {
+            "id": f"fs_read_text_file_{uuid4().hex}",
+            "toolId": tool.id,
+            "parameters": tool_params,
+            "metadata": {"origin": "fs/read_text_file"}
+        }
+
+        permission_options = [
+            {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+            {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+        ]
+
+        option_id = await self._resolve_permission_option(
+            session_id,
+            tool_call,
+            permission_options,
+            fallback_to_agent=False,
+        )
+
+        if not self._is_option_allowed(option_id, permission_options):
+            await self._write_json({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32003,
+                    "message": "fs/read_text_file denied by governance policy"
+                }
+            })
+            self._logger.warning("fs/read_text_file permission denied", extra={
+                "request_id": request_id,
+                "path": path,
+                "option_id": option_id
+            })
+            return
+
         executor = get_bash_executor()
         exec_session_id = params.get("sessionId") or session_id
         context = ExecutionContext(
@@ -740,6 +824,194 @@ class ZedAgentConnection:
                 "error": result.error,
                 "return_code": result.return_code
             })
+
+    async def _handle_fs_write_text_file(self, payload: dict[str, Any], session_id: str) -> None:
+        """Execute the Codex filesystem write request via the bash tool."""
+        request_id = payload.get("id")
+        params = payload.get("params") or {}
+
+        if request_id is None:
+            self._logger.warning("fs/write_text_file request missing id", extra={"payload": payload})
+            return
+
+        self._logger.info("Handling fs/write_text_file request", extra={
+            "request_id": request_id,
+            "path": params.get("path"),
+            "content_length": len(params.get("content", "")) if params.get("content") else 0
+        })
+
+        tool = await get_tool("functions.acp_fs__write_text_file")
+        if not tool:
+            await self._write_json({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32001,
+                    "message": "Tool functions.acp_fs__write_text_file is not available"
+                }
+            })
+            return
+
+        path = params.get("path")
+        content = params.get("content")
+        if not path or content is None:
+            await self._write_json({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32602,
+                    "message": "Missing required parameters: path and content"
+                }
+            })
+            return
+
+        tool_params: dict[str, Any] = {"path": path, "content": content}
+
+        tool_call = {
+            "id": f"fs_write_text_file_{uuid4().hex}",
+            "toolId": tool.id,
+            "parameters": tool_params,
+            "metadata": {"origin": "fs/write_text_file"}
+        }
+
+        permission_options = [
+            {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+            {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+        ]
+
+        option_id = await self._resolve_permission_option(
+            session_id,
+            tool_call,
+            permission_options,
+            fallback_to_agent=False,
+        )
+
+        if not self._is_option_allowed(option_id, permission_options):
+            await self._write_json({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32003,
+                    "message": "fs/write_text_file denied by governance policy"
+                }
+            })
+            self._logger.warning("fs/write_text_file permission denied", extra={
+                "request_id": request_id,
+                "path": path,
+                "option_id": option_id
+            })
+            return
+
+        executor = get_bash_executor()
+        exec_session_id = params.get("sessionId") or session_id
+        context = ExecutionContext(
+            tool_id=tool.id,
+            session_id=exec_session_id,
+            task_id=f"fs_write_text_file_{uuid4().hex}",
+            user_id="zedacp_user"
+        )
+
+        result = await executor.execute_tool(tool, tool_params, context)
+
+        if result.success:
+            await self._write_json({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "content": result.output
+                }
+            })
+            self._logger.info("fs/write_text_file completed", extra={
+                "request_id": request_id,
+                "path": path,
+                "output_length": len(result.output) if result.output else 0
+            })
+        else:
+            await self._write_json({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32002,
+                    "message": result.error or "Tool execution failed"
+                }
+            })
+            self._logger.error("fs/write_text_file failed", extra={
+                "request_id": request_id,
+                "path": path,
+                "error": result.error,
+                "return_code": result.return_code
+            })
+
+    async def _resolve_permission_option(
+        self,
+        session_id: str,
+        tool_call: Dict[str, Any],
+        options: list[dict[str, Any]],
+        *,
+        fallback_to_agent: bool,
+    ) -> Optional[str]:
+        """Resolve a permission decision using the configured handler."""
+        option_id: Optional[str] = None
+
+        if self._permission_handler:
+            try:
+                decision = await self._permission_handler(
+                    ToolPermissionRequest(
+                        session_id=session_id,
+                        tool_call=tool_call,
+                        options=options,
+                    )
+                )
+            except Exception as exc:
+                self._logger.error(
+                    "Permission handler failed",
+                    extra={
+                        "tool_call_id": tool_call.get("id"),
+                        "tool_id": tool_call.get("toolId"),
+                        "error": str(exc),
+                    },
+                )
+                decision = ToolPermissionDecision(option_id=None)
+
+            if decision.future:
+                option_id = await decision.future
+            else:
+                option_id = decision.option_id
+        else:
+            option_id = next(
+                (
+                    opt.get("optionId")
+                    for opt in options
+                    if (opt.get("kind") or "").startswith("allow")
+                ),
+                options[0].get("optionId") if options else None,
+            )
+
+        if option_id is None and fallback_to_agent:
+            response = await self.request(
+                "session/request_permission",
+                {
+                    "sessionId": session_id,
+                    "toolCall": tool_call,
+                    "options": options,
+                },
+            )
+            outcome = response.get("outcome", {})
+            option_id = outcome.get("optionId")
+
+        return option_id
+
+    @staticmethod
+    def _is_option_allowed(option_id: Optional[str], options: Sequence[Dict[str, Any]]) -> bool:
+        if not option_id:
+            return False
+        selected_option = next((opt for opt in options if opt.get("optionId") == option_id), None)
+        if not selected_option:
+            return False
+        kind = selected_option.get("kind", "") or ""
+        if kind:
+            return kind.startswith("allow")
+        return option_id in {"allow", "approved"}
 
     async def _process_zedacp_tool_calls(self, response: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         """Process ZedACP tool calls in agent response.
@@ -906,48 +1178,14 @@ class ZedAgentConnection:
                 {"optionId": "deny", "name": "Deny", "kind": "reject_once"}
             ]
 
-            option_id: Optional[str] = None
+            option_id = await self._resolve_permission_option(
+                session_id,
+                tool_call,
+                options,
+                fallback_to_agent=True,
+            )
 
-            if self._permission_handler:
-                try:
-                    decision = await self._permission_handler(
-                        ToolPermissionRequest(
-                            session_id=session_id,
-                            tool_call=tool_call,
-                            options=options,
-                        )
-                    )
-                except Exception as exc:
-                    self._logger.error(
-                        "Permission handler failed",
-                        extra={
-                            "tool_call_id": tool_call_id,
-                            "tool_id": tool_id,
-                            "error": str(exc),
-                        },
-                    )
-                    decision = ToolPermissionDecision(option_id=None)
-
-                if decision.future:
-                    option_id = await decision.future
-                else:
-                    option_id = decision.option_id
-
-            if option_id is None:
-                # Fall back to agent-provided decision
-                response = await self.request("session/request_permission", {
-                    "sessionId": session_id,
-                    "toolCall": tool_call,
-                    "options": options
-                })
-                outcome = response.get("outcome", {})
-                option_id = outcome.get("optionId")
-
-            selected_option = next((opt for opt in options if opt.get("optionId") == option_id), None)
-            permitted = False
-            if selected_option:
-                kind = selected_option.get("kind", "")
-                permitted = kind.startswith("allow")
+            permitted = self._is_option_allowed(option_id, options)
 
             logger.info(
                 "Tool permission decision",

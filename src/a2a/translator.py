@@ -8,6 +8,7 @@ It enables seamless communication between A2A clients and ZedACP agents.
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
 from .models import (
@@ -149,13 +150,19 @@ class A2ATranslator:
         # Create A2A message parts
         parts: List[Any] = [TextPart(text=text_content)] if text_content else []
 
+        metadata: Dict[str, Any] = {"source": "zedacp"}
+        if isinstance(zedacp_response, dict):
+            tool_calls = zedacp_response.get("toolCalls")
+            if isinstance(tool_calls, list) and tool_calls:
+                metadata["toolCalls"] = deepcopy(tool_calls)
+
         message = Message(
             role="agent",
             parts=parts,
             messageId=create_message_id(),
             taskId=task_id,
             contextId=context_id,
-            metadata={"source": "zedacp"}
+            metadata=metadata
         )
 
         logger.debug("Converted ZedACP response to A2A message",
