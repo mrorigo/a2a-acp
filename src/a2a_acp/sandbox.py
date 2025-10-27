@@ -555,6 +555,16 @@ class ToolSandbox:
                 # Collect any output files created
                 output_files = await self._collect_output_files(working_dir)
 
+                logger.info(f"Script executed", extra={
+                    "success": process.returncode == 0,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "tool_id": context.tool_id,
+                    "return_code": process.returncode,
+                    "execution_time": execution_time,
+                    "output_files": output_files
+                })
+
                 return ExecutionResult(
                     success=process.returncode == 0,
                     return_code=process.returncode or -1,

@@ -63,6 +63,17 @@ class AutoApprovalPolicy:
     def evaluate(self, tool_call: Dict[str, Any]) -> Optional[AutoApprovalDecision]:
         """Return a decision if the policy applies to the given tool call."""
         tool_id = tool_call.get("toolId")
+        
+        # Infer tool ID for diff-based edits if not explicitly provided
+        if not tool_id:
+            kind = tool_call.get("kind", "")
+            content = tool_call.get("content", [])
+            if kind == "edit" and any(item.get("type") == "diff" for item in content if isinstance(item, dict)):
+                tool_id = "functions.acp_fs__edit_text_file"  # Virtual tool ID for diff edits
+                logger.debug("Inferred tool ID for diff edit: %s", tool_id)
+            else:
+                return None
+        
         if self.applies_to and tool_id not in self.applies_to:
             return None
 
@@ -193,13 +204,19 @@ def _extract_paths_from_tool_call(tool_call: Dict[str, Any]) -> Iterable[str]:
     for item in content:
         if not isinstance(item, dict):
             continue
-        path = item.get("path") or item.get("uri")
-        if isinstance(path, str):
-            yield path
-        elif isinstance(path, list):
-            for candidate in path:
-                if isinstance(candidate, str):
-                    yield candidate
+        # Handle diff content specifically
+        if item.get("type") == "diff":
+            path = item.get("path")
+            if isinstance(path, str):
+                yield path
+        else:
+            path = item.get("path") or item.get("uri")
+            if isinstance(path, str):
+                yield path
+            elif isinstance(path, list):
+                for candidate in path:
+                    if isinstance(candidate, str):
+                        yield candidate
     parameters = tool_call.get("parameters")
     if isinstance(parameters, dict):
         file_path = parameters.get("path") or parameters.get("file")

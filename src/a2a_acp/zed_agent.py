@@ -278,13 +278,12 @@ class ZedAgentConnection:
 
     async def initialize(self) -> dict[str, Any] | None:
         """Send initialize request."""
-        # Try the exact format from the user's example first
         params = {"protocolVersion": 1, "clientName": "cli", "clientCapabilities": {      
             "fs": {
                 "readTextFile": True,
                 "writeTextFile": True
             },
-            "terminal": True
+            # "terminal": True.    # Future capability flags can be added here
             }}
         self._logger.info("=== INITIALIZE PHASE ===")
         self._logger.debug("Sending initialize request", extra={"params": params})
@@ -684,7 +683,7 @@ class ZedAgentConnection:
             await self._handle_fs_read_text_file(payload, session_id)
             return True
 
-        if method == "fs/write_text_file":
+        elif method == "fs/write_text_file":
             await self._handle_fs_write_text_file(payload, session_id)
             return True
 

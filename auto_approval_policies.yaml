@@ -1,13 +1,20 @@
 auto_approval_policies:
   - id: docs-edits
-    applies_to: ["functions.acp_fs__write_text_file"]
-    include_paths: ["docs/**", "*.md"]
+    applies_to: ["functions.acp_fs__write_text_file", "functions.acp_fs__edit_text_file"]
+    include_paths: ["docs/**", "*.md", "**/*.md"]
     decision:
       type: approve
-      optionId: approved
+      optionId: proceed_once
       reason: "Documentation edits auto-approved"
+  - id: read-docs
+    applies_to: ["functions.acp_fs__read_text_file"]
+    include_paths: ["**/*.md"]
+    decision:
+      type: approve
+      optionId: allow
+      reason: "Auto-approve markdown reads"
   - id: code-edits
-    applies_to: ["functions.acp_fs__edit_text_file", "functions.acp_fs__multi_edit_text_file", "functions.acp_fs__write_text_file"]
+    applies_to: ["functions.acp_fs__read_text_file", "functions.acp_fs__edit_text_file", "functions.acp_fs__multi_edit_text_file", "functions.acp_fs__write_text_file"]
     include_paths: ["src/**", "lib/**"]
     decision:
       type: approve
