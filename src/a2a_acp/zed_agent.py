@@ -352,7 +352,7 @@ class ZedAgentConnection:
     async def authenticate(self, method_id: str, api_key: str | None = None) -> dict[str, Any] | None:
         """Send authenticate request."""
         params = {"methodId": method_id}
-        self._logger.info("=== AUTHENTICATION PHASE ===")
+        # self._logger.info("=== AUTHENTICATION PHASE ===")
         self._logger.debug("Sending authenticate request", extra={"method_id": method_id, "has_api_key": api_key is not None})
         try:
             result = await self.request("authenticate", params)
@@ -368,7 +368,7 @@ class ZedAgentConnection:
             "cwd": cwd,
             "mcpServers": mcp_servers or []
         }
-        self._logger.info("=== SESSION CREATION PHASE ===")
+        # self._logger.info("=== SESSION CREATION PHASE ===")
         self._logger.debug("Sending session/new request", extra={"params": params})
         try:
             result = await self.request("session/new", params)
@@ -388,7 +388,7 @@ class ZedAgentConnection:
             "cwd": cwd,
             "mcpServers": mcp_servers or []
         }
-        self._logger.info("=== SESSION LOADING PHASE ===")
+        # self._logger.info("=== SESSION LOADING PHASE ===")
         self._logger.debug("Sending session/load request", extra={"session_id": session_id, "params": params})
 
         # Handle the session/load response
@@ -407,7 +407,7 @@ class ZedAgentConnection:
                     "event": event,
                     "update_keys": list(update_data.keys())
                 })
-                # History replay notifications will be sent here
+                # TODO: History replay notifications will be sent here
 
         try:
             result = await self.request("session/load", params, handler=load_handler)
@@ -431,13 +431,12 @@ class ZedAgentConnection:
         cancel_event: asyncio.Event | None = None,
     ) -> dict[str, Any]:
         """Send a session/prompt request and return the final result."""
-        self._logger.info("=== PROMPT PHASE ===")
+        # self._logger.info("=== PROMPT PHASE ===")
         self._logger.debug("Sending session/prompt request", extra={
             "session_id": session_id,
             "prompt_length": len(prompt),
             "has_cancel_event": cancel_event is not None
         })
-        """Send a session/prompt request and return the final result."""
 
         # Accumulate chunks for the final result
         accumulated_chunks: list[str] = []
@@ -583,9 +582,9 @@ class ZedAgentConnection:
 
         # If a cancel_event is provided, also check for external cancellation
         if cancel_event:
-            logger.info("Setting up external cancellation check", extra={"session_id": session_id, "cancel_event_is_set": cancel_event.is_set()})
+            # logger.info("Setting up external cancellation check", extra={"session_id": session_id, "cancel_event_is_set": cancel_event.is_set()})
             async def check_external_cancellation():
-                logger.info("Waiting for external cancellation", extra={"session_id": session_id})
+                # logger.info("Waiting for external cancellation", extra={"session_id": session_id})
                 await cancel_event.wait()
                 logger.info("External cancellation detected", extra={"session_id": session_id})
                 # Send cancellation to the agent when external cancellation is requested
@@ -720,7 +719,7 @@ class ZedAgentConnection:
         return False
 
     async def _handle_fs_read_text_file(self, payload: dict[str, Any], session_id: str) -> None:
-        """Execute the Codex filesystem read request via the bash tool."""
+        """Execute the filesystem read request via the bash tool."""
         request_id = payload.get("id")
         params = payload.get("params") or {}
 
@@ -758,6 +757,7 @@ class ZedAgentConnection:
                     "message": "Tool functions.acp_fs__read_text_file is not available"
                 }
             })
+            self._logger.warning("fs/read_text_file tool not available, check configuration", extra={"request_id": request_id})
             return
 
         tool_params: dict[str, Any] = {}
@@ -776,6 +776,7 @@ class ZedAgentConnection:
                         "message": "Invalid line parameter; must be an integer"
                     }
                 })
+                self._logger.warning("fs/read_text_file invalid line parameter", extra={"request_id": request_id, "line": params["line"]})
                 return
 
         if "limit" in params and params["limit"] is not None:
@@ -790,6 +791,7 @@ class ZedAgentConnection:
                         "message": "Invalid limit parameter; must be an integer"
                     }
                 })
+                self._logger.warning("fs/read_text_file invalid limit parameter", extra={"request_id": request_id, "limit": params["limit"]})
                 return
 
         tool_call = {
@@ -893,6 +895,7 @@ class ZedAgentConnection:
                     "message": "Tool functions.acp_fs__write_text_file is not available"
                 }
             })
+            self._logger.warning("fs/write_text_file tool not available, check configuration", extra={"request_id": request_id})
             return
 
         path = params.get("path")
