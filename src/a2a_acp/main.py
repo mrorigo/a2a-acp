@@ -31,7 +31,7 @@ from .zed_agent import AgentProcessError, PromptCancelled, ZedAgentConnection
 from .push_notification_manager import PushNotificationManager
 from .streaming_manager import StreamingManager
 from .tool_config import get_tool_configuration_manager, BashTool
-from .bash_executor import BashToolExecutor
+from .bash_executor import BashToolExecutor, set_bash_executor
 
 # Import A2A protocol components
 from a2a.models import (
@@ -482,13 +482,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.a2a_translator = A2ATranslator()
 
     # Initialize bash executor with push notification manager and task manager for event emission
-    from .bash_executor import BashToolExecutor
     app.state.bash_executor = BashToolExecutor(
         push_notification_manager=app.state.push_notification_manager,
-        task_manager=app.state.task_manager
+        task_manager=app.state.task_manager,
+        error_profile=settings.error_profile,
     )
+    set_bash_executor(app.state.bash_executor)
 
-    logger.info("A2A-ACP proxy initialized with A2A ↔ ZedACP translation")
+    logger.info(
+        "A2A-ACP proxy initialized with A2A ↔ ZedACP translation",
+        extra={"error_profile": settings.error_profile.value},
+    )
 
     # Start background cleanup task for push notifications
     async def periodic_cleanup():

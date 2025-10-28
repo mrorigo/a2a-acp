@@ -11,7 +11,7 @@ import os
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
-from typing import List
+from typing import Any, List
 from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
@@ -24,6 +24,7 @@ from a2a_acp.zed_agent import (
     ToolPermissionDecision,
 )
 from a2a_acp.bash_executor import ToolExecutionResult
+from a2a_acp.error_profiles import ErrorProfile
 
 
 # Proper async mocking without warning suppression
@@ -1154,6 +1155,7 @@ class TestZedAgentFilesystemGovernance:
             id = "functions.acp_fs__read_text_file"
             config = SimpleNamespace(requires_confirmation=False)
 
+        monkeypatch.setenv("A2A_AGENT_COMMAND", "/bin/echo")
         conn = ZedAgentConnection(["python", "-V"], permission_handler=permission_handler)
         conn._write_json = fake_write_json  # type: ignore[assignment]
 
@@ -1169,6 +1171,52 @@ class TestZedAgentFilesystemGovernance:
         payload = recorded.get("payload")
         assert payload and payload["error"]["code"] == -32003
         assert "executed" not in recorded
+
+    @pytest.mark.asyncio
+    async def test_fs_read_text_file_delegates_to_tool_even_when_missing(self, monkeypatch):
+        recorded: dict[str, Any] = {}
+
+        async def fake_write_json(payload):
+            recorded.setdefault("payloads", []).append(payload)
+
+        class DummyTool:
+            id = "functions.acp_fs__read_text_file"
+            config = SimpleNamespace(requires_confirmation=False)
+
+        class DummyExecutor:
+            async def execute_tool(self, tool, params, context):
+                recorded["executed_params"] = params
+                return ToolExecutionResult(
+                    tool_id=tool.id,
+                    success=False,
+                    output="",
+                    error="missing",
+                    execution_time=0.01,
+                    return_code=1,
+                    metadata={},
+                    output_files=[],
+                    mcp_error={
+                        "code": -32002,
+                        "message": "Resource not found",
+                        "detail": "File not found"
+                    },
+                )
+
+        monkeypatch.setenv("A2A_AGENT_COMMAND", "/bin/echo")
+        conn = ZedAgentConnection(["python", "-V"])
+        conn._write_json = fake_write_json  # type: ignore[assignment]
+
+        async def fake_get_tool(_tool_id):
+            return DummyTool()
+
+        monkeypatch.setattr("a2a_acp.zed_agent.get_tool", fake_get_tool)
+        monkeypatch.setattr("a2a_acp.zed_agent.get_bash_executor", lambda: DummyExecutor())
+
+        await conn._handle_fs_read_text_file({"id": 9, "params": {"path": "missing.txt"}}, "sess_exec")
+
+        assert recorded.get("executed_params") == {"path": "missing.txt"}
+        payloads = recorded.get("payloads", [])
+        assert payloads and payloads[-1]["error"]["code"] == -32002
 
     @pytest.mark.asyncio
     async def test_fs_write_text_file_permission_allow(self, monkeypatch):
@@ -1218,6 +1266,64 @@ class TestZedAgentFilesystemGovernance:
         assert recorded.get("executed_params") == {"path": "README.md", "content": "hi"}
         payloads = recorded.get("payloads", [])
         assert payloads and payloads[-1]["result"]["content"] == "ok"
+
+
+class TestZedAgentErrorFormatting:
+    """Verify error payload shaping follows the negotiated profile."""
+
+    def test_jsonrpc_error_basic_profile_uses_string_data(self):
+        connection = ZedAgentConnection(["echo", "test"], error_profile=ErrorProfile.ACP_BASIC)
+
+        result = ToolExecutionResult(
+            tool_id="sample",
+            success=False,
+            output="",
+            error="File missing",
+            execution_time=0.1,
+            return_code=5,
+            metadata={"a2a_diagnostics": {"raw_detail": {"path": "missing.txt"}}},
+            output_files=[],
+            mcp_error={
+                "code": -32002,
+                "message": "Resource not found",
+                "detail": "missing.txt",
+                "retryable": False,
+            },
+        )
+
+        payload = connection._jsonrpc_error_from_tool_result(result)
+
+        assert payload["code"] == -32002
+        assert payload["message"] == "Resource not found"
+        assert isinstance(payload.get("data"), str)
+
+    def test_jsonrpc_error_extended_profile_retains_structure(self):
+        connection = ZedAgentConnection(["echo", "test"], error_profile=ErrorProfile.EXTENDED_JSON)
+
+        diagnostics = {"return_code": 42}
+        result = ToolExecutionResult(
+            tool_id="sample",
+            success=False,
+            output="",
+            error="Permission denied",
+            execution_time=0.1,
+            return_code=42,
+            metadata={"a2a_diagnostics": diagnostics},
+            output_files=[],
+            mcp_error={
+                "code": -32000,
+                "message": "Authentication required",
+                "detail": {"scope": "write"},
+                "retryable": True,
+            },
+        )
+
+        payload = connection._jsonrpc_error_from_tool_result(result)
+
+        assert isinstance(payload["data"], dict)
+        assert payload["data"]["detail"] == {"scope": "write"}
+        assert payload["data"]["return_code"] == 42
+        assert payload["data"]["diagnostics"] == diagnostics
 
 
 class TestZedAgentRealSubprocess:

@@ -17,6 +17,7 @@ from a2a_acp.tool_config import (
     BashTool, ToolConfig, ToolParameter,
     ToolConfigurationManager, ToolConfigurationError
 )
+from a2a_acp.error_profiles import ErrorProfile
 
 
 class TestToolParameter:
@@ -444,6 +445,40 @@ class TestToolConfigurationManager:
         tools = await manager.load_tools()
         assert len(tools) == 0
 
+    @pytest.mark.asyncio
+    async def test_error_mapping_detail_contracts(self, temp_config_dir):
+        """Ensure error mapping detail obeys the active error profile."""
+        tool_config = {
+            "tools": {
+                "sample": {
+                    "name": "Sample",
+                    "description": "Sample tool",
+                    "script": "echo 'hello'",
+                    "parameters": [],
+                    "sandbox": {},
+                    "error_mapping": {
+                        "1": {
+                            "code": -32002,
+                            "message": "Resource not found",
+                            "detail": {"path": "/tmp/file.txt"}
+                        }
+                    }
+                }
+            }
+        }
+
+        config_path = temp_config_dir / "tools.yaml"
+        with open(config_path, "w", encoding="utf-8") as handle:
+            yaml.safe_dump(tool_config, handle)
+
+        manager_basic = ToolConfigurationManager([str(config_path)], error_profile=ErrorProfile.ACP_BASIC)
+        with pytest.raises(ToolConfigurationError):
+            await manager_basic.load_tools()
+
+        manager_extended = ToolConfigurationManager([str(config_path)], error_profile=ErrorProfile.EXTENDED_JSON)
+        tools = await manager_extended.load_tools()
+        assert tools["sample"].error_mapping[1].detail == {"path": "/tmp/file.txt"}
+
 
 class TestSecurityValidation:
     """Test suite for security validation features."""
@@ -521,7 +556,6 @@ class TestSecurityValidation:
             assert any(pattern in script for pattern in [
                 ";", "&&", "||", "$", "`", "|", ">"
             ])
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

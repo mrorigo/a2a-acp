@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
+import json
 from asyncio import StreamReader, StreamWriter
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Coroutine, Dict, Optional, Sequence
@@ -11,6 +11,7 @@ from uuid import uuid4
 from .bash_executor import get_bash_executor, ToolExecutionResult
 from .sandbox import ExecutionContext
 from .tool_config import get_tool
+from .error_profiles import ErrorProfile
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ class ZedAgentConnection:
         api_key: str | None = None,
         log: logging.Logger | None = None,
         permission_handler: PermissionHandler | None = None,
+        error_profile: ErrorProfile | None = None,
     ) -> None:
         if not command:
             raise ValueError("Agent command cannot be empty")
@@ -72,6 +74,7 @@ class ZedAgentConnection:
         self._write_lock: Optional[asyncio.Lock] = None
         self._stderr_task: Optional[asyncio.Task[None]] = None
         self._permission_handler = permission_handler
+        self._error_profile = self._resolve_error_profile(error_profile)
 
     def _ensure_locks(self) -> None:
         """Lazily create locks to avoid event loop issues in tests."""
@@ -86,6 +89,29 @@ class ZedAgentConnection:
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         await self.close()
+
+    def _resolve_error_profile(self, override: Optional[ErrorProfile]) -> ErrorProfile:
+        if override is not None:
+            return override
+
+        try:
+            executor = get_bash_executor()
+            profile = getattr(executor, "error_profile", None)
+            if isinstance(profile, ErrorProfile):
+                return profile
+        except Exception:  # pragma: no cover - defensive guard
+            self._logger.debug("Failed to derive error profile from executor", exc_info=True)
+
+        from .settings import get_settings
+
+        try:
+            return get_settings().error_profile
+        except ValueError:
+            self._logger.debug(
+                "Settings validation failed while resolving error profile; falling back to acp-basic",
+                exc_info=True,
+            )
+            return ErrorProfile.ACP_BASIC
 
     async def start(self) -> None:
         """Launch the agent subprocess."""
@@ -687,6 +713,10 @@ class ZedAgentConnection:
             await self._handle_fs_write_text_file(payload, session_id)
             return True
 
+        elif method == "session/request_permission":
+            await self._handle_session_request_permission(payload, session_id)
+            return True
+
         return False
 
     async def _handle_fs_read_text_file(self, payload: dict[str, Any], session_id: str) -> None:
@@ -705,6 +735,18 @@ class ZedAgentConnection:
             "limit": params.get("limit")
         })
 
+        path = params.get("path")
+        if not path:
+            await self._write_json({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32602,
+                    "message": "Missing required parameter: path"
+                }
+            })
+            return
+
         # Resolve tool configuration
         tool = await get_tool("functions.acp_fs__read_text_file")
         if not tool:
@@ -719,17 +761,6 @@ class ZedAgentConnection:
             return
 
         tool_params: dict[str, Any] = {}
-        path = params.get("path")
-        if not path:
-            await self._write_json({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {
-                    "code": -32602,
-                    "message": "Missing required parameter: path"
-                }
-            })
-            return
         tool_params["path"] = path
 
         # Optional parameters with validation
@@ -823,19 +854,18 @@ class ZedAgentConnection:
                 "output_length": len(result.output) if result.output else 0
             })
         else:
+            error_payload = self._jsonrpc_error_from_tool_result(result)
             await self._write_json({
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "error": {
-                    "code": -32002,
-                    "message": result.error or "Tool execution failed"
-                }
+                "error": error_payload
             })
             self._logger.error("fs/read_text_file failed", extra={
                 "request_id": request_id,
                 "path": path,
                 "error": result.error,
-                "return_code": result.return_code
+                "return_code": result.return_code,
+                "mcp_error": error_payload
             })
 
     async def _handle_fs_write_text_file(self, payload: dict[str, Any], session_id: str) -> None:
@@ -940,20 +970,76 @@ class ZedAgentConnection:
                 "output_length": len(result.output) if result.output else 0
             })
         else:
+            error_payload = self._jsonrpc_error_from_tool_result(result)
             await self._write_json({
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "error": {
-                    "code": -32002,
-                    "message": result.error or "Tool execution failed"
-                }
+                "error": error_payload
             })
             self._logger.error("fs/write_text_file failed", extra={
                 "request_id": request_id,
                 "path": path,
                 "error": result.error,
-                "return_code": result.return_code
+                "return_code": result.return_code,
+                "mcp_error": error_payload
             })
+
+    async def _handle_session_request_permission(self, payload: dict[str, Any], session_id: str) -> None:
+        """Handle a permission request initiated by the agent."""
+        request_id = payload.get("id")
+        params = payload.get("params") or {}
+        options: list[dict[str, Any]] = params.get("options") or []
+        tool_call = params.get("toolCall") or {}
+        session_ref = params.get("sessionId") or session_id
+
+        if request_id is None:
+            self._logger.warning("session/request_permission request missing id", extra={"payload": payload})
+            return
+
+        self._logger.info(
+            "Handling session/request_permission",
+            extra={
+                "session_id": session_ref,
+                "tool_call_id": tool_call.get("toolCallId"),
+                "tool_id": tool_call.get("toolId"),
+                "option_count": len(options),
+            },
+        )
+
+        option_id = await self._resolve_permission_option(
+            session_ref,
+            tool_call,
+            options,
+            fallback_to_agent=False,
+        )
+
+        if not self._is_option_allowed(option_id, options):
+            option_id = next(
+                (
+                    opt.get("optionId")
+                    for opt in options
+                    if (opt.get("kind") or "").startswith("allow")
+                ),
+                options[0].get("optionId") if options else None,
+            )
+
+        outcome = {"optionId": option_id}
+
+        await self._write_json({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {"outcome": outcome},
+        })
+
+        self._logger.info(
+            "Responded to session/request_permission",
+            extra={
+                "session_id": session_ref,
+                "tool_call_id": tool_call.get("toolCallId"),
+                "selected_option": option_id,
+                "options_returned": len(options),
+            },
+        )
 
     async def _resolve_permission_option(
         self,
@@ -1025,6 +1111,63 @@ class ZedAgentConnection:
         if kind:
             return kind.startswith("allow")
         return option_id in {"allow", "approved"}
+
+    @staticmethod
+    def _extract_mcp_error(result: ToolExecutionResult) -> Optional[Dict[str, Any]]:
+        """Extract the MCP error payload from a tool result, if present."""
+        if result.mcp_error:
+            return result.mcp_error
+        metadata = result.metadata or {}
+        mcp_error = metadata.get("mcp_error")
+        if isinstance(mcp_error, dict) and mcp_error:
+            return mcp_error
+        return None
+
+    def _jsonrpc_error_from_tool_result(
+        self,
+        result: ToolExecutionResult,
+        *,
+        default_code: int = -32603,
+        default_message: str = "Tool execution failed"
+    ) -> Dict[str, Any]:
+        """Convert a failed tool execution into a JSON-RPC error payload."""
+        mcp_error = ZedAgentConnection._extract_mcp_error(result)
+        base_message = result.error or result.output or default_message
+        profile = self._error_profile
+        if mcp_error:
+            error_payload: Dict[str, Any] = {
+                "code": mcp_error.get("code", default_code),
+                "message": mcp_error.get("message") or base_message,
+            }
+            retryable = mcp_error.get("retryable")
+            detail_value = mcp_error.get("detail")
+            diagnostics = (result.metadata or {}).get("a2a_diagnostics")
+
+            if profile is ErrorProfile.ACP_BASIC:
+                if detail_value is not None:
+                    error_payload["data"] = detail_value if isinstance(detail_value, str) else str(detail_value)
+            else:
+                data_block: Dict[str, Any] = {"return_code": result.return_code}
+                if detail_value is not None:
+                    data_block["detail"] = detail_value
+                if retryable is not None:
+                    data_block["retryable"] = retryable
+                if diagnostics:
+                    data_block["diagnostics"] = diagnostics
+                error_payload["data"] = data_block
+            return error_payload
+
+        if profile is ErrorProfile.ACP_BASIC:
+            return {
+                "code": default_code,
+                "message": base_message,
+            }
+
+        return {
+            "code": default_code,
+            "message": base_message,
+            "data": {"return_code": result.return_code}
+        }
 
     async def _process_zedacp_tool_calls(self, response: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         """Process ZedACP tool calls in agent response.
@@ -1141,22 +1284,53 @@ class ZedAgentConnection:
 
         # Convert result to ZedACP format
         status = "completed" if result.success else "failed"
-        content_text = result.output if result.success else result.error
+        mcp_error = self._extract_mcp_error(result)
+        failure_text = result.error or (mcp_error.get("message") if mcp_error else "Tool execution failed")
+        content_text = result.output if result.success else failure_text
+        raw_output = result.output if result.output else (result.error or failure_text)
 
-        zedacp_result = {
+        zedacp_result: Dict[str, Any] = {
             "toolCallId": tool_call_id,
             "status": status,
             "content": [{"type": "text", "text": content_text}],
-            "rawOutput": result.output
+            "rawOutput": raw_output
         }
 
-        # Add metadata for successful executions
-        if result.success and result.metadata:
-            zedacp_result["metadata"] = {
-                "execution_time": result.execution_time,
-                "return_code": result.return_code,
-                "output_files": result.output_files
-            }
+        if mcp_error:
+            zedacp_result["error"] = mcp_error
+
+        diagnostics = (result.metadata or {}).get("a2a_diagnostics")
+        metadata_payload: Dict[str, Any] = {
+            "execution_time": result.execution_time,
+            "return_code": result.return_code,
+        }
+        retryable_flag = mcp_error.get("retryable") if mcp_error else None
+        if isinstance(retryable_flag, bool):
+            metadata_payload["retryable"] = retryable_flag
+        if result.output_files:
+            metadata_payload["output_files"] = result.output_files
+        if mcp_error and self._error_profile is ErrorProfile.EXTENDED_JSON:
+            metadata_payload["mcp_error"] = mcp_error
+
+        if result.metadata:
+            for key, value in result.metadata.items():
+                if key in {"a2a_diagnostics", "mcp_error"}:
+                    continue
+                if key in metadata_payload:
+                    continue
+                if self._error_profile is ErrorProfile.ACP_BASIC and isinstance(value, (dict, list)):
+                    continue
+                metadata_payload[key] = value
+
+        if diagnostics:
+            meta_payload = zedacp_result.setdefault("meta", {})
+            meta_payload["a2a_diagnostics"] = diagnostics
+            if self._error_profile is ErrorProfile.ACP_BASIC:
+                diagnostics_text = json.dumps(diagnostics, separators=(",", ":"), default=str)
+                zedacp_result["content"].append({"type": "text", "text": f"Diagnostics: {diagnostics_text}"})
+
+        if metadata_payload:
+            zedacp_result["metadata"] = metadata_payload
 
         logger.debug(f"ZedACP tool call completed: {tool_call_id}", extra={
             "tool_call_id": tool_call_id,
@@ -1187,8 +1361,9 @@ class ZedAgentConnection:
 
         try:
             options: list[dict[str, Any]] = [
-                {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-                {"optionId": "deny", "name": "Deny", "kind": "reject_once"}
+                {"optionId": "proceed_always", "name": "Allow All Edits", "kind": "allow_always"},
+                {"optionId": "proceed_once", "name": "Allow", "kind": "allow_once"},
+                {"optionId": "cancel", "name": "Reject", "kind": "reject_once"},
             ]
 
             option_id = await self._resolve_permission_option(

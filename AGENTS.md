@@ -4,6 +4,14 @@ This project is a native A2A (Agent-to-Agent) protocol server, named A2A-ACP. It
 
 The server is production-ready, with enterprise-grade security, comprehensive logging, robust error handling, and a built-in **governance pipeline**. In addition to stateful conversations, interactive workflows, push notifications, and tool execution, A2A-ACP supports auto-approval policies, programmable governors (scripted, HTTP, or Python), and detailed permission auditing so that every coding action is explainable and verifiable.
 
+# Key Features
+
+- **Governed Automation** – Declarative policies and programmable governors enforce guardrails while preserving auditability.
+- **Permission Mediation** – Auto-resolves agent `session/request_permission` prompts (including Gemini’s `proceed_*` options) with the same policy/governor pipeline used for direct tool calls.
+- **Tool Execution Sandbox** – Bash-based executor with resource limits, path controls, and rich MCP error mapping.
+- **Multi-Agent Support** – Works with Codex, Claude, Gemini, and any Zed ACP-compliant agent that exposes an A2A session.
+- **Push Notifications** – Real-time task state, permission decisions, and artifact alerts delivered via webhooks or SSE.
+
 # Building and Running
 
 The project uses `uv` for dependency management and `make` for running common tasks.

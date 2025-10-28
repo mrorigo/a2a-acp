@@ -10,13 +10,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass, asdict
+import sqlite3
+import threading
+import uuid
+from dataclasses import dataclass, asdict, replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import sqlite3
-import threading
 
 from .tool_config import BashTool
 from .sandbox import ExecutionContext, ExecutionResult
@@ -295,9 +296,10 @@ class AuditLogger:
             tool: Tool being executed (if applicable)
             **additional_details: Additional event details
         """
+        event_timestamp = datetime.now()
         event = AuditEvent(
-            id=f"audit_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(context.task_id)[:8]}",
-            timestamp=datetime.now(),
+            id=self._generate_event_id(context.task_id, event_timestamp),
+            timestamp=event_timestamp,
             event_type=event_type,
             user_id=context.user_id,
             session_id=context.session_id,
@@ -307,13 +309,10 @@ class AuditLogger:
             details=additional_details
         )
 
-        # Log to database (sync operation)
-        def log_to_db():
-            self.database.log_event(event)
-
-        # Run in thread pool to avoid blocking
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, log_to_db)
+        persisted_event = await loop.run_in_executor(
+            None, self._persist_event_with_retry, event
+        )
 
         # Also log to standard logging
         logger.info(f"Audit Event: {event_type.value}", extra={
@@ -321,9 +320,32 @@ class AuditLogger:
             "user_id": context.user_id,
             "tool_id": tool.id if tool else None,
             "task_id": context.task_id,
-            "severity": event.severity,
+            "severity": persisted_event.severity,
             **additional_details
         })
+
+    def _generate_event_id(self, task_id: Optional[str], timestamp: Optional[datetime] = None) -> str:
+        """Generate a globally unique audit event identifier."""
+        reference_time = timestamp or datetime.now()
+        timestamp_part = reference_time.strftime("%Y%m%d_%H%M%S_%f")
+        task_fragment = (task_id or "task")[:8]
+        safe_task_fragment = "".join(ch if ch.isalnum() else "_" for ch in task_fragment)
+        random_fragment = uuid.uuid4().hex[:8]
+        return f"audit_{timestamp_part}_{safe_task_fragment}_{random_fragment}"
+
+    def _persist_event_with_retry(self, event: AuditEvent, attempts: int = 3) -> AuditEvent:
+        """Persist an audit event, regenerating IDs if collisions are detected."""
+        current_event = event
+        for attempt in range(attempts):
+            try:
+                self.database.log_event(current_event)
+                return current_event
+            except sqlite3.IntegrityError:
+                new_id = self._generate_event_id(current_event.task_id)
+                current_event = replace(current_event, id=new_id)
+        # Final attempt without swallowing the exception
+        self.database.log_event(current_event)
+        return current_event
 
     def _determine_severity(self, event_type: AuditEventType) -> str:
         """Determine severity level for an event type."""

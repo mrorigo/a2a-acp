@@ -57,6 +57,7 @@ For a strategic overview, read the [Enterprise Whitepaper](WHITEPAPER.md).
 ## ✨ Key Capabilities
 
 - **🛡️ Enterprise Governance** – Auto-approval policies, programmable governors, and audit endpoints (`/a2a/tasks/{id}/governor/history`)
+- **🤖 Permission Mediation** – Automatically answers agent `session/request_permission` prompts (including Gemini’s `proceed_*` options) using the same policy/governor pipeline that guards direct tool calls
 - **🔗 Protocol Bridge** – Full A2A v0.3.0 implementation with seamless Zed ACP translation
 - **🧰 Tool Execution** – Direct support for Codex `fs/read_text_file`, `fs/write_text_file`, `shell`, plus custom bash tools
 - **💬 Interactive Conversations** – Native handling of input-required workflows and multi-turn tasks

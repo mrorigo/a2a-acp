@@ -46,6 +46,10 @@ test: dev-install
 	@echo "--> Running tests..."
 	A2A_AGENT_COMMAND=true timeout 60 ./.venv/bin/uv run python -m pytest --tb=no -q
 
+coverage: dev-install
+	@echo "--> Running tests with coverage..."
+	A2A_AGENT_COMMAND=true timeout 60 ./.venv/bin/uv run python -m pytest --tb=no --cov=src --cov-report=term-missing --cov-report=html
+
 quality: format lint type test
 
 # Cleanup target

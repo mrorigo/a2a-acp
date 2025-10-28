@@ -6,6 +6,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+from .error_profiles import ErrorProfile, parse_error_profile
+
 
 @dataclass(frozen=True)
 class PushNotificationSettings:
@@ -58,6 +60,9 @@ class Settings:
 
     # Push notification settings
     push_notifications: PushNotificationSettings
+
+    # Error handling profile
+    error_profile: ErrorProfile
 
 
 def _get_push_notification_settings() -> PushNotificationSettings:
@@ -170,6 +175,8 @@ def get_settings() -> Settings:
     agent_api_key = os.getenv("A2A_AGENT_API_KEY")
     agent_description = os.getenv("A2A_AGENT_DESCRIPTION", "A2A-ACP Agent")
 
+    error_profile = parse_error_profile(os.getenv("A2A_ERROR_PROFILE"))
+
     # Push notification settings
     push_notification_settings = _get_push_notification_settings()
 
@@ -179,7 +186,8 @@ def get_settings() -> Settings:
         agent_command=agent_command,
         agent_api_key=agent_api_key,
         agent_description=agent_description,
-        push_notifications=push_notification_settings
+        push_notifications=push_notification_settings,
+        error_profile=error_profile,
     )
 
     # Validate settings

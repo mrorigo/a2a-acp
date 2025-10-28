@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 
+from .error_profiles import ErrorProfile
+
 logger = logging.getLogger(__name__)
 
 
@@ -88,6 +90,15 @@ class ToolConfig:
 
 
 @dataclass
+class ToolErrorMappingEntry:
+    """Maps a tool exit code to a Zed MCP error response."""
+    code: int
+    message: Optional[str] = None
+    retryable: Optional[bool] = None
+    detail: Optional[Any] = None
+
+
+@dataclass
 class BashTool:
     """Complete definition of a bash-based tool."""
     id: str
@@ -102,6 +113,7 @@ class BashTool:
     author: str = ""
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
+    error_mapping: Dict[int, ToolErrorMappingEntry] = field(default_factory=dict)
 
     def validate_parameters(self, params: Dict[str, Any]) -> tuple[bool, List[str]]:
         """Validate provided parameters against tool definition."""
@@ -158,7 +170,7 @@ class BashTool:
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize tool to dictionary for storage or API responses."""
-        return {
+        data = {
             "id": self.id,
             "name": self.name,
             "description": self.description,
@@ -202,6 +214,17 @@ class BashTool:
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }
+        if self.error_mapping:
+            data["error_mapping"] = {
+                str(code): {
+                    "code": entry.code,
+                    **({"message": entry.message} if entry.message else {}),
+                    **({"retryable": entry.retryable} if entry.retryable is not None else {}),
+                    **({"detail": entry.detail} if entry.detail is not None else {}),
+                }
+                for code, entry in self.error_mapping.items()
+            }
+        return data
 
 
 class ToolConfigurationError(Exception):
@@ -212,7 +235,11 @@ class ToolConfigurationError(Exception):
 class ToolConfigurationManager:
     """Manages loading, validation, and hot-reloading of tool configurations."""
 
-    def __init__(self, config_paths: Optional[List[str]] = None):
+    def __init__(
+        self,
+        config_paths: Optional[List[str]] = None,
+        error_profile: ErrorProfile = ErrorProfile.ACP_BASIC,
+    ):
         """Initialize the tool configuration manager.
 
         Args:
@@ -241,6 +268,7 @@ class ToolConfigurationManager:
         self._config_mtimes: Dict[str, float] = {}
         self._hot_reload_enabled = True
         self._lock = asyncio.Lock()
+        self.error_profile = error_profile
 
     async def load_tools(self, force_reload: bool = False) -> Dict[str, BashTool]:
         """Load and validate all tool configurations.
@@ -337,6 +365,8 @@ class ToolConfigurationManager:
                 tool = await self._parse_tool_config(tool_id, tool_config, source_file)
                 if tool:
                     tools[tool_id] = tool
+            except ToolConfigurationError:
+                raise
             except Exception as e:
                 logger.error(f"Failed to parse tool '{tool_id}' from {source_file}", extra={"error": str(e)})
 
@@ -404,6 +434,69 @@ class ToolConfigurationManager:
                 max_processes=sandbox_config.get("max_processes")
             )
 
+            # Error mapping configuration (maps process exit codes to MCP errors)
+            error_mapping_config = config.get("error_mapping", {})
+            parsed_error_mapping: Dict[int, ToolErrorMappingEntry] = {}
+            if isinstance(error_mapping_config, dict):
+                for exit_code_key, entry in error_mapping_config.items():
+                    try:
+                        exit_code = int(exit_code_key)
+                    except (TypeError, ValueError):
+                        logger.error(
+                            f"Tool '{tool_id}' has invalid exit code '{exit_code_key}' in error_mapping ({source_file})"
+                        )
+                        continue
+
+                    mcp_code: Optional[int] = None
+                    message: Optional[str] = None
+                    retryable: Optional[bool] = None
+
+                    detail: Optional[str] = None
+
+                    if isinstance(entry, dict):
+                        mcp_code = entry.get("code")
+                        message = entry.get("message")
+                        retryable_value = entry.get("retryable")
+                        if retryable_value is not None and not isinstance(retryable_value, bool):
+                            logger.error(
+                                f"Tool '{tool_id}' has non-boolean retryable for exit code {exit_code} in {source_file}"
+                            )
+                        else:
+                            retryable = retryable_value
+
+                        detail_value = entry.get("detail")
+                        if detail_value is not None and not isinstance(detail_value, str):
+                            if self.error_profile is ErrorProfile.ACP_BASIC:
+                                raise ToolConfigurationError(
+                                    f"Tool '{tool_id}' uses non-string detail for exit code {exit_code} in {source_file} "
+                                    "while the acp-basic profile requires detail to be a plain string."
+                                )
+                        detail = detail_value
+                    elif isinstance(entry, (int, float)):
+                        mcp_code = int(entry)
+                    else:
+                        logger.error(
+                            f"Tool '{tool_id}' has invalid mapping entry for exit code {exit_code} in {source_file}"
+                        )
+                        continue
+
+                    if mcp_code is None:
+                        logger.error(
+                            f"Tool '{tool_id}' missing MCP error code for exit code {exit_code} in {source_file}"
+                        )
+                        continue
+
+                    parsed_error_mapping[exit_code] = ToolErrorMappingEntry(
+                        code=int(mcp_code),
+                        message=message,
+                        retryable=retryable,
+                        detail=detail,
+                    )
+            elif error_mapping_config:
+                logger.error(
+                    f"Tool '{tool_id}' error_mapping must be a mapping object in {source_file}"
+                )
+
             # Optional fields
             tags = config.get("tags", [])
             examples = config.get("examples", [])
@@ -420,9 +513,12 @@ class ToolConfigurationManager:
                 tags=tags,
                 examples=examples,
                 version=version,
-                author=author
+                author=author,
+                error_mapping=parsed_error_mapping
             )
 
+        except ToolConfigurationError:
+            raise
         except Exception as e:
             logger.error(f"Error parsing tool '{tool_id}' config", extra={"error": str(e)})
             return None
@@ -446,7 +542,10 @@ def get_tool_configuration_manager() -> ToolConfigurationManager:
     """Get the global tool configuration manager instance."""
     global _tool_manager
     if _tool_manager is None:
-        _tool_manager = ToolConfigurationManager()
+        from .settings import get_settings
+
+        settings = get_settings()
+        _tool_manager = ToolConfigurationManager(error_profile=settings.error_profile)
     return _tool_manager
 
 

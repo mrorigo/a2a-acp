@@ -83,6 +83,78 @@ tools:
       # max_processes: 10          # Max child processes
 ```
 
+## MCP Error Mapping
+
+Tool authors can translate bash exit codes into **Zed MCP-compliant errors** so downstream clients receive semantic failures instead of generic retry prompts. Declare an `error_mapping` section alongside the script to associate process exit codes with JSON-RPC error codes, custom messages, and retryability hints:
+
+```yaml
+functions.acp_fs__read_text_file:
+  name: "Read Text File"
+  script: |
+    #!/bin/bash
+    set -euo pipefail
+    FILE="{{path}}"
+    if [[ -z "$FILE" ]]; then
+      echo "Error: path parameter is required." >&2
+      exit 2
+    fi
+    if [[ ! -f "$FILE" ]]; then
+      echo "Error: file not found: $FILE" >&2
+      exit 1
+    fi
+    cat "$FILE"
+  error_mapping:
+    "1":
+      code: -32002              # RESOURCE_NOT_FOUND
+      message: "Resource not found"
+      detail: "File not found: {{path}}"
+      retryable: false
+    "2":
+      code: -32602              # INVALID_PARAMS
+      message: "Missing required parameter: path"
+      detail: "Provide a path argument before invoking the tool"
+      retryable: false
+```
+
+When the bash script exits with a mapped code, the executor enriches the `ToolExecutionResult` with an `mcp_error` payload and propagates the translated JSON-RPC error (including a `retryable` hint and the original return code) back through the ACP bridge. Unmapped exit codes automatically fall back to an internal error (`-32603`).
+
+> **Tip:** Mappings accept either a full object (as above) or a bare integer (`"10": -32603`) if you only need to override the MCP error code. The optional `retryable` flag defaults to `false` unless explicitly provided. Use the `detail` string to control the JSON-RPC `error.data` text exposed to clients when the server runs in the default `acp-basic` profile, and keep `message` aligned with the canonical ACP text (e.g., `"Resource not found"`) so client heuristics that look for specific phrases continue to behave correctly.
+
+### Error Profiles & Diagnostics
+
+The MCP error contract is profile-driven so Zed-compatible clients receive string-based payloads while advanced backends can opt into richer JSON diagnostics.
+
+- Set the `A2A_ERROR_PROFILE` environment variable to switch between `acp-basic` (default) and `extended-json`. The former emits string `error.data` values; the latter preserves structured dictionaries.
+- Structured metadata that cannot be sent via `error.data` is attached to `toolCall.meta["a2a_diagnostics"]` and mirrored in audit logs. For `acp-basic`, the executor also appends a human-readable diagnostics block to the tool call content so operators can review suppressed detail.
+- YAML `error_mapping` entries must provide plain-string `detail` values when `acp-basic` is active. Supplying objects results in a configuration error to prevent clients from seeing `[object Object]` style messages. The `extended-json` profile continues to accept structured detail payloads.
+- Programmatic consumers should read `result.metadata["a2a_diagnostics"]` (or the matching tool call meta key) for machine-friendly diagnostics instead of depending on `error.data` objects.
+
+## Permission Mediation & Auto-Approvals
+
+All tool invocations—whether triggered directly by Zed ACP methods such as `fs/read_text_file` and `fs/write_text_file` or surfaced through agent-generated `session/request_permission` prompts—flow through the same permission pipeline:
+
+1. **Auto-Approval Policies** (`auto_approval_policies.yaml`) evaluate the tool call first. If a policy returns an approval or rejection, the decision is translated into the option IDs provided by the agent. The resolver understands both legacy IDs (`allow`, `approved`, `deny`) and the Gemini vocabulary (`proceed_once`, `proceed_always`, `cancel`) and will emit the closest matching option automatically.
+2. **Permission Governors** run only when no policy applies (or when the policy’s `skipGovernors` flag is `false`). Governors can still veto a policy decision by returning `reject`.
+3. **Agent Response** – If no automatic path succeeds, the server returns the original `session/request_permission` to the agent for manual resolution.
+
+For Gemini CLI, which always emits the option set:
+
+```json
+[{"optionId":"proceed_always","name":"Allow All Edits","kind":"allow_always"},
+ {"optionId":"proceed_once","name":"Allow","kind":"allow_once"},
+ {"optionId":"cancel","name":"Reject","kind":"reject_once"}]
+```
+
+you can safely author policies using familiar IDs such as `proceed_once`. The resolver also aliases `approved`/`allow` → `proceed_once` and `abort`/`reject` → `cancel`, so existing configurations continue to function even if agents switch option names.
+
+When the agent raises a `session/request_permission` call (common for diff-style edits), the server now handles the JSON-RPC method directly—no external orchestration required. Approved decisions are echoed back to the agent as:
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{"outcome":{"optionId":"proceed_once"}}}
+```
+
+and the task resumes without human intervention. All decisions continue to be recorded in the audit log and `governor/history` endpoints for traceability.
+
 ## Sandboxing & Security
 
 ### User-Configured Environments

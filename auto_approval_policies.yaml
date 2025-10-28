@@ -18,5 +18,5 @@ auto_approval_policies:
     include_paths: ["src/**", "lib/**"]
     decision:
       type: approve
-      optionId: approved
+      optionId: proceed_once
       reason: "Code edits auto-approved"

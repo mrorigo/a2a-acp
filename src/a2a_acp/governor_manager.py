@@ -672,8 +672,39 @@ def _resolve_option_id(
     option_ids = {opt.get("optionId") for opt in options}
     if preferred_option_id and preferred_option_id in option_ids:
         return preferred_option_id
-    if fallback in option_ids:
-        return fallback
+
+    alias_map = {
+        "approved": ["approved", "allow", "proceed_once", "proceed_always"],
+        "allow": ["allow", "approved", "proceed_once", "proceed_always"],
+        "allow_once": ["proceed_once", "allow"],
+        "allow_always": ["proceed_always"],
+        "abort": ["abort", "reject", "cancel", "deny"],
+        "reject": ["reject", "deny", "cancel", "abort"],
+    }
+
+    candidates = alias_map.get(fallback, [])
+    if fallback:
+        candidates.append(fallback)
+
+    for candidate in candidates:
+        if candidate in option_ids:
+            return candidate
+
+    fallback_kind: Optional[str] = None
+    if fallback in {"approved", "allow", "allow_once", "allow_always"}:
+        fallback_kind = "allow"
+    elif fallback in {"abort", "reject"}:
+        fallback_kind = "reject"
+
+    if fallback_kind:
+        for opt in options:
+            kind = (opt.get("kind") or "").lower()
+            option_id = opt.get("optionId")
+            if fallback_kind == "allow" and kind.startswith("allow"):
+                return option_id
+            if fallback_kind == "reject" and kind.startswith("reject"):
+                return option_id
+
     return next(iter(option_ids), None)
 
 

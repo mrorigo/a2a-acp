@@ -19,7 +19,7 @@ from a2a.models import AgentCard, AgentSkill, Task, TaskStatus, TaskState, Messa
 from a2a_acp.tool_config import BashTool, ToolConfig, ToolParameter
 from a2a_acp.bash_executor import BashToolExecutor, ToolExecutionResult
 from a2a_acp.sandbox import ExecutionContext
-from a2a_acp.audit import AuditEventType
+from a2a_acp.audit import AuditEventType, AuditDatabase, AuditLogger
 
 
 class TestToolProtocolCompliance:
@@ -464,6 +464,31 @@ class TestProtocolEdgeCases:
         assert restored_event.event_type == event.event_type
         assert restored_event.user_id == event.user_id
         assert restored_event.details == event.details
+
+
+@pytest.mark.asyncio
+async def test_audit_event_id_uniqueness(monkeypatch):
+    """Ensure audit logger emits unique identifiers even under rapid logging."""
+    logger = AuditLogger(database=AuditDatabase(":memory:"))
+    captured_ids: list[str] = []
+
+    context = ExecutionContext(
+        tool_id="audit_test",
+        session_id="session_1",
+        task_id="task_12345",
+        user_id="tester",
+    )
+
+    def capture(event):
+        captured_ids.append(event.id)
+
+    monkeypatch.setattr(logger.database, "log_event", capture)
+
+    await logger.log_tool_execution(AuditEventType.TOOL_EXECUTION_STARTED, context)
+    await logger.log_tool_execution(AuditEventType.TOOL_EXECUTION_COMPLETED, context)
+
+    assert len(captured_ids) == 2
+    assert len(set(captured_ids)) == 2
 
 
 if __name__ == "__main__":

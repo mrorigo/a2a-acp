@@ -36,12 +36,15 @@ class ExecutionResult:
     execution_time: float
     output_files: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = None
+    mcp_error: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if self.output_files is None:
             self.output_files = []
         if self.metadata is None:
             self.metadata = {}
+        if self.mcp_error is None:
+            self.mcp_error = {}
 
 
 @dataclass
@@ -351,8 +354,14 @@ class ToolSandbox:
                     warnings.append(f"Warning: {description} (allowed by configuration)")
 
         # Check for command injection patterns
+        safe_substitutions = ("$(dirname", "$(basename", "$(wc")
         for pattern, description in injection_patterns:
-            if re.search(pattern, script, re.IGNORECASE):
+            for match in re.finditer(pattern, script, re.IGNORECASE):
+                if pattern == r'\$\((?!\()':
+                    fragment = script[match.start(): match.start() + 40].lower()
+                    if fragment.startswith(safe_substitutions):
+                        continue
+                snippet = script[match.start(): match.end() + 40]
                 violations.append(f"Blocked command injection attempt: {description}")
 
         # Check for filesystem path traversal
@@ -563,6 +572,28 @@ class ToolSandbox:
             execution_timeout = timeout or 30
 
             # Execute the script with enhanced security
+            preexec_fn = None
+            if sys.platform != "darwin":
+                preexec_fn = lambda: self._set_process_limits(tool_config)
+            else:
+                if tool_config and any(
+                    limit is not None
+                    for limit in (
+                        tool_config.max_memory_mb,
+                        tool_config.max_cpu_time_seconds,
+                        tool_config.max_file_size_mb,
+                        tool_config.max_open_files,
+                        tool_config.max_processes,
+                    )
+                ):
+                    logger.debug(
+                        "Skipping process limits: unsupported on macOS preexec context",
+                        extra={
+                            "tool_id": context.tool_id,
+                            "platform": sys.platform,
+                        },
+                    )
+
             process = await asyncio.create_subprocess_shell(
                 script,
                 stdin=asyncio.subprocess.PIPE,
@@ -570,7 +601,7 @@ class ToolSandbox:
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
                 cwd=working_dir,
-                preexec_fn=lambda: self._set_process_limits(tool_config)  # Set resource limits
+                preexec_fn=preexec_fn  # Set resource limits when supported
             )
 
             try:
@@ -608,9 +639,11 @@ class ToolSandbox:
                     "output_files": output_files
                 })
 
+                resolved_return = process.returncode if process.returncode is not None else -1
+
                 return ExecutionResult(
                     success=process.returncode == 0,
-                    return_code=process.returncode or -1,
+                    return_code=resolved_return,
                     stdout=stdout,
                     stderr=stderr,
                     execution_time=execution_time,

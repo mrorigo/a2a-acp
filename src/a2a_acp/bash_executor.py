@@ -9,23 +9,51 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
-import tempfile
-import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from string import Template
 
-from .tool_config import BashTool, ToolParameter
-from .sandbox import ToolSandbox, ExecutionContext, ExecutionResult, get_sandbox_manager, managed_sandbox
+from .tool_config import BashTool
+from .sandbox import (
+    ToolSandbox,
+    ExecutionContext,
+    ExecutionResult,
+    SandboxError,
+    SandboxSecurityError,
+    get_sandbox_manager,
+    managed_sandbox,
+)
 from .push_notification_manager import PushNotificationManager
 from .audit import get_audit_logger, AuditEventType
-from a2a.models import InputRequiredNotification, TaskState
+from .error_profiles import ErrorProfile, ErrorContract, build_acp_error
+from a2a.models import InputRequiredNotification
 
 logger = logging.getLogger(__name__)
 
+ACP_ERROR_CODES = {
+    "PARSE_ERROR": -32700,
+    "INVALID_REQUEST": -32600,
+    "METHOD_NOT_FOUND": -32601,
+    "INVALID_PARAMS": -32602,
+    "INTERNAL_ERROR": -32603,
+    "AUTH_REQUIRED": -32000,
+    "RESOURCE_NOT_FOUND": -32002,
+}
+
+DEFAULT_ERROR_MESSAGES = {
+    ACP_ERROR_CODES["PARSE_ERROR"]: "Parse error",
+    ACP_ERROR_CODES["INVALID_REQUEST"]: "Invalid request",
+    ACP_ERROR_CODES["METHOD_NOT_FOUND"]: "Method not found",
+    ACP_ERROR_CODES["INVALID_PARAMS"]: "Invalid parameters",
+    ACP_ERROR_CODES["INTERNAL_ERROR"]: "Internal error",
+    ACP_ERROR_CODES["AUTH_REQUIRED"]: "Authentication required",
+    ACP_ERROR_CODES["RESOURCE_NOT_FOUND"]: "Resource not found",
+}
+
+RETRYABLE_ERROR_CODES = {
+    ACP_ERROR_CODES["INTERNAL_ERROR"],
+}
 
 @dataclass
 class ToolExecutionResult:
@@ -38,6 +66,7 @@ class ToolExecutionResult:
     return_code: int
     metadata: Dict[str, Any]
     output_files: List[str]
+    mcp_error: Optional[Dict[str, Any]] = None
 
     @classmethod
     def from_execution_result(
@@ -54,7 +83,8 @@ class ToolExecutionResult:
             execution_time=execution_result.execution_time,
             return_code=execution_result.return_code,
             metadata=execution_result.metadata or {},
-            output_files=execution_result.output_files or []
+            output_files=execution_result.output_files or [],
+            mcp_error=execution_result.mcp_error if execution_result.mcp_error else None
         )
 
 
@@ -139,7 +169,8 @@ class BashToolExecutor:
         self,
         sandbox: Optional[ToolSandbox] = None,
         push_notification_manager: Optional[PushNotificationManager] = None,
-        task_manager: Optional[Any] = None
+        task_manager: Optional[Any] = None,
+        error_profile: ErrorProfile = ErrorProfile.ACP_BASIC,
     ):
         """Initialize the bash tool executor.
 
@@ -147,10 +178,12 @@ class BashToolExecutor:
             sandbox: Sandbox manager instance. If None, uses global instance.
             push_notification_manager: Push notification manager for event emission.
             task_manager: A2A task manager for INPUT_REQUIRED integration.
+            error_profile: Selected MCP error contract profile.
         """
         self.sandbox = sandbox or get_sandbox_manager()
         self.push_notification_manager = push_notification_manager
         self.task_manager = task_manager
+        self.error_profile = error_profile
         self._execution_cache: Dict[str, Dict[str, Any]] = {}
         self._cache_lock = asyncio.Lock()
 
@@ -223,7 +256,8 @@ class BashToolExecutor:
                             "reason": reason,
                             "parameters": parameters,
                             "tool_version": tool.version,
-                            "cached": False
+                            "cached": False,
+                            "error_profile": self.error_profile.value,
                         },
                         output_files=[]
                     )
@@ -253,22 +287,45 @@ class BashToolExecutor:
                 "tool_version": tool.version,
                 "cached": False
             })
+            tool_result.metadata.setdefault("error_profile", self.error_profile.value)
 
-            # Emit tool execution completed event
-            await self._emit_tool_event("completed", context,
-                success=True,
-                execution_time=tool_result.execution_time,
-                return_code=tool_result.return_code,
-                output_length=len(tool_result.output)
-            )
+            if tool_result.success:
+                await self._emit_tool_event("completed", context,
+                    success=True,
+                    execution_time=tool_result.execution_time,
+                    return_code=tool_result.return_code,
+                    output_length=len(tool_result.output)
+                )
 
-            logger.info(f"Tool execution completed: {tool.id}", extra={
-                "tool_id": tool.id,
-                "success": tool_result.success,
-                "execution_time": tool_result.execution_time,
-                "return_code": tool_result.return_code,
-                "output_length": len(tool_result.output)
-            })
+                logger.info(f"Tool execution completed: {tool.id}", extra={
+                    "tool_id": tool.id,
+                    "success": tool_result.success,
+                    "execution_time": tool_result.execution_time,
+                    "return_code": tool_result.return_code,
+                    "output_length": len(tool_result.output)
+                })
+            else:
+                error_contract = self._resolve_mcp_error(tool, tool_result)
+                mcp_error = self._apply_error_contract(tool_result, error_contract)
+
+                await self._emit_tool_event("failed", context,
+                    success=False,
+                    error=tool_result.error or "Tool execution failed",
+                    execution_time=tool_result.execution_time,
+                    return_code=tool_result.return_code,
+                    mcp_error=mcp_error,
+                    diagnostics=error_contract.diagnostics,
+                )
+
+                logger.error(f"Tool execution failed with non-zero exit: {tool.id}", extra={
+                    "tool_id": tool.id,
+                    "success": tool_result.success,
+                    "execution_time": tool_result.execution_time,
+                    "return_code": tool_result.return_code,
+                    "error": tool_result.error,
+                    "mcp_error": mcp_error,
+                    "diagnostics": error_contract.diagnostics,
+                })
 
             return tool_result
 
@@ -282,16 +339,21 @@ class BashToolExecutor:
                 "execution_time": execution_time
             })
 
+            error_contract = self._build_mcp_error_from_exception(e)
+            mcp_error = error_contract.to_mcp_error()
+
             # Emit tool execution failed event
             await self._emit_tool_event("failed", context,
                 success=False,
                 error=str(e),
                 error_type=type(e).__name__,
-                execution_time=execution_time
+                execution_time=execution_time,
+                mcp_error=mcp_error,
+                diagnostics=error_contract.diagnostics,
             )
 
             # Return error result
-            return ToolExecutionResult(
+            result = ToolExecutionResult(
                 tool_id=tool.id,
                 success=False,
                 output="",
@@ -304,10 +366,14 @@ class BashToolExecutor:
                     "error_type": type(e).__name__,
                     "parameters": parameters,
                     "tool_version": tool.version,
-                    "cached": False
+                    "cached": False,
+                    "error_profile": self.error_profile.value,
                 },
-                output_files=[]
+                output_files=[],
+                mcp_error=mcp_error
             )
+            self._apply_error_contract(result, error_contract)
+            return result
 
     async def _emit_tool_event(self, event_type: str, context: ExecutionContext, **event_data) -> None:
         """Emit a tool execution event via the push notification system.
@@ -493,10 +559,151 @@ class BashToolExecutor:
         if return_code in [137, 143, 130]:  # SIGKILL, SIGTERM, SIGINT
             return ToolRetryableError(f"Process interrupted (code {return_code}): {error}")
         elif return_code >= 1 and return_code <= 125:  # General errors
-            return ToolRetryableError(f"Retryable process error (code {return_code}): {error}")
+                return ToolRetryableError(f"Retryable process error (code {return_code}): {error}")
         else:
             # Default to retryable for unknown errors
             return ToolRetryableError(f"Unknown error: {error}")
+
+    def _apply_error_contract(
+        self,
+        result: ToolExecutionResult,
+        contract: ErrorContract,
+    ) -> Dict[str, Any]:
+        """Attach a normalised error contract to the tool result metadata."""
+        payload = contract.to_mcp_error()
+        payload_copy = dict(payload)
+        result.mcp_error = payload_copy
+        result.metadata["mcp_error"] = payload_copy
+        result.metadata.setdefault("error_profile", self.error_profile.value)
+        if contract.diagnostics:
+            diagnostics = result.metadata.setdefault("a2a_diagnostics", {})
+            diagnostics.update(contract.diagnostics)
+        return payload_copy
+
+    @staticmethod
+    def _sanitize_error_output(output: Optional[str]) -> Optional[str]:
+        """Filter internal warning noise from tool stderr for cleaner diagnostics."""
+        if not output:
+            return output
+
+        filtered = []
+        for line in output.splitlines():
+            if line.startswith("WARNING:a2a_acp.sandbox:Could not set process limits"):
+                continue
+            filtered.append(line)
+
+        cleaned = "\n".join(filtered).strip()
+        return cleaned or None
+
+    def _resolve_mcp_error(self, tool: BashTool, result: ToolExecutionResult) -> ErrorContract:
+        """Resolve the MCP error payload for a failed tool result."""
+        mapping_entry = tool.error_mapping.get(result.return_code) if tool.error_mapping else None
+
+        if mapping_entry:
+            return self._build_error_contract(
+                code=mapping_entry.code,
+                configured_message=mapping_entry.message,
+                result=result,
+                retryable_override=mapping_entry.retryable,
+                configured_detail=getattr(mapping_entry, "detail", None),
+            )
+
+        fallback_code = self._default_error_code_for_return_code(result.return_code)
+        return self._build_error_contract(
+            code=fallback_code,
+            configured_message=None,
+            result=result,
+            retryable_override=None,
+        )
+
+    def _build_mcp_error_from_exception(self, error: Exception) -> ErrorContract:
+        """Construct an MCP error payload from an exception."""
+        message = str(error)
+
+        if isinstance(error, ParameterError):
+            return self._build_error_contract(ACP_ERROR_CODES["INVALID_PARAMS"], None, error_message=message, retryable_override=False)
+        if isinstance(error, TemplateRenderError):
+            return self._build_error_contract(ACP_ERROR_CODES["INVALID_PARAMS"], None, error_message=message, retryable_override=False)
+        if isinstance(error, ToolPermanentError):
+            return self._build_error_contract(ACP_ERROR_CODES["INVALID_PARAMS"], None, error_message=message, retryable_override=False)
+        if isinstance(error, ToolRetryableError):
+            return self._build_error_contract(ACP_ERROR_CODES["INTERNAL_ERROR"], None, error_message=message, retryable_override=True)
+        if isinstance(error, SandboxSecurityError):
+            return self._build_error_contract(ACP_ERROR_CODES["INVALID_REQUEST"], None, error_message=message, retryable_override=False)
+        if isinstance(error, SandboxError):
+            return self._build_error_contract(ACP_ERROR_CODES["INTERNAL_ERROR"], None, error_message=message, retryable_override=False)
+
+        return self._build_error_contract(ACP_ERROR_CODES["INTERNAL_ERROR"], None, error_message=message, retryable_override=False)
+
+    def _build_error_contract(
+        self,
+        code: int,
+        configured_message: Optional[str],
+        result: Optional[ToolExecutionResult] = None,
+        retryable_override: Optional[bool] = None,
+        error_message: Optional[str] = None,
+        configured_detail: Optional[str] = None,
+    ) -> ErrorContract:
+        """Forms a consistent MCP error structure."""
+        resolved_message = (
+            (configured_message.strip() if configured_message else None)
+            or DEFAULT_ERROR_MESSAGES.get(code)
+            or "Tool execution failed"
+        )
+
+        sanitized_error: Optional[str] = None
+        if result:
+            sanitized_error = self._sanitize_error_output(result.error)
+
+        detail_candidates: List[str] = []
+        if configured_detail:
+            detail_candidates.append(configured_detail.strip())
+        if error_message:
+            detail_candidates.append(error_message.strip())
+        if sanitized_error:
+            detail_candidates.append(sanitized_error)
+        elif result and result.output:
+            detail_candidates.append(result.output.strip())
+
+        if result and isinstance(result.return_code, int) and result.return_code < 0:
+            signal_number = abs(result.return_code)
+            detail_candidates.append(f"Process terminated by signal {signal_number}")
+
+        detail_value = next((m for m in detail_candidates if m), None)
+        retryable = retryable_override if retryable_override is not None else self._is_retryable_error_code(code)
+
+        diagnostics: Dict[str, Any] = {"error_profile": self.error_profile.value}
+        if result:
+            diagnostics["return_code"] = result.return_code
+            if isinstance(result.return_code, int) and result.return_code < 0:
+                diagnostics["signal"] = abs(result.return_code)
+        elif error_message:
+            diagnostics["error_message"] = error_message
+
+        return build_acp_error(
+            profile=self.error_profile,
+            code=code,
+            message=resolved_message,
+            detail=detail_value,
+            retryable=retryable,
+            diagnostics=diagnostics,
+        )
+
+    def _default_error_code_for_return_code(self, return_code: int) -> int:
+        """Map a process return code to a reasonable default MCP error."""
+        if return_code == 0:
+            return ACP_ERROR_CODES["INTERNAL_ERROR"]
+        if return_code == 2:
+            return ACP_ERROR_CODES["INVALID_PARAMS"]
+        if return_code in (126, 127):
+            return ACP_ERROR_CODES["METHOD_NOT_FOUND"]
+        if return_code in (130, 137, 143):
+            return ACP_ERROR_CODES["INTERNAL_ERROR"]
+        return ACP_ERROR_CODES["INTERNAL_ERROR"]
+
+    def _is_retryable_error_code(self, code: int) -> bool:
+        """Determine whether an MCP error code should be treated as retryable."""
+        return code in RETRYABLE_ERROR_CODES
 
     async def render_script(
         self,
@@ -871,6 +1078,7 @@ class BashToolExecutor:
             except Exception as e:
                 logger.error(f"Batch execution failed for tool: {tool_id}", extra={"error": str(e)})
                 # Create error result
+                error_contract = self._build_mcp_error_from_exception(e)
                 error_result = ToolExecutionResult(
                     tool_id=tool_id,
                     success=False,
@@ -878,9 +1086,14 @@ class BashToolExecutor:
                     error=str(e),
                     execution_time=0.0,
                     return_code=-1,
-                    metadata={"error_type": type(e).__name__},
-                    output_files=[]
+                    metadata={
+                        "error_type": type(e).__name__,
+                        "error_profile": self.error_profile.value,
+                    },
+                    output_files=[],
+                    mcp_error=None
                 )
+                self._apply_error_contract(error_result, error_contract)
                 results.append(error_result)
 
         logger.info(f"Batch execution completed: {len(results)} results")
@@ -944,8 +1157,17 @@ def get_bash_executor() -> BashToolExecutor:
     """Get the global bash executor instance."""
     global _bash_executor
     if _bash_executor is None:
-        _bash_executor = BashToolExecutor()
+        from .settings import get_settings
+
+        settings = get_settings()
+        _bash_executor = BashToolExecutor(error_profile=settings.error_profile)
     return _bash_executor
+
+
+def set_bash_executor(executor: BashToolExecutor) -> None:
+    """Set the global bash executor instance."""
+    global _bash_executor
+    _bash_executor = executor
 
 
 async def execute_tool(

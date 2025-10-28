@@ -220,14 +220,22 @@ output_settings:
 
 #### `auto_approval_policies.yaml`
 
+Policy decisions accept either the legacy option IDs (`allow`, `approved`, `deny`) _or_ the Gemini-native values (`proceed_once`, `proceed_always`, `cancel`). The resolver automatically maps synonyms to the closest option exposed by the agent, so the example below works even when Gemini presents its custom option list.
+
 ```yaml
 auto_approval_policies:
   - id: docs-edits
-    applies_to: ["functions.acp_fs__write_text_file"]
-    include_paths: ["docs/**", "*.md"]
+    applies_to:
+      - "functions.acp_fs__write_text_file"
+      - "functions.acp_fs__edit_text_file"
+    include_paths:
+      - "*.md"
+      - "docs/**"
     decision:
       type: approve
-      optionId: approved
+      optionId: proceed_once   # maps to the agent's one-time allow option
+      reason: "Documentation edits auto-approved"
+      skipGovernors: true
 
   - id: safe-shell
     applies_to: ["functions.shell"]
@@ -235,8 +243,10 @@ auto_approval_policies:
       command_prefix: ["git", "status"]
     decision:
       type: approve
-      optionId: approved
+      optionId: allow          # automatically resolves to proceed_once/allow_always
 ```
+
+> **Note:** Rejection aliases are handled the same way. Returning `deny`, `reject`, `abort`, or `cancel` will select the first reject-style option offered by the agent.
 
 ## Runtime Configuration
 

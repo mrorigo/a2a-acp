@@ -5,7 +5,6 @@ This module defines the data models used by ZedACP for handling push notificatio
 configurations, delivery tracking, and related functionality.
 """
 
-import json
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Union
