@@ -378,52 +378,81 @@ class ToolSandbox:
     def _validate_file_paths(self, script: str, allowed_commands: List[str]) -> List[str]:
         """Validate file paths in script for security."""
         violations = []
+        variables = {}
+        var_pattern = re.compile(r'^([a-zA-Z_][a-zA-Z0-9_]*)=([\'"`]?)(.*)\2$')
 
-        # Extract file paths from common commands
         lines = script.split('\n')
+        
+        # First pass: collect variable definitions
+        for line in lines:
+            match = var_pattern.match(line.strip())
+            if match:
+                var_name, _, var_value = match.groups()
+                variables[f"${var_name}"] = var_value
+                variables[f"${{{var_name}}}"] = var_value
+
+        def resolve_path(path_str: str) -> str:
+            # Simple, non-recursive substitution
+            return variables.get(path_str.strip('\'"'), path_str.strip('\'"'))
+
+        # Regex to find file paths after redirection operators > or >>
+        write_pattern = re.compile(r'(?:>>|(?<!&)>)\s*([\'"`]?)([$\w./-]+)\1')
+
         for line in lines:
             line = line.strip()
 
+            parts = line.split()
+            if not parts:
+                continue
+            
+            command = parts[0]
+
             # Check file reading operations
-            if any(cmd in line for cmd in ['cat ', 'head ', 'tail ', 'less ', 'more ']):
-                parts = line.split()
+            if command in ['cat', 'head', 'tail', 'less', 'more', 'sed']:
                 if len(parts) >= 2:
                     file_path = parts[-1]
-                    if not self._is_path_allowed(file_path, allowed_commands):
-                        violations.append(f"Blocked file access: {file_path}")
+                    resolved_path = resolve_path(file_path)
+                    if not self._is_path_allowed(resolved_path, allowed_commands):
+                        stripped_path = file_path.strip("'\"")
+                        violations.append(f"Blocked file access: {stripped_path}")
 
             # Check file writing operations
-            elif any(cmd in line for cmd in ['echo ', 'printf ', 'tee ']) and '>' in line:
-                parts = line.split('>')
-                if len(parts) >= 2:
-                    file_path = parts[1].strip()
-                    if not self._is_path_allowed(file_path, allowed_commands):
+            elif command in ['echo', 'printf', 'tee'] and '>' in line:
+                matches = write_pattern.finditer(line)
+                for match in matches:
+                    file_path = match.group(2)
+                    resolved_path = resolve_path(file_path)
+                    if not self._is_path_allowed(resolved_path, allowed_commands):
                         violations.append(f"Blocked file write: {file_path}")
 
             # Check directory operations
-            elif 'cd ' in line:
-                dir_path = line.replace('cd ', '').strip()
-                if not self._is_path_allowed(dir_path, allowed_commands):
-                    violations.append(f"Blocked directory access: {dir_path}")
+            elif command == 'cd':
+                if len(parts) > 1:
+                    dir_path = parts[1]
+                    resolved_path = resolve_path(dir_path)
+                    if not self._is_path_allowed(resolved_path, allowed_commands):
+                        stripped_dir = dir_path.strip("'\"")
+                        violations.append(f"Blocked directory access: {stripped_dir}")
 
-        return violations
+        return list(dict.fromkeys(violations))
 
     def _is_path_allowed(self, path: str, allowed_commands: List[str]) -> bool:
         """Check if a file path is allowed based on security configuration."""
-        # Basic path validation - in production this would be more sophisticated
-        if not path or path.startswith('/dev/') or path.startswith('/proc/'):
+        # Basic path validation
+        if not path or path.startswith('/dev/') or path.startswith('/proc/') or path.startswith('$'):
             return False
 
         if '..' in path:
             return False
 
-        # If no specific restrictions, allow common safe paths
         if not self.allowed_paths:
             return True
 
-        # Check against allowed paths
-        for allowed_path in self.allowed_paths:
-            if path.startswith(allowed_path):
+        abs_path_to_check = os.path.abspath(path)
+
+        for allowed_path_str in self.allowed_paths:
+            abs_allowed_path = os.path.abspath(allowed_path_str)
+            if abs_path_to_check.startswith(abs_allowed_path):
                 return True
 
         return False
