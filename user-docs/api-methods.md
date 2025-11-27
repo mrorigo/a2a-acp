@@ -238,14 +238,23 @@ curl -X GET http://localhost:8001/.well-known/agent-card.json
 {
   "protocolVersion": "0.3.0",
   "name": "a2a-acp-agent",
-  "description": "A2A-ACP Development Agent (with bash tool execution)",
+  "description": "A2A-ACP Development Agent (with bash tool execution and development-tool extension)",
   "url": "http://localhost:8001",
   "preferredTransport": "JSONRPC",
   "version": "1.0.0",
   "capabilities": {
     "streaming": true,
     "pushNotifications": true,
-    "stateTransitionHistory": true
+    "stateTransitionHistory": true,
+    "extensions": [
+      {
+        "uri": "https://developers.google.com/gemini/a2a/extensions/development-tool/v1",
+        "version": "1.0.0",
+        "metadata": {
+          "description": "Support for development tool interactions including slash commands and tool lifecycles"
+        }
+      }
+    ]
   },
   "securitySchemes": {
     "bearer": {

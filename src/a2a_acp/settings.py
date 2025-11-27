@@ -64,6 +64,9 @@ class Settings:
     # Error handling profile
     error_profile: ErrorProfile
 
+    # Development tool extension
+    development_tool_extension_enabled: bool = True
+
 
 def _get_push_notification_settings() -> PushNotificationSettings:
     """Get push notification specific settings from environment variables."""
@@ -175,6 +178,8 @@ def get_settings() -> Settings:
     agent_api_key = os.getenv("A2A_AGENT_API_KEY")
     agent_description = os.getenv("A2A_AGENT_DESCRIPTION", "A2A-ACP Agent")
 
+    development_tool_extension_enabled = os.getenv("DEVELOPMENT_TOOL_EXTENSION_ENABLED", "true").lower() == "true"
+
     error_profile = parse_error_profile(os.getenv("A2A_ERROR_PROFILE"))
 
     # Push notification settings
@@ -186,6 +191,7 @@ def get_settings() -> Settings:
         agent_command=agent_command,
         agent_api_key=agent_api_key,
         agent_description=agent_description,
+        development_tool_extension_enabled=development_tool_extension_enabled,
         push_notifications=push_notification_settings,
         error_profile=error_profile,
     )
@@ -213,6 +219,9 @@ A2A_AUTH_TOKEN=your-auth-token-here
 A2A_AGENT_COMMAND=python your_agent.py
 A2A_AGENT_API_KEY=your-agent-api-key
 A2A_AGENT_DESCRIPTION="Your A2A-ACP Agent"
+
+# Development Tool Extension
+DEVELOPMENT_TOOL_EXTENSION_ENABLED=true
 
 # Push Notification Configuration
 PUSH_NOTIFICATIONS_ENABLED=true

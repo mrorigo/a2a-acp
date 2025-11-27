@@ -82,7 +82,20 @@ When the input request originates from a tool permission prompt, the notificatio
       {"optionId": "abort", "name": "Reject"}
     ],
     "governor_summary": ["[security-diff-check] Needs attention: file touches secrets.env"],
-    "tool_call": {"toolId": "functions.acp_fs__write_text_file", "path": "config/secrets.env"}
+    "tool_call": {"toolId": "functions.acp_fs__write_text_file", "path": "config/secrets.env"},
+    "metadata": {
+      "development-tool": {
+        "kind": "tool_call_update",
+        "tool_call": {
+          "tool_call_id": "tc_001",
+          "status": "pending",
+          "confirmation_request": {
+            "options": [{"id": "approve", "name": "Allow"}],
+            "details": {"description": "Write to secrets file?"}
+          }
+        }
+      }
+    }
   }
 }
 ```
@@ -166,7 +179,17 @@ When the input request originates from a tool permission prompt, the notificatio
     "tool_id": "web_request",
     "status": "started",
     "parameters": {"method": "GET", "url": "https://api.example.com"},
-    "execution_context": "production"
+    "execution_context": "production",
+    "metadata": {
+      "development-tool": {
+        "kind": "tool_call_update",
+        "tool_call": {
+          "tool_call_id": "tc_001",
+          "status": "executing",
+          "tool_name": "web_request"
+        }
+      }
+    }
   }
 }
 ```
@@ -189,7 +212,27 @@ When the input request originates from a tool permission prompt, the notificatio
     "execution_time": 0.5,
     "return_code": 0,
     "output_length": 512,
-    "cached": false
+    "cached": false,
+    "output": {
+      "content": "HTTP 200 OK",
+      "details": {
+        "stdout": "Response: {\"status\": \"success\"}\n",
+        "exit_code": 0
+      }
+    },
+    "metadata": {
+      "development-tool": {
+        "kind": "tool_call_update",
+        "tool_call": {
+          "tool_call_id": "tc_001",
+          "status": "succeeded",
+          "result": {
+            "content": "HTTP 200 OK",
+            "details": {"stdout": "Response body...", "exit_code": 0}
+          }
+        }
+      }
+    }
   }
 }
 ```
@@ -212,12 +255,259 @@ When the input request originates from a tool permission prompt, the notificatio
     "error": "Connection timeout",
     "execution_time": 5.2,
     "retry_attempt": 2,
-    "will_retry": true
+    "will_retry": true,
+    "metadata": {
+      "development-tool": {
+        "kind": "tool_call_update",
+        "tool_call": {
+          "tool_call_id": "tc_002",
+          "status": "failed",
+          "result": {
+            "message": "Connection timeout",
+            "code": "DB_TIMEOUT",
+            "details": {"attempt": 2}
+          }
+        }
+      }
+    }
   }
 }
 ```
 
+## Development Tool Extension Events
+
+The development-tool extension enhances A2A-ACP's event system with structured metadata for tool interactions. When enabled (`DEVELOPMENT_TOOL_EXTENSION_ENABLED=true`), events include `DevelopmentToolEvent` objects in the `metadata` field, enabling clients to render tool progress, confirmations, and thoughts natively.
+
+### DevelopmentToolEvent Metadata Types
+
+`DevelopmentToolEvent` appears in `TaskStatusUpdateEvent` and push notifications, namespaced under the extension URI:
+
+```json
+{
+  "metadata": {
+    "https://developers.google.com/gemini/a2a/extensions/development-tool/v1": {
+      "kind": "tool_call_update",  // DevelopmentToolEventKind
+      "model": "gemini-1.5-pro",
+      "user_tier": "premium",
+      "data": { ... }  // ToolCall, AgentThought, etc.
+    }
+  }
+}
+```
+
+#### Supported Event Kinds (DevelopmentToolEventKind)
+
+| Kind | Description | Example Use Case |
+|------|-------------|------------------|
+| `TOOL_CALL_UPDATE` | Tool lifecycle update (PENDING, EXECUTING, SUCCEEDED, FAILED, CANCELLED) | Progress during bash tool execution |
+| `TOOL_CALL_CONFIRMATION` | User confirmation received for pending tool | After `tasks/provideInputAndContinue` |
+| `TEXT_CONTENT` | Plain text output from tool | Simple stdout capture |
+| `STATE_CHANGE` | Task state transition with extension context | From input-required to working |
+| `THOUGHT` | Agent reasoning step | "Analyzing parameters for security..." |
+| `GOVERNANCE_EVENT` | Policy decision or remediation suggestion | Post-run governor feedback |
+
+#### Tool Lifecycle Event Kinds
+
+Tool calls follow a structured lifecycle, emitted via `TOOL_CALL_UPDATE`:
+
+1. **PENDING**: Confirmation required (if `requires_confirmation: true` in tool config).
+   ```json
+   {
+     "kind": "tool_call_update",
+     "tool_call": {
+       "tool_call_id": "tc_001",
+       "status": "pending",
+       "tool_name": "database_query",
+       "input_parameters": {"query": "DELETE FROM users"},
+       "confirmation_request": {
+         "options": [{"id": "approve", "name": "Allow"}],
+         "details": {"description": "Dangerous SQL query detected"}
+       }
+     }
+   }
+   ```
+
+2. **EXECUTING**: Sandbox execution started.
+   ```json
+   {
+     "kind": "tool_call_update",
+     "tool_call": {
+       "tool_call_id": "tc_001",
+       "status": "executing",
+       "live_content": "Connecting to database..."
+     }
+   }
+   ```
+
+3. **SUCCEEDED**: Execution complete with output.
+   ```json
+   {
+     "kind": "tool_call_update",
+     "tool_call": {
+       "tool_call_id": "tc_001",
+       "status": "succeeded",
+       "result": {
+         "content": "Query executed successfully",
+         "details": {"stdout": "10 rows affected", "exit_code": 0}
+       }
+     }
+   }
+   ```
+
+4. **FAILED**: Execution error.
+   ```json
+   {
+     "kind": "tool_call_update",
+     "tool_call": {
+       "tool_call_id": "tc_001",
+       "status": "failed",
+       "result": {
+         "message": "Connection refused",
+         "code": "DB_CONN_ERROR"
+       }
+     }
+   }
+   ```
+
+5. **CANCELLED**: User rejected or timeout.
+   ```json
+   {
+     "kind": "tool_call_update",
+     "tool_call": {
+       "tool_call_id": "tc_001",
+       "status": "cancelled",
+       "result": {"message": "User cancelled confirmation"}
+     }
+   }
+   ```
+
+#### Agent Thoughts (THOUGHT Kind)
+Emitted for reasoning transparency:
+```json
+{
+  "kind": "thought",
+  "content": "Reviewing query for potential data loss before execution.",
+  "timestamp": "2025-10-30T13:40:00Z"
+}
+```
+
+#### Extension-Specific Event Payloads Examples
+
+1. **Confirmation Flow with Tool Call**:
+   Full `input_required` event integrating extension metadata:
+   ```json
+   {
+     "event": "input_required",
+     "task_id": "task_123",
+     "data": {
+       "permission_options": [{"optionId": "approve", "name": "Proceed"}],
+       "tool_call": {
+         "tool_call_id": "tc_001",
+         "status": "pending",
+         "confirmation_request": {
+           "options": [{"id": "approve", "name": "Allow"}],
+           "details": {"description": "Execute shell command?"}
+         }
+       },
+       "metadata": {
+         "development-tool": {
+           "kind": "tool_call_update",
+           "tool_call": { ... }  // Full ToolCall object
+         }
+       }
+     }
+   }
+   ```
+
+2. **Governance Event (Post-Run Feedback)**:
+   Integrates with RAIL for policy decisions:
+   ```json
+   {
+     "event": "task_governor_followup",
+     "task_id": "task_123",
+     "data": {
+       "governor_id": "code-reviewer",
+       "prompt": "Add unit tests for new endpoint",
+       "metadata": {
+         "development-tool": {
+           "kind": "governance_event",
+           "data": {
+             "policy_phase": "post_run",
+             "final_decision": "needs_attention",
+             "governor_summary": "Add coverage for error handling"
+           }
+         }
+       }
+     }
+   }
+   ```
+
+3. **Push Notification Enhancements**
+   Push notifications now include extension metadata for async clients:
+   - **Enhanced Payloads**: `DevelopmentToolEvent` embedded in `data.metadata`.
+   - **New Event Types**: `tool_call_update`, `thought`, `governance_event` via push configs.
+   - **Async Confirmation**: Clients receive PENDING events offline; respond via API when reconnected.
+
+   **Example Push Payload for Tool Update**:
+   ```json
+   {
+     "event": "status_change",
+     "task_id": "task_123",
+     "timestamp": "2025-10-30T13:40:00Z",
+     "data": {
+       "old_state": "working",
+       "new_state": "working",
+       "metadata": {
+         "development-tool": {
+           "kind": "tool_call_update",
+           "tool_call": {
+             "status": "succeeded",
+             "result": {"content": "Command output..."}
+           }
+         }
+       }
+     }
+   }
+   ```
+
+   **Configuration for Extension Events**:
+   Include extension kinds in `enabledEvents`:
+   ```json
+   {
+     "enabledEvents": ["status_change", "input_required", "tool_call_update", "thought"]
+   }
+   ```
+
+   Enhancements:
+   - **Rich Payloads**: Structured `ToolOutput`/`ErrorDetails` for better error handling.
+   - **Retry Support**: Failed deliveries retry with exponential backoff, preserving metadata.
+   - **Filtering**: Clients filter by `kind` (e.g., ignore `GOVERNANCE_EVENT` if unsupported).
+   - **Security**: Metadata signed with HMAC; sensitive params redacted.
+
+For schema details, see [DEVELOPMENT_TOOL_EXTENSION.md](docs/DEVELOPMENT_TOOL_EXTENSION.md).
+
 ### Security Events
+
+#### Authentication Events
+**Emitted when**: Authentication attempts occur
+
+**Trigger locations**:
+- `main.py`: API authentication middleware
+- `zed_agent.py`: Agent credential validation
+
+**Event structure:**
+```json
+{
+  "event": "authentication",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "data": {
+    "type": "api_key",
+    "status": "success",
+    "client_ip": "192.168.1.100",
+    "user_agent": "A2A-Client/1.0"
+  }
+}
+```
 
 #### Authentication Events
 **Emitted when**: Authentication attempts occur

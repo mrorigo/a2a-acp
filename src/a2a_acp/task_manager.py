@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Dict, List, Optional, Any, Callable, Awaitable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -35,13 +36,30 @@ from .zed_agent import (
     ToolPermissionRequest,
 )
 from .push_notification_manager import PushNotificationManager
-from .models import EventType
+from .models import (
+    EventType,
+    ToolCall,
+    ToolCallStatus,
+    ConfirmationRequest,
+    ConfirmationOption,
+    GenericDetails,
+    ToolCallConfirmation,
+    DevelopmentToolEvent,
+    DevelopmentToolEventKind,
+    AgentThought,
+    ToolOutput,
+    ErrorDetails,
+    ExecuteDetails,
+)
 from .governor_manager import (
     AutoApprovalDecision,
     GovernorResult,
     PermissionEvaluationResult,
     get_governor_manager,
 )
+
+# Import development tool extension models
+from .models import AgentSettings
 
 logger = logging.getLogger(__name__)
 
@@ -135,23 +153,62 @@ class A2ATaskManager:
         task_id: str,
         old_state: str,
         error: Exception,
-        context: str = ""
+        context_str: str = ""
     ) -> None:
         """Handle task errors with consistent status update, notification, and cleanup."""
         try:
+            task = None
+            dev_tool_meta = {}
+            exec_context = None
+
             # Update task status to failed
             if task_id in self._active_tasks:
                 task = self._active_tasks[task_id].task
                 task.status.state = TaskState.FAILED
                 task.status.timestamp = current_timestamp()
 
+                # Update tool call statuses to FAILED if any
+                exec_context = self._active_tasks[task_id]
+                if exec_context.permission_decisions or exec_context.pending_permissions:
+                    task_metadata = task.metadata or {}
+                    exec_context.task.metadata = task_metadata
+                    dev_tool = task_metadata.setdefault("development-tool", {})
+                    tool_calls = dev_tool.setdefault("tool_calls", {})
+
+                    all_tc_ids = [d.tool_call_id for d in exec_context.permission_decisions] + list(exec_context.pending_permissions.keys())
+                    for tc_id in all_tc_ids:
+                        if tc_id in tool_calls:
+                            tc = ToolCall.from_dict(tool_calls[tc_id])
+                            tc.status = ToolCallStatus.FAILED
+                            tc.result = ErrorDetails(
+                                message=f"Task failed with error: {str(error)}",
+                                code="TASK_FAILED"
+                            )
+                            tool_calls[tc_id] = tc.to_dict()
+
+                    # Clear pending permissions on failure
+                    for pending in exec_context.pending_permissions.values():
+                        if not pending.decision_future.done():
+                            pending.decision_future.set_result("deny")
+                    exec_context.pending_permissions.clear()
+
+                    # Add AgentThought for failure
+                    agent_thought = AgentThought(content=f"Task failed due to error: {str(error)}. Review and retry if appropriate.")
+                    if "thoughts" not in dev_tool:
+                        dev_tool["thoughts"] = []
+                    dev_tool["thoughts"].append(agent_thought.to_dict())
+
+                if task:
+                    dev_tool_meta = task.metadata.get("development-tool", {}) if task else {}
+
             # Send notification for failure
-            error_message = f"{context}: {str(error)}" if context else str(error)
+            error_message = f"{context_str}: {str(error)}" if context_str else str(error)
             asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
                 "old_state": old_state,
                 "new_state": TaskState.FAILED.value,
                 "message": error_message,
-                "error": str(error)
+                "error": str(error),
+                "development_tool_metadata": dev_tool_meta
             }))
 
             # Clean up notification configs for failed tasks (immediate deletion)
@@ -365,6 +422,44 @@ class A2ATaskManager:
         tool_call_id = str(request.tool_call.get("id") or request.tool_call.get("toolCallId") or uuid4())
         async with context.lock:
             if evaluation.selected_option_id:
+                # Create ToolCall for auto-approval case
+                confirmation_options = []
+                for opt in request.options:
+                    option_id = opt.get("optionId")
+                    if option_id:  # Skip options without ID
+                        confirmation_options.append(
+                            ConfirmationOption(
+                                id=option_id,
+                                name=opt.get("name", option_id),
+                                description=opt.get("description")
+                            )
+                        )
+
+                # Create confirmation request
+                confirmation_request = ConfirmationRequest(
+                    options=confirmation_options,
+                    details=GenericDetails(
+                        description=f"Tool permission required for {request.tool_call.get('toolId', 'unknown_tool')}"
+                    )
+                )
+
+                # Create ToolCall object for extension serialization
+                tool_call = ToolCall(
+                    tool_call_id=tool_call_id,
+                    status=ToolCallStatus.EXECUTING,
+                    tool_name=request.tool_call.get("toolId", "unknown_tool"),
+                    input_parameters=request.tool_call.get("parameters", {}),
+                    confirmation_request=None  # Cleared after approval
+                )
+
+                # Serialize ToolCall to task metadata for extension support
+                task_metadata = context.task.metadata or {}
+                context.task.metadata = task_metadata
+                if "development-tool" not in task_metadata:
+                    task_metadata["development-tool"] = {}
+                tool_calls = task_metadata["development-tool"].setdefault("tool_calls", {})
+                tool_calls[tool_call_id] = tool_call.to_dict()
+
                 self._record_permission_decision(
                     context,
                     tool_call_id,
@@ -378,6 +473,36 @@ class A2ATaskManager:
             loop = asyncio.get_running_loop()
             decision_future: asyncio.Future[str] = loop.create_future()
 
+            # Build confirmation options from request options
+            confirmation_options = []
+            for opt in request.options:
+                option_id = opt.get("optionId")
+                if option_id:  # Skip options without ID
+                    confirmation_options.append(
+                        ConfirmationOption(
+                            id=option_id,
+                            name=opt.get("name", option_id),
+                            description=opt.get("description")
+                        )
+                    )
+
+            # Create confirmation request
+            confirmation_request = ConfirmationRequest(
+                options=confirmation_options,
+                details=GenericDetails(
+                    description=f"Tool permission required for {request.tool_call.get('toolId', 'unknown_tool')}"
+                )
+            )
+
+            # Create ToolCall object for extension serialization
+            tool_call = ToolCall(
+                tool_call_id=tool_call_id,
+                status=ToolCallStatus.PENDING,
+                tool_name=request.tool_call.get("toolId", "unknown_tool"),
+                input_parameters=request.tool_call.get("parameters", {}),
+                confirmation_request=confirmation_request
+            )
+
             metadata = {
                 "type": "tool-permission",
                 "toolCallId": tool_call_id,
@@ -387,6 +512,7 @@ class A2ATaskManager:
                 "summary": evaluation.summary_lines,
                 "policyDecision": self._serialize_policy_decision(evaluation.policy_decision),
                 "governorResults": self._serialize_governor_results(evaluation.governor_results),
+                "tool_call": tool_call.to_dict(),
             }
 
             pending = PendingPermission(
@@ -400,6 +526,14 @@ class A2ATaskManager:
                 metadata=metadata,
             )
             context.pending_permissions[tool_call_id] = pending
+
+            # Serialize ToolCall to task metadata for extension support
+            task_metadata = context.task.metadata or {}
+            context.task.metadata = task_metadata
+            if "development-tool" not in task_metadata:
+                task_metadata["development-tool"] = {}
+            tool_calls = task_metadata["development-tool"].setdefault("tool_calls", {})
+            tool_calls[tool_call_id] = tool_call.to_dict()
 
             task = context.task
             old_state = task.status.state.value
@@ -415,6 +549,7 @@ class A2ATaskManager:
             "summary": evaluation.summary_lines,
             "policy_decision": metadata["policyDecision"],
             "governor_results": metadata["governorResults"],
+            "tool_call": metadata["tool_call"],
         }
 
         asyncio.create_task(self._send_task_notification(
@@ -552,18 +687,18 @@ class A2ATaskManager:
         """Create a new A2A task."""
         async with self.lock:
             task_id = create_task_id()
-
+    
             # Create initial task status
             status = TaskStatus(
                 state=TaskState.SUBMITTED,
                 timestamp=current_timestamp()
             )
-
+    
             # Create A2A task
             history = None
             if initial_message:
                 history = [Message(**initial_message.model_dump(exclude_none=True))]
-
+    
             task = Task(
                 id=task_id,
                 contextId=context_id,
@@ -573,18 +708,40 @@ class A2ATaskManager:
                 metadata=metadata or {},
                 kind="task"
             )
-
+    
             # Create execution context
             context = TaskExecutionContext(
                 task=task,
                 agent_name=agent_name
             )
-
-            self._active_tasks[task_id] = context
     
+            # Parse AgentSettings from initial_message metadata if present
+            if initial_message and initial_message.metadata:
+                agent_settings_data = initial_message.metadata.get("agent_settings")
+                if agent_settings_data:
+                    try:
+                        agent_settings = AgentSettings.from_dict(agent_settings_data)
+                        if agent_settings.workspace_path:
+                            context.working_directory = agent_settings.workspace_path
+                            logger.debug(
+                                "Set working directory from AgentSettings",
+                                extra={"task_id": task_id, "working_directory": context.working_directory}
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to parse AgentSettings from metadata",
+                            extra={"task_id": task_id, "error": str(e)}
+                        )
+    
+            # Fallback to current directory if not set
+            if not context.working_directory:
+                context.working_directory = os.getcwd()
+    
+            self._active_tasks[task_id] = context
+        
             logger.info("Created A2A task",
                        extra={"task_id": task_id, "context_id": context_id, "agent": agent_name})
-    
+        
             # Send notification for task creation
             asyncio.create_task(self._send_task_notification(task_id, "task_created", {
                 "old_state": None,
@@ -593,7 +750,7 @@ class A2ATaskManager:
                 "agent_name": agent_name,
                 "creation_event": True
             }))
-    
+        
             return task
 
     async def execute_task(
@@ -610,24 +767,27 @@ class A2ATaskManager:
             if task_id not in self._active_tasks:
                 raise ValueError(f"Unknown task: {task_id}")
             context = self._active_tasks[task_id]
-
+    
         task = context.task
-
+    
+        # Use context working_directory if set, otherwise fallback to parameter
+        effective_working_directory = context.working_directory or working_directory
+    
         try:
             async with context.lock:
                 old_state = task.status.state.value
                 task.status.state = TaskState.WORKING
                 task.status.timestamp = current_timestamp()
-
+    
             asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
                 "old_state": old_state,
                 "new_state": TaskState.WORKING.value,
                 "message": "Task execution started"
             }))
-
+    
             async def permission_handler(request: ToolPermissionRequest) -> ToolPermissionDecision:
                 return await self._handle_tool_permission(task_id, context, request)
-
+    
             # Provide a built-in stub agent when no external command is configured
             if not agent_command or agent_command == ["true"]:
                 logger.info(
@@ -635,7 +795,7 @@ class A2ATaskManager:
                     extra={"task_id": task_id, "agent_command": agent_command},
                 )
                 return await self._execute_stub_agent(task_id, context, stream_handler)
-
+    
             # Execute via ZedACP agent
             async with ZedAgentConnection(
                 agent_command,
@@ -643,57 +803,68 @@ class A2ATaskManager:
                 permission_handler=permission_handler,
             ) as connection:
                 await connection.initialize()
-
+    
                 # Create ZedACP session for this task
                 zed_session_id = await connection.start_session(
-                    cwd=working_directory,
+                    cwd=effective_working_directory,
                     mcp_servers=mcp_servers or []
                 )
-
+    
                 async with context.lock:
                     context.zedacp_session_id = zed_session_id
-                    context.working_directory = working_directory
-
+                    context.working_directory = effective_working_directory
+    
                 # Convert A2A message to ZedACP format if we have history
                 if task.history and len(task.history) > 0:
                     user_message = task.history[0]  # First message should be user input
                     from ..a2a.translator import A2ATranslator
                     translator = A2ATranslator()
                     zedacp_parts = translator.a2a_to_zedacp_message(user_message)
-
+    
                     # Execute the task with protocol-compliant input-required detection
                     cancel_event = context.cancel_event
-
+    
                     # Chunk handler that accumulates content and handles artifacts
                     accumulated_content = []
-
+    
                     async def on_chunk(text: str) -> None:
                         # Accumulate all chunks for the final response
                         accumulated_content.append(text)
-
+    
                         # Forward to streaming handler if provided
                         if stream_handler:
                             await stream_handler(text)
-
+    
+                        # Embed DevelopmentToolEvent for tool call updates in streaming
+                        if task.metadata and "development-tool" in task.metadata:
+                            dev_tool = task.metadata["development-tool"]
+                            if "tool_calls" in dev_tool:
+                                # For simplicity, emit a generic update for ongoing execution
+                                event = DevelopmentToolEvent(
+                                    kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
+                                    data={"status": "streaming", "chunk_length": len(text)}
+                                )
+                                # This would be sent via streaming metadata if supported, or batched
+    
                         # Also check for artifact creation notifications
                         upper_text = text.upper()
                         if ("ARTIFACT:" in upper_text or
                             "FILE:" in upper_text or
                             "CREATED:" in upper_text):
-
+    
                             asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_ARTIFACT.value, {
                                 "artifact_type": "detected",
                                 "artifact_name": "processing",
                                 "detection_text": text[:100]
                             }))
-
+    
                     result = await connection.prompt(
                         zed_session_id,
                         zedacp_parts,
                         on_chunk=on_chunk,
                         cancel_event=cancel_event
                     )
-
+    
                     result, blocked = await self._run_post_run_governors(
                         task_id,
                         context,
@@ -702,18 +873,18 @@ class A2ATaskManager:
                         result,
                         translator,
                     )
-
+    
                     if blocked:
                         logger.info("Task awaiting feedback due to governor block", extra={"task_id": task_id})
                         return task
-
+    
                     if accumulated_content:
                         full_text = "".join(accumulated_content)
                         result.setdefault("result", {})
                         result["result"]["text"] = full_text
                         logger.debug("Added accumulated content to result",
                                      extra={"content_length": len(full_text), "chunks": len(accumulated_content)})
-
+    
                     is_input_required, reason = self._is_input_required_from_response(result)
                     logger.info("Protocol analysis of ZedACP response",
                                 extra={
@@ -723,14 +894,14 @@ class A2ATaskManager:
                                     "is_input_required": is_input_required,
                                     "reason": reason
                                 })
-
+    
                     if is_input_required:
                         old_state = task.status.state.value
                         task.status.state = TaskState.INPUT_REQUIRED
                         task.status.timestamp = current_timestamp()
-
+    
                         input_types = self._extract_input_types_from_response(result)
-
+    
                         asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_INPUT_REQUIRED.value, {
                             "old_state": old_state,
                             "new_state": TaskState.INPUT_REQUIRED.value,
@@ -738,7 +909,7 @@ class A2ATaskManager:
                             "input_types": input_types,
                             "detection_method": "protocol_compliant"
                         }))
-
+    
                         input_notification = InputRequiredNotification(
                             taskId=task_id,
                             contextId=task.contextId,
@@ -746,7 +917,7 @@ class A2ATaskManager:
                             inputTypes=input_types,
                             timeout=300
                         )
-
+    
                         logger.info("Task requires input (protocol-compliant detection)",
                                     extra={
                                         "task_id": task_id,
@@ -755,43 +926,68 @@ class A2ATaskManager:
                                         "detection_reason": reason
                                     })
                         return task
-
+    
                     response_message = translator.zedacp_to_a2a_message(result, task.contextId, task_id)
                     task.history.append(response_message)
                     asyncio.create_task(self._send_message_notification(task_id, response_message, "agent_response"))
-
+    
                     old_state = task.status.state.value
                     task.status.state = TaskState.COMPLETED
                     task.status.timestamp = current_timestamp()
-
+    
+                    # Update tool call statuses to SUCCEEDED if there were any
+                    if context.permission_decisions:
+                        task_metadata = task.metadata or {}
+                        context.task.metadata = task_metadata
+                        dev_tool = task_metadata.setdefault("development-tool", {})
+                        tool_calls = dev_tool.setdefault("tool_calls", {})
+                        for decision in context.permission_decisions:
+                            tc_id = decision.tool_call_id
+                            if tc_id in tool_calls:
+                                tc = ToolCall.from_dict(tool_calls[tc_id])
+                                tc.status = ToolCallStatus.SUCCEEDED
+                                tc.result = ToolOutput(
+                                    content="Tool executed successfully as part of task",
+                                    details=ExecuteDetails(stdout="Success", exit_code=0)
+                                )
+                                tool_calls[tc_id] = tc.to_dict()
+    
+                        # Add AgentThought for task completion
+                        agent_thought = AgentThought(content="Task execution completed successfully. All tools processed without issues.")
+                        if "thoughts" not in dev_tool:
+                            dev_tool["thoughts"] = []
+                        dev_tool["thoughts"].append(agent_thought.to_dict())
+    
+                    dev_tool_meta = task.metadata.get("development-tool", {}) if task else {}
                     asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
                         "old_state": old_state,
                         "new_state": TaskState.COMPLETED.value,
-                        "message": "Task completed successfully"
+                        "message": "Task completed successfully",
+                        "development_tool_metadata": dev_tool_meta
                     }))
-
+    
                     if self.push_notification_manager:
                         asyncio.create_task(self.push_notification_manager.cleanup_by_task_state(
                             task_id, TaskState.COMPLETED.value
                         ))
-
+    
                     logger.info("Task completed successfully",
                                 extra={"task_id": task_id, "agent": context.agent_name})
-
+    
                     return task
                 else:
                     # No message to execute
                     task.status.state = TaskState.COMPLETED
                     return task
-
+    
         except PromptCancelled:
             await self._handle_task_cancellation(task_id, task.status.state.value)
             return task
-
+    
         except AgentProcessError as e:
             await self._handle_task_error(task_id, task.status.state.value, e)
             raise
-
+    
         except Exception as e:
             await self._handle_task_error(task_id, task.status.state.value, e, "Unexpected error")
             raise
@@ -844,7 +1040,17 @@ class A2ATaskManager:
             context.task.status.state = TaskState.COMPLETED
             context.task.status.timestamp = current_timestamp()
 
+            # Add AgentThought for stub completion
+            task_metadata = context.task.metadata or {}
+            context.task.metadata = task_metadata
+            dev_tool = task_metadata.setdefault("development-tool", {})
+            agent_thought = AgentThought(content="Stub agent completed the task simulation successfully.")
+            if "thoughts" not in dev_tool:
+                dev_tool["thoughts"] = []
+            dev_tool["thoughts"].append(agent_thought.to_dict())
+
         asyncio.create_task(self._send_message_notification(task_id, response_message, "agent_response"))
+        dev_tool_meta = context.task.metadata.get("development-tool", {})
         asyncio.create_task(
             self._send_task_notification(
                 task_id,
@@ -853,6 +1059,7 @@ class A2ATaskManager:
                     "old_state": previous_state,
                     "new_state": TaskState.COMPLETED.value,
                     "message": "Task execution completed via stub agent",
+                    "development_tool_metadata": dev_tool_meta
                 },
             )
         )
@@ -983,9 +1190,37 @@ class A2ATaskManager:
         if task.status.state != TaskState.INPUT_REQUIRED:
             raise ValueError(f"Task {task_id} is not in input-required state")
 
-        # Handle permission decisions first
+        # Handle permission decisions first, including extension ToolCallConfirmation
+        effective_permission_option_id = permission_option_id
+        tool_call_id_to_update = None
+
+        if user_input and user_input.metadata:
+            dev_tool_meta = user_input.metadata.get("development-tool")
+            if dev_tool_meta:
+                # Try to deserialize ToolCallConfirmation from metadata
+                confirmation_data = dev_tool_meta.get("tool_call_confirmation")
+                if confirmation_data:
+                    try:
+                        confirmation = ToolCallConfirmation.from_dict(confirmation_data)
+                        effective_permission_option_id = confirmation.selected_option_id
+                        tool_call_id_to_update = confirmation.tool_call_id
+
+                        # Validate the tool_call_id exists in pending permissions
+                        if tool_call_id_to_update not in context.pending_permissions:
+                            raise ValueError(f"Tool call ID not found in pending permissions: {tool_call_id_to_update}")
+
+                        logger.info(
+                            "ToolCallConfirmation deserialized from extension metadata",
+                            extra={"task_id": task_id, "tool_call_id": tool_call_id_to_update, "selected_option_id": effective_permission_option_id}
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to deserialize ToolCallConfirmation, falling back to legacy handling",
+                            extra={"task_id": task_id, "error": str(e)}
+                        )
+
         if context.pending_permissions:
-            if permission_option_id is None:
+            if effective_permission_option_id is None:
                 raise ValueError("permissionOptionId is required to resolve pending permissions")
 
             if user_input and any(
@@ -996,18 +1231,18 @@ class A2ATaskManager:
 
             async with context.lock:
                 pending_id, pending = next(iter(context.pending_permissions.items()))
-                selected_option = next((opt for opt in pending.options if opt.get("optionId") == permission_option_id), None)
+                selected_option = next((opt for opt in pending.options if opt.get("optionId") == effective_permission_option_id), None)
                 if not selected_option:
-                    raise ValueError(f"Invalid permission option: {permission_option_id}")
+                    raise ValueError(f"Invalid permission option: {effective_permission_option_id}")
 
                 if not pending.decision_future.done():
-                    pending.decision_future.set_result(permission_option_id)
+                    pending.decision_future.set_result(effective_permission_option_id)
 
                 self._record_permission_decision(
                     context,
                     pending_id,
                     "user",
-                    permission_option_id,
+                    effective_permission_option_id,
                     pending.governor_results,
                     metadata={"summary": pending.summary_lines},
                 )
@@ -1016,16 +1251,44 @@ class A2ATaskManager:
                 task.status.state = TaskState.WORKING
                 task.status.timestamp = current_timestamp()
 
-            asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
+                # If we have a tool_call_id_to_update, update the ToolCall status to EXECUTING
+                if tool_call_id_to_update:
+                    task_metadata = task.metadata or {}
+                    dev_tool_meta = task_metadata.setdefault("development-tool", {})
+                    tool_calls = dev_tool_meta.setdefault("tool_calls", {})
+                    
+                    if tool_call_id_to_update in tool_calls:
+                        tool_call_dict = tool_calls[tool_call_id_to_update]
+                        tool_call = ToolCall.from_dict(tool_call_dict)
+                        tool_call.status = ToolCallStatus.EXECUTING
+                        tool_calls[tool_call_id_to_update] = tool_call.to_dict()
+
+                        # Emit DevelopmentToolEvent for status update
+                        event = DevelopmentToolEvent(
+                            kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
+                            data={"tool_call_id": tool_call_id_to_update, "status": "executing"}
+                        )
+                        notification_metadata = {
+                            "development-tool": event.to_dict()
+                        }
+                    else:
+                        notification_metadata = {}
+                else:
+                    notification_metadata = {}
+
+            notification_payload = {
                 "old_state": TaskState.INPUT_REQUIRED.value,
                 "new_state": TaskState.WORKING.value,
                 "message": "Permission decision recorded",
-                "permission_option_id": permission_option_id,
-            }))
+                "permission_option_id": effective_permission_option_id,
+                **notification_metadata
+            }
+
+            asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, notification_payload))
 
             logger.info(
                 "Permission decision applied",
-                extra={"task_id": task_id, "permission_option_id": permission_option_id},
+                extra={"task_id": task_id, "permission_option_id": effective_permission_option_id, "tool_call_id": tool_call_id_to_update},
             )
 
             return task

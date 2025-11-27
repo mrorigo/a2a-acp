@@ -12,3 +12,4 @@ config/agents.json
 *.db-shm
 *.db-wal
 codex-acp
+web-ui-spec

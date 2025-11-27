@@ -28,6 +28,7 @@ from .push_notification_manager import PushNotificationManager
 from .audit import get_audit_logger, AuditEventType
 from .error_profiles import ErrorProfile, ErrorContract, build_acp_error
 from a2a.models import InputRequiredNotification
+from .models import ToolOutput, ErrorDetails, ExecuteDetails, FileDiff, DevelopmentToolEvent, DevelopmentToolEventKind
 
 logger = logging.getLogger(__name__)
 
@@ -229,7 +230,7 @@ class BashToolExecutor:
 
         start_time = datetime.now()
 
-        # Emit tool execution started event
+        # Emit tool execution started event with EXECUTING status
         await self._emit_tool_event("started", context, parameters=parameters)
 
         try:
@@ -289,12 +290,35 @@ class BashToolExecutor:
             })
             tool_result.metadata.setdefault("error_profile", self.error_profile.value)
 
+            # Map to extension schemas
             if tool_result.success:
+                details = ExecuteDetails(
+                    stdout=tool_result.output,
+                    stderr=tool_result.error or "",
+                    exit_code=tool_result.return_code
+                )
+                tool_output = ToolOutput(content=tool_result.output, details=details)
+                tool_result.metadata["tool_output"] = tool_output.to_dict()
+
+                # For output_files, create FileDiff if applicable
+                if tool_result.output_files:
+                    file_diffs = []
+                    for file_path in tool_result.output_files:
+                        # Assume new file for now; in real impl, read content
+                        file_diff = FileDiff(
+                            path=file_path,
+                            old_content=None,
+                            new_content="File created during tool execution"  # Placeholder
+                        )
+                        file_diffs.append(file_diff.to_dict())
+                    tool_result.metadata["file_diffs"] = file_diffs
+
                 await self._emit_tool_event("completed", context,
                     success=True,
                     execution_time=tool_result.execution_time,
                     return_code=tool_result.return_code,
-                    output_length=len(tool_result.output)
+                    output_length=len(tool_result.output),
+                    tool_output=tool_output.to_dict()
                 )
 
                 logger.info(f"Tool execution completed: {tool.id}", extra={
@@ -305,6 +329,12 @@ class BashToolExecutor:
                     "output_length": len(tool_result.output)
                 })
             else:
+                error_details = ErrorDetails(
+                    message=tool_result.error or "Tool execution failed",
+                    code=str(tool_result.return_code) if tool_result.return_code else "INTERNAL_ERROR"
+                )
+                tool_result.metadata["error_details"] = error_details.to_dict()
+
                 error_contract = self._resolve_mcp_error(tool, tool_result)
                 mcp_error = self._apply_error_contract(tool_result, error_contract)
 
@@ -315,6 +345,7 @@ class BashToolExecutor:
                     return_code=tool_result.return_code,
                     mcp_error=mcp_error,
                     diagnostics=error_contract.diagnostics,
+                    error_details=error_details.to_dict()
                 )
 
                 logger.error(f"Tool execution failed with non-zero exit: {tool.id}", extra={
@@ -377,7 +408,7 @@ class BashToolExecutor:
 
     async def _emit_tool_event(self, event_type: str, context: ExecutionContext, **event_data) -> None:
         """Emit a tool execution event via the push notification system.
-
+ 
         Args:
             event_type: Type of event (started, completed, failed)
             context: Execution context
@@ -385,6 +416,29 @@ class BashToolExecutor:
         """
         if not self.push_notification_manager:
             return
+
+        # Add development-tool extension metadata
+        dev_tool_event = None
+        if "tool_output" in event_data:
+            dev_tool_event = DevelopmentToolEvent(
+                kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
+                data={"status": "succeeded", "live_content": event_data.get("tool_output", {}).get("content", "")}
+            )
+            event_data["development-tool"] = dev_tool_event.to_dict()
+            del event_data["tool_output"]  # Avoid duplication
+        elif "error_details" in event_data:
+            dev_tool_event = DevelopmentToolEvent(
+                kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
+                data={"status": "failed"}
+            )
+            event_data["development-tool"] = dev_tool_event.to_dict()
+            del event_data["error_details"]
+        elif event_type == "started":
+            dev_tool_event = DevelopmentToolEvent(
+                kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
+                data={"status": "executing"}
+            )
+            event_data["development-tool"] = dev_tool_event.to_dict()
 
         event = {
             "event": f"tool_{event_type}",
@@ -394,10 +448,10 @@ class BashToolExecutor:
             "timestamp": datetime.now().isoformat(),
             **event_data
         }
-
+ 
         try:
             await self.push_notification_manager.send_notification(context.task_id, event)
-
+ 
             # Also log to audit system
             audit_logger = get_audit_logger()
             await audit_logger.log_tool_execution(
@@ -406,7 +460,7 @@ class BashToolExecutor:
                 tool_id=context.tool_id,
                 **event_data
             )
-
+ 
             logger.debug(f"Emitted tool {event_type} event", extra={
                 "tool_id": context.tool_id,
                 "task_id": context.task_id,

@@ -33,6 +33,16 @@ from .streaming_manager import StreamingManager
 from .tool_config import get_tool_configuration_manager, BashTool
 from .bash_executor import BashToolExecutor, set_bash_executor
 
+# Import development tool extension models
+from .models import (
+    GetAllSlashCommandsResponse,
+    ExecuteSlashCommandRequest,
+    ExecuteSlashCommandResponse,
+    SlashCommand,
+    SlashCommandArgument,
+    AgentSettings
+)
+
 # Import A2A protocol components
 from a2a.models import (
     Message,
@@ -398,6 +408,29 @@ async def generate_static_agent_card():
         )
     ] + tool_skills
 
+    settings = get_settings()
+    extensions = []
+    if settings.development_tool_extension_enabled:
+        extensions = [
+            {
+                "uri": "https://developers.google.com/gemini/a2a/extensions/development-tool/v1",
+                "version": "1.0.0",
+                "metadata": {
+                    "description": "Support for development tool interactions including slash commands and tool lifecycles"
+                }
+            }
+        ]
+
+    capabilities_dict = {
+        "streaming": True,
+        "pushNotifications": True,
+        "stateTransitionHistory": True
+    }
+    if extensions:
+        capabilities_dict["extensions"] = extensions
+
+    # Since AgentCapabilities may not have extensions, we'll create it as a dict or extend
+    # For now, assuming we can pass dict to capabilities
     return AgentCard(
         protocolVersion="0.3.0",
         name="a2a-acp-agent",
@@ -405,11 +438,7 @@ async def generate_static_agent_card():
         url="http://localhost:8001/a2a/rpc",
         preferredTransport="JSONRPC",
         version="1.0.0",
-        capabilities=AgentCapabilities(
-            streaming=True,
-            pushNotifications=True,
-            stateTransitionHistory=True
-        ),
+        capabilities=capabilities_dict,
         securitySchemes={
             "bearer": HTTPAuthSecurityScheme(
                 type="http",
@@ -1503,6 +1532,87 @@ def create_app() -> FastAPI:
             # Mark task as failed
             await task_manager.cancel_task(task.id)
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+
+    @app.get("/a2a/commands/get")
+    async def a2a_commands_get(
+        authorization: Optional[str] = Header(default=None)
+    ) -> GetAllSlashCommandsResponse:
+        """Get all available slash commands based on tool configuration."""
+        require_authorization(authorization)
+
+        settings = get_settings()
+        if not settings.development_tool_extension_enabled:
+            raise HTTPException(status_code=404, detail="Development tool extension not enabled")
+
+        # Load available tools
+        tool_manager = get_tool_configuration_manager()
+        available_tools = await tool_manager.load_tools()
+
+        slash_commands = []
+        for tool in available_tools.values():
+            # Map tool parameters to SlashCommandArgument
+            arguments = []
+            for param in tool.parameters or []:
+                arg = SlashCommandArgument(
+                    name=param.name,
+                    type=param.type,
+                    description=param.description or "",
+                    required=getattr(param, 'required', False)
+                )
+                arguments.append(arg)
+
+            slash_command = SlashCommand(
+                name=tool.name,
+                description=tool.description,
+                arguments=arguments
+            )
+            slash_commands.append(slash_command)
+
+        response = GetAllSlashCommandsResponse(commands=slash_commands)
+        return response
+
+    @app.post("/a2a/command/execute")
+    async def a2a_command_execute(
+        request: ExecuteSlashCommandRequest,
+        task_manager: A2ATaskManager = Depends(get_task_manager),
+        context_manager: A2AContextManager = Depends(get_context_manager),
+        authorization: Optional[str] = Header(default=None)
+    ) -> ExecuteSlashCommandResponse:
+        """Execute a slash command by creating a task."""
+        require_authorization(authorization)
+
+        settings = get_settings()
+        if not settings.development_tool_extension_enabled:
+            raise HTTPException(status_code=404, detail="Development tool extension not enabled")
+
+        # Create context
+        context_id = await context_manager.create_context("slash-command")
+
+        # Create initial message from the slash command request
+        from a2a.models import Message, TextPart, create_message_id
+        initial_message = Message(
+            role="user",
+            parts=[TextPart(text=f"/{request.command} {request.arguments}")],
+            messageId=create_message_id(),
+            metadata={"slash_command": request.to_dict()}
+        )
+
+        # Create task
+        task = await task_manager.create_task(
+            context_id=context_id,
+            agent_name="default-agent",
+            initial_message=initial_message,
+            metadata={"type": "slash_command", "command": request.command}
+        )
+
+        # Return response with execution_id = task_id
+        response = ExecuteSlashCommandResponse(
+            execution_id=task.id,
+            status=CommandExecutionStatus.EXECUTING
+        )
+
+        # The task will be streamed via existing mechanisms
+        return response
 
     @app.post("/a2a/message/stream")
     async def a2a_message_stream(

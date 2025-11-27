@@ -15,7 +15,7 @@ Configure A2A-ACP using environment variables for simple, secure, and flexible s
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `A2A_AGENT_API_KEY` | API key for agent authentication | `${OPENAI_API_KEY}` or `${GEMINI_API_KEY}` |
+| `A2A_AGENT_API_KEY` | API key for agent authentication | `${OPENAI_API_KEY}` or `${GEMINI_API_KEY}` (supports `apikey`, `gemini-api-key`, `codex-api-key`, `openai-api-key`) |
 | `A2A_AGENT_DESCRIPTION` | Human-readable agent description | `OpenAI Codex for A2A-ACP` or `Gemini CLI for A2A-ACP` |
 
 ### Optional Settings
@@ -32,7 +32,7 @@ A2A-ACP supports multiple Zed ACP-compliant agents:
 
 | Agent | Authentication Method | Environment Variable | Description |
 |-------|----------------------|---------------------|-------------|
-| `codex-acp` | `apikey` | `${OPENAI_API_KEY}` | OpenAI Codex agent |
+| `codex-acp` | `apikey`, `codex-api-key`, `openai-api-key` | `${OPENAI_API_KEY}` | OpenAI Codex agent |
 | `claude-code-acp` | `apikey` | `${ANTHROPIC_API_KEY}` | Anthropic Claude agent |
 | `gemini-cli` | `gemini-api-key` | `${GEMINI_API_KEY}` | Google Gemini agent |
 
@@ -247,6 +247,120 @@ auto_approval_policies:
 ```
 
 > **Note:** Rejection aliases are handled the same way. Returning `deny`, `reject`, `abort`, or `cancel` will select the first reject-style option offered by the agent.
+
+## Development Tool Extension Configuration
+
+Enable support for the A2A `development-tool` extension, which provides structured tool interactions including slash commands, tool call lifecycles, user confirmations, and agent thoughts. This extension enhances interoperability with clients like Gemini CLI.
+
+### Settings
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DEVELOPMENT_TOOL_EXTENSION_ENABLED` | Enable the development-tool extension in agent capabilities, endpoints, and metadata emission | `True` |
+
+### Enable Extension
+
+Set the environment variable to activate extension features:
+
+```bash
+export DEVELOPMENT_TOOL_EXTENSION_ENABLED=true
+```
+
+With the extension enabled:
+- Agent card includes the extension URI in `capabilities.extensions`.
+- Bash tools from `tools.yaml` are automatically exposed as slash commands via `/a2a/commands/get`.
+- Task updates include `DevelopmentToolEvent` metadata for tool lifecycles.
+- New endpoints `/a2a/commands/get` and `/a2a/command/execute` become available.
+
+### Configuration Examples
+
+#### Basic Extension Setup
+No additional config needed beyond enabling the flag. Existing `tools.yaml` files map directly:
+
+```yaml
+# tools.yaml (example)
+tools:
+  web_request:
+    name: "HTTP Request"
+    description: "Execute HTTP requests via curl"
+    script: |
+      #!/bin/bash
+      curl -X {{method}} "{{url}}" -w "STATUS:%{http_code}\n"
+    parameters:
+      - name: method
+        type: string
+        required: true
+      - name: url
+        type: string
+        required: true
+    sandbox:
+      requires_confirmation: false  # No confirmation for this tool
+      timeout: 30
+```
+
+This tool becomes available as the `/web_request` slash command.
+
+#### Extension with Confirmation Flows
+For sensitive tools, enable confirmations in `tools.yaml`:
+
+```yaml
+tools:
+  database_query:
+    name: "Database Query"
+    description: "Execute SQL queries"
+    script: |
+      #!/bin/bash
+      psql -d {{database}} -c "{{query}}"
+    parameters:
+      - name: database
+        type: string
+        required: true
+      - name: query
+        type: string
+        required: true
+    sandbox:
+      requires_confirmation: true
+      confirmation_message: "Execute SQL query on production database? This may modify data."
+      timeout: 10
+```
+
+**Workflow:**
+1. Client executes `/database_query` via `/a2a/command/execute`.
+2. Task enters PENDING; `input_required` event with `ConfirmationRequest`.
+3. User approves via `tasks/provideInputAndContinue`.
+4. Tool executes; SUCCEEDED with `ToolOutput` (stdout).
+
+#### Advanced: Custom Metadata and Thoughts
+Extension metadata can include agent thoughts for transparency. Configure in tool or globally via settings.
+
+### Disable Extension Support
+
+To disable for legacy compatibility or reduced features:
+
+```bash
+export DEVELOPMENT_TOOL_EXTENSION_ENABLED=false
+```
+
+Effects:
+- Extension URI removed from agent card.
+- `/a2a/commands/*` endpoints return 404.
+- Tool calls use legacy flows without `DevelopmentToolEvent` metadata.
+- Existing bash execution and confirmations continue via `input_required` events.
+
+**When to Disable:**
+- Interacting with pre-v0.3.0 A2A clients that ignore unknown metadata.
+- Reducing endpoint surface for security audits.
+- Testing without extension overhead.
+
+### Best Practices
+
+- **Enable for Modern Clients**: Use with Gemini CLI or extension-aware UIs for rich interactions.
+- **Security**: Confirmation-enabled tools prevent unauthorized executions; always review `allowed_commands` in sandbox.
+- **Performance**: Extension adds minimal overhead (~5% latency for metadata serialization).
+- **Migration**: Existing `tools.yaml` works unchanged; enable flag to activate slash commands.
+- **Version Compatibility**: Supports development-tool v1.0.0; update URI in future for v2+.
+
+For full implementation details, see [DEVELOPMENT_TOOL_EXTENSION.md](docs/DEVELOPMENT_TOOL_EXTENSION.md).
 
 ## Runtime Configuration
 

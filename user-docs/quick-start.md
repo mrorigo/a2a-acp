@@ -7,7 +7,7 @@ Get A2A-ACP running and send your first message in under 5 minutes.
 Ensure you have:
 - ✅ Python 3.9+
 - ✅ Zed ACP agent installed (e.g., `codex-acp`)
-- ✅ API key for your agent
+- ✅ API key for your agent (supports `apikey`, `gemini-api-key`, `codex-api-key`, `openai-api-key`)
 
 ## 2. Installation (1 minute)
 
@@ -150,6 +150,111 @@ curl -X POST http://localhost:8001/ \
     }
   }'
 ```
+
+## 8. Enable Development Tool Extension
+
+The development-tool extension adds support for slash commands, tool lifecycles, user confirmations, and agent thoughts, enhancing interactions with clients like Gemini CLI.
+
+### Setup
+
+1. **Enable in Environment**:
+   ```bash
+   export DEVELOPMENT_TOOL_EXTENSION_ENABLED=true
+   ```
+
+2. **Restart Server**:
+   ```bash
+   make run
+   ```
+
+3. **Verify Extension in Agent Card**:
+   ```bash
+   curl http://localhost:8001/.well-known/agent-card.json
+   ```
+   Look for `"extensions"` in `capabilities` with the development-tool URI.
+
+### Example Configuration
+
+Configure tools in `tools.yaml` to enable slash commands:
+
+```yaml
+# tools.yaml
+tools:
+  web_request:
+    name: "HTTP Request"
+    description: "Execute HTTP requests"
+    script: |
+      #!/bin/bash
+      curl -X {{method}} "{{url}}" -w "STATUS:%{http_code}\n"
+    parameters:
+      - name: method
+        type: string
+        required: true
+      - name: url
+        type: string
+        required: true
+    sandbox:
+      requires_confirmation: false
+      timeout: 30
+```
+
+### Example Extension-Enabled Agent Interaction
+
+1. **Discover Slash Commands**:
+   ```bash
+   curl -X GET http://localhost:8001/a2a/commands/get \
+     -H "Authorization: Bearer your-token"
+   ```
+   Response includes `/web_request` command.
+
+2. **Execute Slash Command**:
+   ```bash
+   curl -X POST http://localhost:8001/a2a/command/execute \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer your-token" \
+     -d '{
+       "command": "web_request",
+       "arguments": {
+         "method": "GET",
+         "url": "https://api.example.com/users"
+       }
+     }'
+   ```
+   Response: `{"execution_id": "task_123", "status": "executing"}`
+
+3. **Stream Interaction with Extension Metadata**:
+   ```bash
+   curl -X POST http://localhost:8001/a2a/message/stream \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer your-token" \
+     -d '{
+       "taskId": "task_123"
+     }'
+   ```
+   Stream includes `DevelopmentToolEvent` metadata, e.g.:
+   ```json
+   {
+     "metadata": {
+       "development-tool": {
+         "kind": "tool_call_update",
+         "tool_call": {
+           "status": "succeeded",
+           "result": {"content": "HTTP 200 OK"}
+         }
+       }
+     }
+   }
+   ```
+
+For confirmation-enabled tools, the stream pauses at PENDING with a `ConfirmationRequest`; respond via `tasks/provideInputAndContinue`.
+
+### Compatibility Notes
+
+- **Version**: A2A v0.3.0+ required for metadata.
+- **Backward Compatibility**: Disable with `DEVELOPMENT_TOOL_EXTENSION_ENABLED=false` for legacy clients.
+- **Best Practices**: Use confirmation for sensitive tools; monitor via push notifications with extension events.
+
+See [DEVELOPMENT_TOOL_EXTENSION.md](docs/DEVELOPMENT_TOOL_EXTENSION.md) for advanced usage.
 
 ## 8. What's Next?
 

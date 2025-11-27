@@ -25,7 +25,9 @@ from .models import (
     DeliveryStatus,
     EventType,
     NotificationFilter,
-    NotificationAnalytics
+    NotificationAnalytics,
+    DevelopmentToolEvent,
+    DevelopmentToolEventKind
 )
 from .database import SessionDatabase
 # from .streaming_manager import StreamingManager  # Avoid circular import
@@ -454,7 +456,7 @@ class PushNotificationManager:
         event_type_str = event.get("event", "unknown")
         task_id = event.get("task_id", "")
         timestamp = datetime.utcnow()
-
+    
         # Handle legacy event type strings by mapping them to enum values
         event_type_mapping = {
             "status_change": EventType.TASK_STATUS_CHANGE,
@@ -471,14 +473,14 @@ class PushNotificationManager:
             "performance_test": EventType.TASK_STATUS_CHANGE
         }
         event_type = event_type_mapping.get(event_type_str, EventType.TASK_STATUS_CHANGE)
-
+    
         # Preserve original event string for payload (for backward compatibility)
         # but use enum for internal type determination
         payload_event = event_type_str  # Use original string from event
-
-        # Create appropriate payload based on event type
+    
+        # Create base payload
         if event_type in [EventType.TASK_STATUS_CHANGE, EventType.TASK_COMPLETED, EventType.TASK_FAILED]:
-            return TaskStatusChangePayload(
+            base_payload = TaskStatusChangePayload(
                 event=payload_event,
                 task_id=task_id,
                 timestamp=timestamp,
@@ -487,7 +489,7 @@ class PushNotificationManager:
                 new_state=event.get("new_state", "")
             )
         elif event_type == EventType.TASK_MESSAGE:
-            return TaskMessagePayload(
+            base_payload = TaskMessagePayload(
                 event=payload_event,
                 task_id=task_id,
                 timestamp=timestamp,
@@ -496,7 +498,7 @@ class PushNotificationManager:
                 message_content=event.get("message_content", "")
             )
         elif event_type == EventType.TASK_ARTIFACT:
-            return TaskArtifactPayload(
+            base_payload = TaskArtifactPayload(
                 event=payload_event,
                 task_id=task_id,
                 timestamp=timestamp,
@@ -507,12 +509,35 @@ class PushNotificationManager:
             )
         else:
             # Generic payload for unknown event types
-            return NotificationPayload(
+            base_payload = NotificationPayload(
                 event=payload_event,
                 task_id=task_id,
                 timestamp=timestamp,
                 data=event
             )
+    
+        # Extend with DevelopmentToolEvent if metadata present
+        payload_dict = base_payload.to_dict()
+        dev_tool_meta = event.get("development_tool_metadata")
+        if dev_tool_meta:
+            # Map event type to DevelopmentToolEventKind
+            kind_map = {
+                EventType.TASK_STATUS_CHANGE.value: DevelopmentToolEventKind.TOOL_CALL_UPDATE,
+                EventType.TASK_MESSAGE.value: DevelopmentToolEventKind.THOUGHT,
+                EventType.TASK_ARTIFACT.value: DevelopmentToolEventKind.TOOL_CALL_UPDATE,
+                EventType.TASK_INPUT_REQUIRED.value: DevelopmentToolEventKind.TOOL_CALL_CONFIRMATION,
+                # Add more mappings as needed
+            }
+            kind = kind_map.get(event_type_str, DevelopmentToolEventKind.UNSPECIFIED)
+            
+            dev_event = DevelopmentToolEvent(
+                kind=kind,
+                data=dev_tool_meta
+            )
+            payload_dict["development_tool_event"] = dev_event.to_dict()
+    
+        # Return the enhanced payload as dict for serialization
+        return payload_dict
 
     def _get_authentication_headers(
         self,
