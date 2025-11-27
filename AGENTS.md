@@ -58,7 +58,7 @@ curl -H "Authorization: Bearer <token>" \
 ## Environment Variables
 
 *   `A2A_AGENT_COMMAND`: The command to execute the Zed ACP agent.
-*   `A2A_AGENT_API_KEY`: (Optional) The API key for the Zed ACP agent.
+*   `A2A_AGENT_API_KEY`: (Optional) The API key for the Zed ACP agent. Supports `apikey`, `gemini-api-key`, `codex-api-key`, and `openai-api-key` authentication methods.
 *   `A2A_AUTH_TOKEN`: The bearer token for authenticating with the A2A-ACP server.
 *   `PORT`: (Optional) The port to run the server on. Defaults to `8001`.
 

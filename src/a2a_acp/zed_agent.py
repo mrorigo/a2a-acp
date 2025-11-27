@@ -325,7 +325,7 @@ class ZedAgentConnection:
                 # Look for API key authentication method (support multiple agent types)
                 api_key_method = None
                 api_key_method_id = None
-                supported_api_key_methods = ["apikey", "gemini-api-key"]  # Support both codex and gemini
+                supported_api_key_methods = ["apikey", "gemini-api-key", "codex-api-key", "openai-api-key"]  # Support codex, gemini and openai
 
                 for method in auth_methods:
                     method_id = method.get("id")
