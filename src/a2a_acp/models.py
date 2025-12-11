@@ -5,11 +5,11 @@ This module defines the data models used by ZedACP for handling push notificatio
 configurations, delivery tracking, and related functionality.
 """
 
-from dataclasses import dataclass, asdict
+import json
+from dataclasses import dataclass, asdict, field
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Union
-from dataclasses import field
 from enum import Enum
+from typing import Dict, List, Optional, Any, Union
 
 
 class DeliveryStatus(Enum):
@@ -248,15 +248,9 @@ class NotificationAnalytics:
         if self.total_sent > 0:
             self.success_rate = (self.total_delivered / self.total_sent) * 100.0
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        return asdict(self)
-
-from enum import Enum
-from typing import Dict, List, Optional, Any, Union
-from dataclasses import dataclass, asdict, field
-from datetime import datetime
-import json  # For handling dicts as JSON if needed, but asdict suffices
+def to_dict(self) -> Dict[str, Any]:
+    """Convert to dictionary for JSON serialization."""
+    return asdict(self)
 
 class ToolCallStatus(Enum):
     """Enumeration of tool call statuses."""
@@ -467,6 +461,8 @@ class ToolCall:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
+        if isinstance(self.status, ToolCallStatus):
+            data['status'] = self.status.value
         if self.confirmation_request:
             data['confirmation_request'] = self.confirmation_request.to_dict()
         if self.result:
@@ -537,6 +533,8 @@ class DevelopmentToolEvent:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data_dict = asdict(self)
+        if isinstance(self.kind, DevelopmentToolEventKind):
+            data_dict["kind"] = self.kind.value
         if self.data:
             data_dict['data'] = self.data  # Assume already serializable
         return data_dict

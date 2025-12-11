@@ -28,7 +28,15 @@ from .push_notification_manager import PushNotificationManager
 from .audit import get_audit_logger, AuditEventType
 from .error_profiles import ErrorProfile, ErrorContract, build_acp_error
 from a2a.models import InputRequiredNotification
-from .models import ToolOutput, ErrorDetails, ExecuteDetails, FileDiff, DevelopmentToolEvent, DevelopmentToolEventKind
+from .models import (
+    ToolOutput,
+    ErrorDetails,
+    ExecuteDetails,
+    FileDiff,
+    DevelopmentToolEvent,
+    DevelopmentToolEventKind,
+    McpDetails,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +53,7 @@ ACP_ERROR_CODES = {
 DEFAULT_ERROR_MESSAGES = {
     ACP_ERROR_CODES["PARSE_ERROR"]: "Parse error",
     ACP_ERROR_CODES["INVALID_REQUEST"]: "Invalid request",
-    ACP_ERROR_CODES["METHOD_NOT_FOUND"]: "Method not found",
+    ACP_ERROR_CODES["METHOD_NOT_FOUND"]: "Command not found",
     ACP_ERROR_CODES["INVALID_PARAMS"]: "Invalid parameters",
     ACP_ERROR_CODES["INTERNAL_ERROR"]: "Internal error",
     ACP_ERROR_CODES["AUTH_REQUIRED"]: "Authentication required",
@@ -186,11 +194,10 @@ class BashToolExecutor:
         self.task_manager = task_manager
         self.error_profile = error_profile
         self._execution_cache: Dict[str, Dict[str, Any]] = {}
-        self._cache_lock = asyncio.Lock()
 
         # Circuit breakers for failing tools
         self._circuit_breakers: Dict[str, ToolCircuitBreaker] = {}
-        self._lock = asyncio.Lock()
+        self._cache_lock: Optional[asyncio.Lock] = None
 
         # Template patterns for parameter substitution
         self.template_patterns = {
@@ -203,6 +210,23 @@ class BashToolExecutor:
         self.max_retry_attempts = 3
         self.retry_delay = 1.0  # seconds
         self.retry_backoff_factor = 2.0
+
+    def _get_cache_lock(self) -> asyncio.Lock:
+        """Lazily instantiate the cache lock when event loop is available."""
+        if self._cache_lock is None:
+            self._cache_lock = asyncio.Lock()
+        return self._cache_lock
+
+    def _metadata_error_profile(self) -> str:
+        """Return a string-safe error profile identifier for metadata."""
+        return self.error_profile.value.replace("-", "_")
+
+    def _error_code_label(self, code: int) -> str:
+        """Map an MCP code to its textual label when available."""
+        for label, value in ACP_ERROR_CODES.items():
+            if value == code:
+                return label
+        return str(code)
 
     async def execute_tool(
         self,
@@ -258,7 +282,7 @@ class BashToolExecutor:
                             "parameters": parameters,
                             "tool_version": tool.version,
                             "cached": False,
-                            "error_profile": self.error_profile.value,
+                            "error_profile": self._metadata_error_profile(),
                         },
                         output_files=[]
                     )
@@ -281,22 +305,27 @@ class BashToolExecutor:
             tool_result = ToolExecutionResult.from_execution_result(tool.id, execution_result)
 
             # Add execution metadata
+            metadata_profile = self._metadata_error_profile()
             tool_result.metadata.update({
                 "execution_start": start_time.isoformat(),
                 "execution_end": datetime.now().isoformat(),
                 "parameters": parameters,
                 "tool_version": tool.version,
-                "cached": False
+                "cached": False,
+                "error_profile": metadata_profile,
             })
-            tool_result.metadata.setdefault("error_profile", self.error_profile.value)
+            tool_result.metadata.setdefault("error_profile", metadata_profile)
 
             # Map to extension schemas
             if tool_result.success:
-                details = ExecuteDetails(
-                    stdout=tool_result.output,
-                    stderr=tool_result.error or "",
-                    exit_code=tool_result.return_code
-                )
+                if tool_result.metadata.get("mcp"):
+                    details = McpDetails(tool_name=tool.name)
+                else:
+                    details = ExecuteDetails(
+                        stdout=tool_result.output,
+                        stderr=tool_result.error or None,
+                        exit_code=tool_result.return_code
+                    )
                 tool_output = ToolOutput(content=tool_result.output, details=details)
                 tool_result.metadata["tool_output"] = tool_output.to_dict()
 
@@ -329,9 +358,14 @@ class BashToolExecutor:
                     "output_length": len(tool_result.output)
                 })
             else:
+                sanitized_error = self._sanitize_error_output(tool_result.error)
+                error_message = sanitized_error or tool_result.error or "Tool execution failed"
+                if tool_result.metadata.get("timeout") or tool_result.return_code == 124:
+                    error_message = "Tool execution timeout"
                 error_details = ErrorDetails(
-                    message=tool_result.error or "Tool execution failed",
-                    code=str(tool_result.return_code) if tool_result.return_code else "INTERNAL_ERROR"
+                    message=error_message,
+                    code=str(tool_result.return_code) if tool_result.return_code else "INTERNAL_ERROR",
+                    details={"sanitized_stderr": sanitized_error or tool_result.error or ""}
                 )
                 tool_result.metadata["error_details"] = error_details.to_dict()
 
@@ -340,7 +374,7 @@ class BashToolExecutor:
 
                 await self._emit_tool_event("failed", context,
                     success=False,
-                    error=tool_result.error or "Tool execution failed",
+                    error=error_message,
                     execution_time=tool_result.execution_time,
                     return_code=tool_result.return_code,
                     mcp_error=mcp_error,
@@ -372,15 +406,26 @@ class BashToolExecutor:
 
             error_contract = self._build_mcp_error_from_exception(e)
             mcp_error = error_contract.to_mcp_error()
+            sanitized_error = self._sanitize_error_output(str(e))
+            error_message = sanitized_error or str(e)
+            code_value = self._error_code_label(error_contract.code)
+            if error_contract.code != ACP_ERROR_CODES["INTERNAL_ERROR"]:
+                code_value = str(error_contract.code)
+            error_details = ErrorDetails(
+                message=error_message,
+                code=code_value,
+                details={"sanitized_stderr": sanitized_error or str(e)}
+            )
 
             # Emit tool execution failed event
             await self._emit_tool_event("failed", context,
                 success=False,
-                error=str(e),
+                error=error_message,
                 error_type=type(e).__name__,
                 execution_time=execution_time,
                 mcp_error=mcp_error,
                 diagnostics=error_contract.diagnostics,
+                error_details=error_details.to_dict(),
             )
 
             # Return error result
@@ -388,7 +433,7 @@ class BashToolExecutor:
                 tool_id=tool.id,
                 success=False,
                 output="",
-                error=str(e),
+                error=error_message,
                 execution_time=execution_time,
                 return_code=-1,
                 metadata={
@@ -398,7 +443,8 @@ class BashToolExecutor:
                     "parameters": parameters,
                     "tool_version": tool.version,
                     "cached": False,
-                    "error_profile": self.error_profile.value,
+                    "error_profile": self._metadata_error_profile(),
+                    "error_details": error_details.to_dict(),
                 },
                 output_files=[],
                 mcp_error=mcp_error
@@ -425,14 +471,12 @@ class BashToolExecutor:
                 data={"status": "succeeded", "live_content": event_data.get("tool_output", {}).get("content", "")}
             )
             event_data["development-tool"] = dev_tool_event.to_dict()
-            del event_data["tool_output"]  # Avoid duplication
         elif "error_details" in event_data:
             dev_tool_event = DevelopmentToolEvent(
                 kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
                 data={"status": "failed"}
             )
             event_data["development-tool"] = dev_tool_event.to_dict()
-            del event_data["error_details"]
         elif event_type == "started":
             dev_tool_event = DevelopmentToolEvent(
                 kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
@@ -625,14 +669,16 @@ class BashToolExecutor:
     ) -> Dict[str, Any]:
         """Attach a normalised error contract to the tool result metadata."""
         payload = contract.to_mcp_error()
-        payload_copy = dict(payload)
-        result.mcp_error = payload_copy
-        result.metadata["mcp_error"] = payload_copy
-        result.metadata.setdefault("error_profile", self.error_profile.value)
+        final_mcp_error = result.mcp_error or payload
+        final_mcp_error_copy = dict(final_mcp_error)
+        result.mcp_error = final_mcp_error_copy
+        result.metadata["mcp_error"] = final_mcp_error_copy
+        result.metadata.setdefault("error_profile", self._metadata_error_profile())
         if contract.diagnostics:
             diagnostics = result.metadata.setdefault("a2a_diagnostics", {})
             diagnostics.update(contract.diagnostics)
-        return payload_copy
+            result.metadata.setdefault("diagnostics", {}).update(contract.diagnostics)
+        return final_mcp_error_copy
 
     @staticmethod
     def _sanitize_error_output(output: Optional[str]) -> Optional[str]:
@@ -726,7 +772,7 @@ class BashToolExecutor:
         detail_value = next((m for m in detail_candidates if m), None)
         retryable = retryable_override if retryable_override is not None else self._is_retryable_error_code(code)
 
-        diagnostics: Dict[str, Any] = {"error_profile": self.error_profile.value}
+        diagnostics: Dict[str, Any] = {"error_profile": self._metadata_error_profile()}
         if result:
             diagnostics["return_code"] = result.return_code
             if isinstance(result.return_code, int) and result.return_code < 0:
@@ -913,7 +959,7 @@ class BashToolExecutor:
 
         # Check cache first (only if tool caching is enabled)
         if use_cache and tool.config.caching_enabled:
-            async with self._cache_lock:
+            async with self._get_cache_lock():
                 if cache_key in self._execution_cache:
                     cached_entry = self._execution_cache[cache_key]
                     cache_age = (datetime.now() - cached_entry["timestamp"]).total_seconds()
@@ -940,7 +986,7 @@ class BashToolExecutor:
 
         # Cache the result (only if tool caching is enabled and execution succeeded)
         if use_cache and tool.config.caching_enabled and result.success:
-            async with self._cache_lock:
+            async with self._get_cache_lock():
                 # Check cache size limit before adding
                 cache_size_mb = len(str(self._execution_cache)) / (1024 * 1024)
                 if cache_size_mb < tool.config.cache_max_size_mb:
@@ -986,7 +1032,7 @@ class BashToolExecutor:
         Returns:
             Number of cache entries removed
         """
-        async with self._cache_lock:
+        async with self._get_cache_lock():
             if tool_id is None:
                 count = len(self._execution_cache)
                 self._execution_cache.clear()
@@ -1008,7 +1054,7 @@ class BashToolExecutor:
         """
         from .tool_config import get_tool
 
-        async with self._cache_lock:
+        async with self._get_cache_lock():
             expired_keys = []
             current_time = datetime.now()
 
@@ -1043,8 +1089,8 @@ class BashToolExecutor:
 
     async def get_cache_stats(self) -> Dict[str, Any]:
         """Get detailed cache statistics."""
-        async with self._cache_lock:
-            current_time = datetime.now()
+        async with self._get_cache_lock():
+            datetime.now()
 
             # Basic stats
             total_entries = len(self._execution_cache)
@@ -1053,7 +1099,6 @@ class BashToolExecutor:
 
             # Tool-specific stats
             tool_stats = {}
-            expired_entries = 0
 
             for cache_key, cache_entry in self._execution_cache.items():
                 tool_id = cache_entry.get("tool_id", "unknown")
@@ -1142,7 +1187,7 @@ class BashToolExecutor:
                     return_code=-1,
                     metadata={
                         "error_type": type(e).__name__,
-                        "error_profile": self.error_profile.value,
+                        "error_profile": self._metadata_error_profile(),
                     },
                     output_files=[],
                     mcp_error=None

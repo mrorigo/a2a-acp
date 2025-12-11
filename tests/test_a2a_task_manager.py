@@ -10,13 +10,11 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
-from src.a2a.models import Task, TaskStatus, TaskState, Message, TextPart, generate_id
+from src.a2a.models import Task, TaskStatus, TaskState, Message, TextPart
 from src.a2a_acp.task_manager import A2ATaskManager, TaskExecutionContext
-from src.a2a_acp.models import EventType
 from src.a2a_acp.governor_manager import (
     PermissionEvaluationResult,
     GovernorResult,
-    AutoApprovalDecision,
     PostRunEvaluationResult,
 )
 from src.a2a_acp.zed_agent import ToolPermissionRequest
@@ -52,7 +50,7 @@ class TestA2ATaskManager:
         }
 
         is_required, reason = task_manager._is_input_required_from_response(response)
-        assert is_required == True
+        assert is_required
         assert "without actions" in reason
 
     def test_is_input_required_from_response_end_turn_with_tool_calls(self, task_manager):
@@ -63,7 +61,7 @@ class TestA2ATaskManager:
         }
 
         is_required, reason = task_manager._is_input_required_from_response(response)
-        assert is_required == False
+        assert not is_required
         assert "end_turn" in reason
 
     def test_is_input_required_from_response_max_tokens(self, task_manager):
@@ -74,7 +72,7 @@ class TestA2ATaskManager:
         }
 
         is_required, reason = task_manager._is_input_required_from_response(response)
-        assert is_required == False
+        assert not is_required
         assert "max_tokens" in reason
 
     def test_is_input_required_from_response_cancelled(self, task_manager):
@@ -85,20 +83,20 @@ class TestA2ATaskManager:
         }
 
         is_required, reason = task_manager._is_input_required_from_response(response)
-        assert is_required == False
+        assert not is_required
         assert "cancelled" in reason
 
     def test_is_input_required_from_response_missing_fields(self, task_manager):
         """Test graceful handling of responses missing expected fields."""
         # Empty response
         is_required, reason = task_manager._is_input_required_from_response({})
-        assert is_required == False
+        assert not is_required
         assert "None" in reason
 
         # Missing toolCalls
         response = {"stopReason": "end_turn"}
         is_required, reason = task_manager._is_input_required_from_response(response)
-        assert is_required == True  # Should default to input required
+        assert is_required  # Should default to input required
 
     def test_extract_input_types_from_response_with_meta(self, task_manager):
         """Test extracting input types from response metadata."""
@@ -850,7 +848,7 @@ class TestA2ATaskManager:
     async def test_get_input_required_tasks(self, task_manager):
         """Test getting tasks that require input."""
         # Create tasks in different states
-        task1 = await task_manager.create_task("ctx_123", "test_agent")
+        await task_manager.create_task("ctx_123", "test_agent")
         task2 = await task_manager.create_task("ctx_124", "test_agent")
 
         # Manually set one task to input-required state
@@ -912,7 +910,7 @@ class TestA2ATaskManager:
         # Test missing status field
         with pytest.raises(Exception):  # pydantic validation error
             from a2a.models import TaskStatus, TaskState, current_timestamp
-            invalid_task = Task(
+            Task(
                 id="task_123",
                 contextId="ctx_123",
                 status=TaskStatus(state=TaskState.SUBMITTED, timestamp=current_timestamp()),
@@ -1094,7 +1092,7 @@ class TestA2ATaskManagerIntegration:
             task = await task_manager_with_notifications.create_task("ctx_123", "test_agent")
             mcp_servers = [{"name": "test_mcp", "command": "test"}]
 
-            result = await task_manager_with_notifications.execute_task(
+            await task_manager_with_notifications.execute_task(
                 task.id,
                 ["echo", "test"],
                 mcp_servers=mcp_servers

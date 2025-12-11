@@ -1,21 +1,42 @@
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
-import os
+from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 
 # No test imports needed; all mocked below. Remove to avoid ModuleNotFoundError.
 
 # Bootstrap path for src/ imports (tests/ is sibling to src/)
 import sys
-from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from a2a_acp.main import create_app
-from a2a_acp.settings import get_settings
 from a2a_acp.database import SessionDatabase
 from a2a_acp.models import TaskPushNotificationConfig  # Existing model
-from a2a_acp.task_manager import A2ATaskManager
-from a2a.models import Message, TextPart, create_message_id
+from a2a_acp.settings import _get_push_notification_settings
+from a2a.models import create_message_id
+
+
+class DummyZedAgentConnection:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    async def initialize(self):
+        return {"authMethods": []}
+
+    async def start_session(self, cwd, mcp_servers):
+        return "session"
+
+    async def request(self, method, params, handler=None):
+        if handler:
+            return None
+        if method == "session/new":
+            return {"sessionId": "session"}
+        return {"authMethods": []}
 
 
 @pytest.fixture
@@ -28,29 +49,70 @@ def mock_db():
 
 
 @pytest.fixture
-def test_client_no_extension(mock_db):
+def mock_push_manager():
+    mock = AsyncMock()
+    mock.send_notification = AsyncMock()
+    mock.cleanup_expired_configs = AsyncMock(return_value=0)
+    mock.close = AsyncMock()
+    mock.list_configs = AsyncMock(return_value=[])
+    mock.get_delivery_history = AsyncMock(return_value=[])
+    mock.delete_config = AsyncMock(return_value=True)
+    mock.create_config = AsyncMock(return_value=MagicMock(id="config"))
+    return mock
+
+
+@pytest.fixture
+def test_client_no_extension(mock_db, mock_push_manager):
     """Test client with extension disabled."""
     with patch("a2a_acp.settings.get_settings") as mock_settings:
         settings = MagicMock()
         settings.development_tool_extension_enabled = False
+        settings.auth_token = None
+        settings.agent_command = "true"
+        settings.agent_api_key = None
+        settings.agent_description = "Compatibility Agent"
+        settings.push_notifications = _get_push_notification_settings()
+        settings.error_profile = MagicMock(value="acp-basic")
         mock_settings.return_value = settings
         app = create_app()
-        with patch("a2a_acp.main.get_database", return_value=mock_db):
+        context_manager = MagicMock()
+        context_manager.create_context = AsyncMock(return_value="ctx")
+        context_manager.add_task_to_context = AsyncMock()
+        context_manager.add_message_to_context = AsyncMock()
+
+        with patch("a2a_acp.main.get_database", return_value=mock_db), \
+             patch("a2a_acp.main.get_context_manager", return_value=context_manager), \
+             patch("a2a_acp.main.PushNotificationManager", return_value=mock_push_manager), \
+             patch("a2a_acp.main.ZedAgentConnection", DummyZedAgentConnection):
             from fastapi.testclient import TestClient
-            
+
             with TestClient(app) as client:
                 yield client
 
 
 @pytest.fixture
-def test_client_full(mock_db):
+def test_client_full(mock_db, mock_push_manager):
     """Test client with extension enabled."""
     with patch("a2a_acp.settings.get_settings") as mock_settings:
         settings = MagicMock()
         settings.development_tool_extension_enabled = True
+        settings.auth_token = None
+        settings.agent_command = "true"
+        settings.agent_api_key = None
+        settings.agent_description = "Compatibility Agent"
+        settings.push_notifications = _get_push_notification_settings()
+        settings.error_profile = MagicMock(value="acp-basic")
         mock_settings.return_value = settings
         app = create_app()
-        with patch("a2a_acp.main.get_database", return_value=mock_db):
+        context_manager = MagicMock()
+        context_manager.create_context = AsyncMock(return_value="ctx")
+        context_manager.add_task_to_context = AsyncMock()
+        context_manager.add_message_to_context = AsyncMock()
+
+        with patch("a2a_acp.main.get_database", return_value=mock_db), \
+             patch("a2a_acp.main.get_context_manager", return_value=context_manager), \
+             patch("a2a_acp.main.PushNotificationManager", return_value=mock_push_manager), \
+             patch("a2a_acp.main.ZedAgentConnection", DummyZedAgentConnection):
             from fastapi.testclient import TestClient
             with TestClient(app) as client:
                 yield client
@@ -293,7 +355,7 @@ class TestConfigurationTogglingWorksCorrectly:
                 "metadata": {"development-tool": {"test": "data"}},
             }
             resp = test_client_full.post("/a2a/message/send", json={"message": message_data})
-            task_id = resp.json()["task"]["id"]
+            resp.json()["task"]["id"]
 
             # Verify persisted with metadata
             mock_db.store_task.assert_called()
@@ -304,7 +366,7 @@ class TestConfigurationTogglingWorksCorrectly:
             settings.development_tool_extension_enabled = False
             new_message = {"role": "user", "parts": [{"kind": "text", "text": "No ext"}], "messageId": str(create_message_id())}
             new_resp = test_client_full.post("/a2a/message/send", json={"message": new_message})
-            new_task = new_resp.json()["task"]
+            new_resp.json()["task"]
             new_stored = mock_db.store_task.call_args[0][0]
             # Extension metadata stripped or absent
             assert "development-tool" not in new_stored.metadata

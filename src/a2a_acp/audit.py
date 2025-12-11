@@ -16,11 +16,10 @@ import uuid
 from dataclasses import dataclass, asdict, replace
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .tool_config import BashTool
-from .sandbox import ExecutionContext, ExecutionResult
+from .sandbox import ExecutionContext
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +39,11 @@ class AuditEventType(Enum):
     RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
     CIRCUIT_BREAKER_OPENED = "circuit_breaker_opened"
     CIRCUIT_BREAKER_CLOSED = "circuit_breaker_closed"
+    OAUTH_LOGIN_STARTED = "oauth_login_started"
+    OAUTH_LOGIN_SUCCESS = "oauth_login_success"
+    OAUTH_LOGIN_FAILED = "oauth_login_failed"
+    OAUTH_REFRESH_SUCCESS = "oauth_refresh_success"
+    OAUTH_TOKEN_REMOVED = "oauth_token_removed"
 
 
 @dataclass
@@ -67,8 +71,10 @@ class AuditEvent:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> AuditEvent:
         """Create from dictionary."""
+        data = dict(data)
         data['event_type'] = AuditEventType(data['event_type'])
         data['timestamp'] = datetime.fromisoformat(data['timestamp'])
+        data.pop("created_at", None)
         return cls(**data)
 
 
@@ -279,7 +285,7 @@ class AuditLogger:
             db_path: Database path if creating new database.
         """
         self.database = database or AuditDatabase(db_path)
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None
 
     async def log_tool_execution(
         self,
@@ -309,20 +315,35 @@ class AuditLogger:
             details=additional_details
         )
 
-        loop = asyncio.get_event_loop()
-        persisted_event = await loop.run_in_executor(
-            None, self._persist_event_with_retry, event
-        )
-
-        # Also log to standard logging
-        logger.info(f"Audit Event: {event_type.value}", extra={
-            "audit_event_type": event_type.value,
+        log_extra = {
             "user_id": context.user_id,
-            "tool_id": tool.id if tool else None,
+            "session_id": context.session_id,
             "task_id": context.task_id,
-            "severity": persisted_event.severity,
+            "tool_id": tool.id if tool else None,
             **additional_details
-        })
+        }
+        await self._persist_and_log(event, log_extra)
+
+    def _get_lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+
+    async def _persist_and_log(
+        self, event: AuditEvent, log_extra: Dict[str, Any]
+    ) -> AuditEvent:
+        """Persist the event and emit a structured log record."""
+        lock = self._get_lock()
+        async with lock:
+            loop = asyncio.get_event_loop()
+            persisted_event = await loop.run_in_executor(
+                None, self._persist_event_with_retry, event
+            )
+
+        payload = {"audit_event_type": event.event_type.value, **log_extra}
+        payload["severity"] = persisted_event.severity
+        logger.info(f"Audit Event: {event.event_type.value}", extra=payload)
+        return persisted_event
 
     def _generate_event_id(self, task_id: Optional[str], timestamp: Optional[datetime] = None) -> str:
         """Generate a globally unique audit event identifier."""
@@ -363,9 +384,48 @@ class AuditLogger:
             AuditEventType.RATE_LIMIT_EXCEEDED: "warning",
             AuditEventType.CIRCUIT_BREAKER_OPENED: "warning",
             AuditEventType.CIRCUIT_BREAKER_CLOSED: "info",
+            AuditEventType.OAUTH_LOGIN_STARTED: "info",
+            AuditEventType.OAUTH_LOGIN_SUCCESS: "info",
+            AuditEventType.OAUTH_LOGIN_FAILED: "warning",
+            AuditEventType.OAUTH_REFRESH_SUCCESS: "info",
+            AuditEventType.OAUTH_TOKEN_REMOVED: "info",
         }
 
         return severity_mapping.get(event_type, "info")
+
+    async def log_event(
+        self,
+        event_type: AuditEventType,
+        user_id: str,
+        session_id: str,
+        task_id: str,
+        tool_id: Optional[str] = None,
+        severity: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> AuditEvent:
+        """Log a general-purpose audit event (not tied to a tool execution)."""
+        event_timestamp = datetime.now()
+        event_details = dict(details or {})
+        event = AuditEvent(
+            id=self._generate_event_id(task_id, event_timestamp),
+            timestamp=event_timestamp,
+            event_type=event_type,
+            user_id=user_id,
+            session_id=session_id,
+            task_id=task_id,
+            tool_id=tool_id,
+            severity=severity or self._determine_severity(event_type),
+            details=event_details,
+        )
+
+        log_extra = {
+            "user_id": user_id,
+            "session_id": session_id,
+            "task_id": task_id,
+            "tool_id": tool_id,
+            **event_details,
+        }
+        return await self._persist_and_log(event, log_extra)
 
     async def log_security_event(
         self,
@@ -496,6 +556,24 @@ async def log_security_event(
     """Convenience function to log security events."""
     logger = get_audit_logger()
     await logger.log_security_event(context, violation_type, details)
+
+
+async def log_oauth_event(
+    event_type: AuditEventType,
+    agent_id: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> AuditEvent:
+    """Convenience function to log OAuth-specific events."""
+    logger = get_audit_logger()
+    event_details = dict(details or {})
+    event_details["agent_id"] = agent_id
+    return await logger.log_event(
+        event_type=event_type,
+        user_id="oauth",
+        session_id=agent_id,
+        task_id="oauth_flow",
+        details=event_details,
+    )
 
 
 def generate_audit_report(

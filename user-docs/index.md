@@ -21,8 +21,13 @@ Get started in minutes with our streamlined setup:
 - **[Event System](events.md)** - Comprehensive event emission and consumption
 - **[Tool Execution](tool-execution.md)** - Bash tooling with native Codex tool-call support (read/write/shell today)
 
+### Authentication & Security
+- **[OAuth Authentication](oauth-authentication.md)** - OAuth 2.0 for ChatGPT/OpenAI integration
+- **[Configuration Guide](configuration.md)** - Environment variables, OAuth, and security settings
+
 ### Advanced Features
 - **[Tool Execution System](tool-execution.md)** - Bash-based tool execution capabilities
+- **[Development Tool Extension](configuration.md#development-tool-extension-configuration)** - Slash commands and tool lifecycles
 
 ## 🛠️ Development
 
@@ -66,6 +71,7 @@ user-docs/
 ├── installation.md          # Quick installation guide
 ├── configuration.md         # Configuration management
 ├── quick-start.md           # 5-minute getting started tutorial
+├── oauth-authentication.md  # OAuth 2.0 authentication guide
 ├── architecture.md          # System architecture overview
 ├── api-methods.md           # Complete API reference
 ├── deployment.md            # Production deployment

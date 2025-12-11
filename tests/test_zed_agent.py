@@ -7,9 +7,6 @@ focusing on real subprocess interaction and edge cases that were previously unte
 
 import asyncio
 import json
-import os
-import tempfile
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, List
 from unittest.mock import MagicMock, patch, AsyncMock
@@ -515,7 +512,7 @@ class TestZedAgentRequestResponse:
             try:
                 payload = json.loads(data.decode().strip())
                 ids.append(payload.get("id"))
-            except:
+            except json.JSONDecodeError:
                 pass
 
         assert ids == [1, 2, 3]
@@ -573,7 +570,6 @@ class TestZedAgentAuthentication:
 
         # Mock authentication method
         auth_call_count = 0
-        original_authenticate = connection.authenticate
 
         async def mock_authenticate(method_id, api_key=None):
             nonlocal auth_call_count
@@ -634,7 +630,6 @@ class TestZedAgentAuthentication:
         # Mock authentication method
         auth_call_count = 0
         auth_method_used = None
-        original_authenticate = connection.authenticate
 
         async def mock_authenticate(method_id, api_key=None):
             nonlocal auth_call_count, auth_method_used
@@ -839,7 +834,6 @@ class TestZedAgentSessionManagement:
         await connection.start()
 
         # Track notifications
-        notifications = []
         async def mock_request(method, params=None, handler=None):
             if method == "session/load":
                 # Simulate the notifications that would be sent during load

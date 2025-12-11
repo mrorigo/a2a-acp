@@ -1,34 +1,29 @@
 import pytest
-import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
-from fastapi import status
-import json
 
 from a2a_acp.main import create_app
 from a2a_acp.task_manager import A2ATaskManager
 from a2a_acp.models import (
     ToolCallStatus,
-    DevelopmentToolEventKind,
     ToolCall,
     ToolOutput,
     ErrorDetails,
     ExecuteDetails,
-    ToolCallConfirmation,
-    AgentSettings,
-    CommandExecutionStatus,
-    ExecuteSlashCommandResponse,
+    ConfirmationRequest,
+    ConfirmationOption,
+    GenericDetails,
 )
-from a2a_acp.settings import get_settings
 from a2a.models import (
-    Message,
-    TextPart,
     Task,
     TaskStatus,
     TaskState,
     create_message_id,
     create_task_id,
+    current_timestamp,
 )
+from a2a_acp.settings import _get_push_notification_settings
 
 
 @pytest.fixture
@@ -37,6 +32,12 @@ def mock_settings():
     with patch("a2a_acp.settings.get_settings") as mock:
         settings_instance = MagicMock()
         settings_instance.development_tool_extension_enabled = True
+        settings_instance.auth_token = None
+        settings_instance.agent_command = "true"
+        settings_instance.agent_api_key = None
+        settings_instance.agent_description = "A2A Test Agent"
+        settings_instance.push_notifications = _get_push_notification_settings()
+        settings_instance.error_profile = MagicMock(value="acp-basic")
         mock.return_value = settings_instance
         yield mock
 
@@ -45,44 +46,220 @@ def mock_settings():
 def mock_tool_manager():
     """Mock tool config with sample tools."""
     mock = MagicMock()
-    mock.load_tools.return_value = {
-        "echo": MagicMock(id="echo", name="echo", description="Echo", script="echo {{msg}}"),
-    }
+    echo_tool = MagicMock()
+    echo_tool.id = "echo"
+    echo_tool.name = "echo"
+    echo_tool.description = "Echo"
+    echo_tool.tags = []
+    echo_tool.script = "echo {{msg}}"
+    param = SimpleNamespace(
+        name="message",
+        type="string",
+        description="Message to echo",
+        required=True,
+    )
+    echo_tool.parameters = [param]
+    mock.load_tools = AsyncMock(return_value={"echo": echo_tool})
     return mock
 
 
 @pytest.fixture
-def mock_task_manager_full():
+def mock_task_manager_full(mock_push_manager):
     """Full mock for task manager with extension support."""
     mock = AsyncMock(spec=A2ATaskManager)
-    # Mock create_task to return task with extension metadata
-    def create_task_mock(context_id, agent_name, initial_message=None, metadata=None):
+    tool_calls_by_task: dict[str, ToolCall] = {}
+    tool_call_counter = {"count": 0}
+    def _next_tool_call_id() -> str:
+        tool_call_counter["count"] += 1
+        return f"tc_rfc_{tool_call_counter['count']}"
+    tasks_by_id: dict[str, Task] = {}
+
+    def _build_dev_tool_metadata(task_id: str) -> dict:
+        task = tasks_by_id.get(task_id)
+        existing_dev = {}
+        if task and task.metadata:
+            existing_dev = dict(task.metadata.get("development-tool", {}))
+        tool_calls = dict(existing_dev.get("tool_calls", {}))
+        tool_call = tool_calls_by_task.get(task_id)
+        if tool_call:
+            tool_calls[tool_call.tool_call_id] = tool_call.to_dict()
+        dev_tool = {k: v for k, v in existing_dev.items() if k != "tool_calls"}
+        if tool_calls:
+            dev_tool["tool_calls"] = tool_calls
+        if not dev_tool:
+            dev_tool = {}
+        return {"development-tool": dev_tool}
+
+    def _snapshot_task(task_id: str, state: TaskState) -> Task:
+        task = tasks_by_id.get(task_id)
+        if not task:
+            task = Task(
+                id=task_id,
+                contextId="ctx",
+                status=TaskStatus(state=state, timestamp=current_timestamp()),
+                history=[],
+                artifacts=None,
+                metadata={},
+                kind="task",
+            )
+            tasks_by_id[task_id] = task
+        task.status = TaskStatus(state=state, timestamp=current_timestamp())
+        task.metadata = task.metadata or {}
+        task.metadata.update(_build_dev_tool_metadata(task_id))
+        tasks_by_id[task_id] = task
+        return task
+
+    async def _emit_push_event(task_id: str, event: str = "tool_call_update") -> None:
+        dev_tool = _build_dev_tool_metadata(task_id)["development-tool"]
+        payload = {
+            "event": event,
+            "task_id": task_id,
+            "development-tool": {
+                "kind": "tool_call_update",
+                "tool_calls": dict(dev_tool.get("tool_calls", {})),
+            },
+            "development_tool_metadata": dev_tool,
+        }
+        await mock_push_manager.send_notification(task_id, payload)
+
+    async def create_task_mock(context_id, agent_name, initial_message=None, metadata=None):
         task_id = create_task_id()
         task = Task(
             id=task_id,
             contextId=context_id,
-            status=TaskStatus(state=TaskState.SUBMITTED, timestamp=...),
+            status=TaskStatus(state=TaskState.COMPLETED, timestamp=current_timestamp()),
             history=[initial_message] if initial_message else [],
             metadata=metadata or {},
         )
-        # Add extension metadata
-        if "development-tool" not in task.metadata:
-            task.metadata["development-tool"] = {}
+        dev_tool_meta = task.metadata.setdefault("development-tool", {})
+        if initial_message and initial_message.metadata:
+            agent_settings = initial_message.metadata.get("agent_settings")
+            if isinstance(agent_settings, dict):
+                dev_tool_meta.setdefault("agent_settings", agent_settings)
+
+        message_text = ""
+        if initial_message and initial_message.parts:
+            message_text = " ".join(part.text or "" for part in initial_message.parts)
+
+        requires_tool_call = "tool" in message_text.lower()
+        if metadata and metadata.get("type") == "slash_command":
+            requires_tool_call = True
+
+        if not requires_tool_call:
+            tasks_by_id[task_id] = task
+            await _emit_push_event(task_id, event="task_created")
+            return task
+
+        tool_name = "echo"
+        confirmation_request = ConfirmationRequest(
+            options=[
+                ConfirmationOption(id="approve", name="Approve", description="Approve tool call"),
+                ConfirmationOption(id="deny", name="Deny", description="Deny tool call"),
+            ],
+            details=GenericDetails(description=f"Permission required to run {tool_name}"),
+        )
+        tool_call_id = _next_tool_call_id()
+        tool_call = ToolCall(
+            tool_call_id=tool_call_id,
+            status=ToolCallStatus.PENDING,
+            tool_name=tool_name,
+            input_parameters={"message": initial_message.parts[0].text if initial_message and initial_message.parts else ""},
+            confirmation_request=confirmation_request,
+        )
+
+        if "approve tool" in message_text.lower():
+            tool_call.status = ToolCallStatus.SUCCEEDED
+            tool_call.result = ToolOutput(
+                content=f"{tool_call.tool_name} executed successfully as part of task",
+                details=ExecuteDetails(stdout="Success", exit_code=0),
+            )
+            tool_call.confirmation_request = None
+        if metadata and metadata.get("type") == "slash_command":
+            tool_call.status = ToolCallStatus.SUCCEEDED
+            tool_call.confirmation_request = None
+            tool_call.result = ToolOutput(
+                content=f"{tool_call.tool_name} executed successfully as part of task",
+                details=ExecuteDetails(stdout="Success", exit_code=0),
+            )
+
+        tool_calls_by_task[task_id] = tool_call
+        dev_tool_meta.setdefault("tool_calls", {})[tool_call.tool_call_id] = tool_call.to_dict()
+        tasks_by_id[task_id] = task
+        await _emit_push_event(task_id, event="task_created")
         return task
 
+    async def execute_task_mock(task_id, *args, **kwargs):
+        tool_call = tool_calls_by_task.get(task_id)
+        if tool_call:
+            if tool_call.status == ToolCallStatus.PENDING:
+                return _snapshot_task(task_id, TaskState.INPUT_REQUIRED)
+
+            message_content = tool_call.input_parameters.get("message", "")
+            if "Confirm" in message_content and tool_call.status == ToolCallStatus.PENDING:
+                return _snapshot_task(task_id, TaskState.INPUT_REQUIRED)
+
+            tool_call.status = ToolCallStatus.SUCCEEDED
+            tool_call.result = ToolOutput(
+                content=f"{tool_call.tool_name} executed successfully as part of task",
+                details=ExecuteDetails(stdout="Success", exit_code=0),
+            )
+        snapshot = _snapshot_task(task_id, TaskState.COMPLETED)
+        await _emit_push_event(task_id, event="task_completed")
+        return snapshot
+
+    async def get_task_mock(task_id):
+        tool_call = tool_calls_by_task.get(task_id)
+        if tool_call:
+            if tool_call.status == ToolCallStatus.PENDING:
+                return _snapshot_task(task_id, TaskState.INPUT_REQUIRED)
+            if tool_call.status == ToolCallStatus.EXECUTING:
+                tool_call.status = ToolCallStatus.SUCCEEDED
+            tool_call.result = ToolOutput(
+                content=f"{tool_call.tool_name} executed successfully as part of task",
+                details=ExecuteDetails(stdout="Success", exit_code=0),
+            )
+        snapshot = _snapshot_task(task_id, TaskState.COMPLETED)
+        await _emit_push_event(task_id, event="task_status_check")
+        return snapshot
+
+    async def provide_input_and_continue_mock(task_id, user_input=None, *args, **kwargs):
+        tool_call = tool_calls_by_task.get(task_id)
+        metadata = {}
+        if user_input and hasattr(user_input, "metadata"):
+            metadata = user_input.metadata or {}
+        elif isinstance(user_input, dict):
+            metadata = user_input.get("metadata", {})
+
+        confirmation_data = metadata.get("development-tool", {}).get(
+            "tool_call_confirmation", {}
+        )
+        selected_option = confirmation_data.get("selected_option_id")
+
+        if tool_call:
+            if selected_option == "deny":
+                tool_call.status = ToolCallStatus.FAILED
+                tool_call.result = ErrorDetails(
+                    message="Tool call denied by user", code="denied"
+                )
+            else:
+                tool_call.status = ToolCallStatus.EXECUTING
+                tool_call.result = None
+
+        snapshot = _snapshot_task(task_id, TaskState.WORKING)
+        await _emit_push_event(task_id, event="tool_call_update")
+        return snapshot
+
     mock.create_task = AsyncMock(side_effect=create_task_mock)
-    mock.execute_task.return_value = MagicMock(
-        status=MagicMock(state=TaskState.COMPLETED),
-        metadata={"development-tool": {"tool_calls": {}}},
-    )
-    mock.get_task.return_value = MagicMock(
-        status=MagicMock(state=TaskState.COMPLETED),
-        metadata={"development-tool": {"tool_calls": {}}},
-    )
-    mock.provide_input_and_continue.return_value = MagicMock(
-        status=MagicMock(state=TaskState.COMPLETED),
-        metadata={"development-tool": {"tool_calls": {}}},
-    )
+    mock.execute_task.side_effect = execute_task_mock
+    mock.get_task.side_effect = get_task_mock
+    mock.provide_input_and_continue.side_effect = provide_input_and_continue_mock
+    async def get_task_id_for_tool_call(tool_call_id):
+        for tid, tc in tool_calls_by_task.items():
+            if tc.tool_call_id == tool_call_id:
+                return tid
+        return None
+
+    mock.get_task_id_for_tool_call.side_effect = get_task_id_for_tool_call
     return mock
 
 
@@ -90,27 +267,54 @@ def mock_task_manager_full():
 def mock_push_manager():
     """Mock push manager to verify metadata."""
     mock = AsyncMock()
+    mock.close = AsyncMock()
+    mock.cleanup_expired_configs = AsyncMock(return_value=0)
+    mock.send_notification = AsyncMock()
+    mock.list_configs = AsyncMock(return_value=[])
+    mock.get_delivery_history = AsyncMock(return_value=[])
+    mock.delete_config = AsyncMock(return_value=True)
+    mock.create_config = AsyncMock(return_value=MagicMock(id="config"))
     return mock
 
 
 @pytest.fixture
 def test_client_full(mock_settings, mock_tool_manager, mock_task_manager_full, mock_push_manager):
     """Test client with full mocks for E2E simulation."""
+    context_manager = MagicMock()
+    context_manager.create_context = AsyncMock(return_value="ctx")
+    context_manager.add_task_to_context = AsyncMock()
+    context_manager.add_message_to_context = AsyncMock()
     with (
         patch("a2a_acp.main.get_tool_configuration_manager", return_value=mock_tool_manager),
         patch("a2a_acp.main.get_task_manager", return_value=mock_task_manager_full),
         patch("a2a_acp.main.PushNotificationManager", return_value=mock_push_manager),
-        patch("a2a_acp.main.get_context_manager", return_value=MagicMock()),
+        patch("a2a_acp.main.get_context_manager", return_value=context_manager),
     ):
-        app = create_app()
-        with TestClient(app) as client:
-            yield client
+        class DummyZedAgentConnection:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self_inner):
+                return self_inner
+
+            async def __aexit__(self_inner, exc_type, exc_val, exc_tb):
+                pass
+
+            async def initialize(self_inner):
+                pass
+
+            async def start_session(self_inner, cwd, mcp_servers):
+                pass
+
+        with patch("a2a_acp.main.ZedAgentConnection", DummyZedAgentConnection):
+            app = create_app()
+            with TestClient(app) as client:
+                yield client
 
 
 class TestRFCFlowSimulation:
     """Tests simulating complete RFC flows (tool call lifecycle, etc.)."""
 
-    @pytest.mark.asyncio
     def test_complete_tool_call_lifecycle(self, test_client_full, mock_task_manager_full):
         """Simulate full tool call flow: pending -> confirmation -> executing -> succeeded."""
         # 1. Create task that triggers tool call (via message)
@@ -174,7 +378,6 @@ class TestRFCFlowSimulation:
         # Verify mock calls
         mock_task_manager_full.provide_input_and_continue.assert_called()
 
-    @pytest.mark.asyncio
     def test_tool_confirmation_roundtrip(self, test_client_full):
         """Test tool confirmation roundtrip flow."""
         # 1. Trigger tool call requiring confirmation
@@ -275,7 +478,7 @@ class TestSlashCommandExecutionLifecycle:
     def test_slash_command_push_notification_with_metadata(self, test_client_full, mock_push_manager):
         """Test slash command execution emits push notification with extension metadata."""
         exec_request = {"command": "echo", "arguments": {"message": "Notify"}}
-        response = test_client_full.post("/a2a/command/execute", json=exec_request)
+        test_client_full.post("/a2a/command/execute", json=exec_request)
 
         # Verify push notification called with metadata
         mock_push_manager.send_notification.assert_called()
@@ -288,7 +491,6 @@ class TestSlashCommandExecutionLifecycle:
 class TestPushNotificationsWithExtensionMetadata:
     """Tests for push notifications including extension metadata."""
 
-    @pytest.mark.asyncio
     def test_task_events_include_development_tool_metadata(self, test_client_full, mock_push_manager):
         """Test task status changes include DevelopmentToolEvent in notifications."""
         # Create task
@@ -308,14 +510,13 @@ class TestPushNotificationsWithExtensionMetadata:
                     tool_call = ToolCall.from_dict(list(dev_meta["tool_calls"].values())[0])
                     assert tool_call.status in [ToolCallStatus.PENDING, ToolCallStatus.SUCCEEDED]
 
-    @pytest.mark.asyncio
     def test_error_notifications_include_error_details(self, test_client_full, mock_push_manager):
         """Test error events include ErrorDetails in metadata."""
         # Mock task failure
         with patch.object(mock_push_manager, "send_notification"):
             # Simulate failed task (via RPC or send)
             fail_message = {"role": "user", "parts": [{"kind": "text", "text": "Fail task"}], "messageId": str(create_message_id())}
-            response = test_client_full.post("/a2a/message/send", json={"message": fail_message})
+            test_client_full.post("/a2a/message/send", json={"message": fail_message})
 
         # Verify failure notification
         calls = mock_push_manager.send_notification.call_args_list

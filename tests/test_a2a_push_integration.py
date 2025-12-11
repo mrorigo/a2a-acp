@@ -6,13 +6,10 @@ task execution to notification delivery and streaming.
 """
 
 import asyncio
-import json
 import pytest
 import sqlite3
 import time
-from datetime import datetime
-from typing import Dict, List, Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -137,7 +134,7 @@ class TestA2APushNotificationIntegration:
                 config_payload["taskId"],
                 config_payload["id"]
             )
-            assert delete_success == True
+            assert delete_success
 
             # Verify deletion
             deleted_config = await push_mgr.get_config(
@@ -331,7 +328,7 @@ class TestA2APushNotificationIntegration:
             })
 
             # Should still return False but not crash
-            assert success == False
+            assert not success
 
             # Check that failed delivery was tracked
             deliveries = await push_mgr.get_delivery_history(task_id="test-error-task")
@@ -743,7 +740,7 @@ class TestErrorRecovery:
                 "event": "resilience_test"
             })
 
-            assert success == True
+            assert success
             assert mock_post.call_count == 3  # Initial + 2 retries
 
         asyncio.run(test_http_resilience())

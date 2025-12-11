@@ -7,7 +7,6 @@ and YAML loading capabilities.
 """
 
 import pytest
-import asyncio
 import tempfile
 import yaml
 from pathlib import Path
@@ -497,7 +496,7 @@ class TestSecurityValidation:
         ]
 
         for script in dangerous_scripts:
-            tool = BashTool(
+            BashTool(
                 id="dangerous",
                 name="Dangerous",
                 description="Dangerous tool for testing",
@@ -527,7 +526,7 @@ class TestSecurityValidation:
         ]
 
         for script in safe_scripts:
-            tool = BashTool(
+            BashTool(
                 id="safe",
                 name="Safe",
                 description="Safe tool for testing",

@@ -49,6 +49,7 @@ curl -X POST http://localhost:8001/ \
 - **[Configuration Guide](user-docs/configuration.md)** – Environment variables, policies, governors  
 - **[Governance Events](user-docs/events.md)** – Event payloads for audit and compliance  
 - **[Testing Guide](user-docs/testing.md)** – Running the unit and governance suites
+- **[ChatGPT OAuth Guide](docs/chatgpt-oauth-guide.md)** – Config, agent setup, and curl recipes for the auth endpoints
 
 For a strategic overview, read the [Enterprise Whitepaper](WHITEPAPER.md).
 
@@ -82,6 +83,10 @@ For a strategic overview, read the [Enterprise Whitepaper](WHITEPAPER.md).
 - **A2A Compliance** – Full v0.3.0 coverage, including tasks, contexts, artifacts, and streaming
 - **Enterprise Security** – Auth tokens, quota controls, and immutable audit logging
 - **Production Tooling** – 240+ tests, SSE streaming, webhook analytics, and bash-based tool execution
+
+### 🧪 Testing
+
+- `make test` (`PYTHONPATH=src A2A_AGENT_COMMAND=true ./.venv/bin/uv run python -m pytest --tb=short -vv`) now passes end-to-end (364 passed, 4 skipped) after fixing async lock initialization in the task manager, audit logger, and executor so the extension suites can run inside a shared event loop.
 
 ### 🔭 On the Horizon
 - Integrations with external policy engines (e.g., Rego/CEL)

@@ -29,11 +29,11 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ExecutionResult:
     """Result of a tool execution."""
-    success: bool
-    return_code: int
-    stdout: str
-    stderr: str
-    execution_time: float
+    success: bool = True
+    return_code: int = 0
+    stdout: str = ""
+    stderr: str = ""
+    execution_time: float = 0.0
     output_files: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = None
     mcp_error: Optional[Dict[str, Any]] = None
@@ -361,7 +361,7 @@ class ToolSandbox:
                     fragment = script[match.start(): match.start() + 40].lower()
                     if fragment.startswith(safe_substitutions):
                         continue
-                snippet = script[match.start(): match.end() + 40]
+                script[match.start(): match.end() + 40]
                 violations.append(f"Blocked command injection attempt: {description}")
 
         # Check for filesystem path traversal
@@ -517,7 +517,7 @@ class ToolSandbox:
             process_limit = max_processes or 10
             resource.setrlimit(resource.RLIMIT_NPROC, (process_limit, process_limit))
 
-            logger.debug(f"Set process limits for tool", extra={
+            logger.debug("Set process limits for tool", extra={
                 "memory_mb": memory_limit_mb,
                 "cpu_seconds": cpu_limit_seconds,
                 "file_mb": file_limit_mb,
@@ -574,7 +574,8 @@ class ToolSandbox:
             # Execute the script with enhanced security
             preexec_fn = None
             if sys.platform != "darwin":
-                preexec_fn = lambda: self._set_process_limits(tool_config)
+                def preexec_fn():
+                    return self._set_process_limits(tool_config)
             else:
                 if tool_config and any(
                     limit is not None
@@ -629,7 +630,7 @@ class ToolSandbox:
                 if tool_config and tool_config.use_temp_isolation:
                     output_files = await self._collect_output_files(working_dir)
 
-                logger.info(f"Script executed", extra={
+                logger.info("Script executed", extra={
                     "success": process.returncode == 0,
                     "stdout": stdout,
                     "stderr": stderr,
@@ -668,7 +669,7 @@ class ToolSandbox:
 
         except Exception as e:
             execution_time = (datetime.now() - start_time).total_seconds()
-            logger.error(f"Sandbox execution failed", extra={
+            logger.error("Sandbox execution failed", extra={
                 "tool_id": context.tool_id,
                 "error": str(e),
                 "execution_time": execution_time

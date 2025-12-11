@@ -8,12 +8,7 @@ various load conditions and concurrent scenarios.
 import asyncio
 import json
 import pytest
-import sqlite3
 import time
-import statistics
-from datetime import datetime
-from typing import Dict, List, Any
-from unittest.mock import AsyncMock, MagicMock
 
 from src.a2a_acp.database import SessionDatabase
 from src.a2a_acp.models import TaskPushNotificationConfig
@@ -94,7 +89,7 @@ class TestPushNotificationPerformance:
                     "event": "status_change",
                     "task_id": task_id
                 })
-                assert should_send == True
+                assert should_send
 
             end_time = time.time()
             total_time = end_time - start_time
@@ -283,7 +278,7 @@ class TestPushNotificationPerformance:
             cleanup_time = cleanup_end - cleanup_start
             assert cleanup_time < 2.0  # Cleanup should be efficient
 
-            print(f"Streaming performance:")
+            print("Streaming performance:")
             print(f"  Registered {num_connections} connections in {registration_time:.2f}s")
             print(f"  Broadcast to connections in {broadcast_time:.2f}s")
             print(f"  Cleaned up connections in {cleanup_time:.2f}s")
@@ -449,7 +444,7 @@ class TestStressTests:
 
             # Test payload creation multiple times
             for i in range(10):
-                payload = mgr._create_notification_payload(large_data)
+                mgr._create_notification_payload(large_data)
 
             end_time = time.time()
             processing_time = end_time - start_time

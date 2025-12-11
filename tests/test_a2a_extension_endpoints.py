@@ -1,20 +1,13 @@
 import pytest
+from typing import Any
+from types import SimpleNamespace
 from unittest.mock import MagicMock, AsyncMock, patch
 from fastapi.testclient import TestClient
 from fastapi import status
 
 from a2a_acp.main import create_app
-from a2a_acp.settings import get_settings
-from a2a_acp.models import (
-    GetAllSlashCommandsResponse,
-    ExecuteSlashCommandRequest,
-    ExecuteSlashCommandResponse,
-    SlashCommand,
-    SlashCommandArgument,
-    CommandExecutionStatus,
-)
-from a2a_acp.tool_config import get_tool_configuration_manager, BashTool
 from a2a_acp.task_manager import A2ATaskManager, create_task_id
+from a2a_acp.settings import _get_push_notification_settings
 
 
 @pytest.fixture
@@ -23,6 +16,12 @@ def mock_settings():
     with patch("a2a_acp.settings.get_settings") as mock:
         settings_instance = MagicMock()
         settings_instance.development_tool_extension_enabled = True
+        settings_instance.auth_token = None
+        settings_instance.agent_command = "true"
+        settings_instance.agent_api_key = None
+        settings_instance.agent_description = "Test Agent"
+        settings_instance.push_notifications = _get_push_notification_settings()
+        settings_instance.error_profile = MagicMock(value="acp-basic")
         mock.return_value = settings_instance
         yield mock
 
@@ -32,17 +31,27 @@ def mock_tool_manager():
     """Mock tool configuration manager with sample tools."""
     mock = MagicMock()
     mock_echo = MagicMock()
+    mock_echo.id = "echo"
     mock_echo.name = "echo"
     mock_echo.description = "Echo a message"
-    mock_echo.parameters = [
-        {"name": "message", "type": "string", "description": "Message to echo", "required": True},
-    ]
+    echo_param = MagicMock()
+    echo_param.name = "message"
+    echo_param.type = "string"
+    echo_param.description = "Message to echo"
+    echo_param.required = True
+    mock_echo.parameters = [echo_param]
+    mock_echo.tags = []
     mock_ls = MagicMock()
+    mock_ls.id = "list_files"
     mock_ls.name = "ls"
     mock_ls.description = "List files"
-    mock_ls.parameters = [
-        {"name": "path", "type": "string", "description": "Path to list", "required": False},
-    ]
+    ls_param = MagicMock()
+    ls_param.name = "path"
+    ls_param.type = "string"
+    ls_param.description = "Path to list"
+    ls_param.required = False
+    mock_ls.parameters = [ls_param]
+    mock_ls.tags = []
     sample_tools = {"echo": mock_echo, "list_files": mock_ls}
     mock.load_tools = AsyncMock(return_value=sample_tools)
     return mock
@@ -52,7 +61,27 @@ def mock_tool_manager():
 def mock_task_manager():
     """Mock task manager for command execution tests."""
     mock = MagicMock(spec=A2ATaskManager)
-    mock.create_task = AsyncMock(return_value=MagicMock(id=create_task_id()))
+    metadata_cache: dict[str, Any] = {"metadata": {}}
+
+    async def create_task_side_effect(*args, **kwargs):
+        metadata_cache["metadata"] = kwargs.get("metadata", {})
+        task_id = create_task_id()
+        task = MagicMock(id=task_id)
+        task.metadata = metadata_cache["metadata"]
+        mock.create_task.return_value = task
+        return task
+
+    async def get_task_side_effect(task_id):
+        status = SimpleNamespace(state=SimpleNamespace(value="completed"))
+        return SimpleNamespace(
+            id=task_id,
+            contextId="slash-command",
+            status=status,
+            metadata=metadata_cache["metadata"],
+        )
+
+    mock.create_task = AsyncMock(side_effect=create_task_side_effect)
+    mock.get_task = AsyncMock(side_effect=get_task_side_effect)
     return mock
 
 
@@ -60,10 +89,14 @@ def mock_task_manager():
 def test_client(mock_settings, mock_tool_manager, mock_task_manager) -> TestClient:
     """Create test client with mocked dependencies."""
     # Patch dependencies in app
+    context_manager = MagicMock()
+    context_manager.create_context = AsyncMock(return_value="ctx")
+    context_manager.add_task_to_context = AsyncMock()
+    context_manager.add_message_to_context = AsyncMock()
     with (
         patch("a2a_acp.main.get_tool_configuration_manager", return_value=mock_tool_manager),
         patch("a2a_acp.main.get_task_manager", return_value=mock_task_manager),
-        patch("a2a_acp.main.get_context_manager", return_value=MagicMock()),
+        patch("a2a_acp.main.get_context_manager", return_value=context_manager),
     ):
         app = create_app()
         with TestClient(app) as client:
@@ -101,16 +134,15 @@ class TestCommandsGetEndpoint:
         assert arg["name"] == "path"
         assert arg["required"] is False
 
-    def test_get_commands_disabled_when_extension_off(self, test_client):
+    def test_get_commands_disabled_when_extension_off(self, test_client, mock_settings):
         """Test endpoint returns 404 when extension disabled."""
-        with patch("a2a_acp.settings.get_settings") as mock_settings:
-            settings = MagicMock()
-            settings.development_tool_extension_enabled = False
-            mock_settings.return_value = settings
+        settings = mock_settings.return_value
+        settings.development_tool_extension_enabled = False
+        settings.auth_token = None
 
-            response = test_client.get("/a2a/commands/get")
-            assert response.status_code == 404
-            assert response.json()["detail"] == "Development tool extension not enabled"
+        response = test_client.get("/a2a/commands/get")
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Development tool extension not enabled"
 
     def test_get_commands_handles_no_tools(self, test_client):
         """Test endpoint returns empty list when no tools configured."""
@@ -145,9 +177,8 @@ class TestCommandExecuteEndpoint:
 
         # Verify task_manager.create_task was called
         mock_task_manager.create_task.assert_called_once()
-        call_args = mock_task_manager.create_task.call_args[0]
-        assert call_args[0] == "slash-command"  # context_id
-        initial_message = call_args[2]  # initial_message
+        call_kwargs = mock_task_manager.create_task.call_args.kwargs
+        initial_message = call_kwargs["initial_message"]
         assert initial_message.role == "user"
         assert initial_message.parts[0].text == "/echo {'message': 'Hello World'}"
         assert initial_message.metadata["slash_command"]["command"] == "echo"
@@ -166,28 +197,25 @@ class TestCommandExecuteEndpoint:
         assert isinstance(detail, list)
         assert any("validation" in str(error).lower() for error in detail)
 
-    def test_execute_command_disabled_when_extension_off(self, test_client):
+    def test_execute_command_disabled_when_extension_off(self, test_client, mock_settings):
         """Test endpoint returns 404 when extension disabled."""
-        with patch("a2a_acp.settings.get_settings") as mock_settings:
-            settings = MagicMock()
-            settings.development_tool_extension_enabled = False
-            mock_settings.return_value = settings
+        settings = mock_settings.return_value
+        settings.development_tool_extension_enabled = False
+        settings.auth_token = None
 
-            response = test_client.post("/a2a/command/execute", json={"command": "echo", "arguments": {"message": "test"}})
-            assert response.status_code == 404
-            assert response.json()["detail"] == "Development tool extension not enabled"
+        response = test_client.post("/a2a/command/execute", json={"command": "echo", "arguments": {"message": "test"}})
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Development tool extension not enabled"
 
-    def test_execute_command_auth_required(self, test_client):
+    def test_execute_command_auth_required(self, test_client, mock_settings):
         """Test authentication required for endpoint."""
         # Assuming auth is enabled in settings
-        with patch("a2a_acp.main.get_settings") as mock_settings:
-            settings = MagicMock()
-            settings.auth_token = "test-token"
-            mock_settings.return_value = settings
+        settings = mock_settings.return_value
+        settings.auth_token = "test-token"
 
-            response = test_client.post("/a2a/command/execute", json={"command": "echo", "arguments": {"message": "test"}})
-            assert response.status_code == 401
-            assert "bearer token" in response.json()["detail"]
+        response = test_client.post("/a2a/command/execute", json={"command": "echo", "arguments": {"message": "test"}})
+        assert response.status_code == 401
+        assert "bearer token" in response.json()["detail"]
 
 
 class TestAgentCardExtension:
@@ -208,21 +236,22 @@ class TestAgentCardExtension:
         assert len(extensions) == 1
         ext = extensions[0]
         assert ext["uri"] == "https://developers.google.com/gemini/a2a/extensions/development-tool/v1"
-        assert ext["version"] == "1.0.0"
-        assert "description" in ext["metadata"]
+        params = ext.get("params", {})
+        assert params.get("version") == "1.0.0"
+        metadata = params.get("metadata", {})
+        assert "description" in metadata
 
-    def test_agent_card_excludes_extension_when_disabled(self, test_client):
+    def test_agent_card_excludes_extension_when_disabled(self, test_client, mock_settings):
         """Test agent card excludes extension when disabled."""
-        with patch("a2a_acp.settings.get_settings") as mock_settings:
-            settings = MagicMock()
-            settings.development_tool_extension_enabled = False
-            mock_settings.return_value = settings
+        settings = mock_settings.return_value
+        settings.development_tool_extension_enabled = False
+        settings.auth_token = None
 
-            response = test_client.get("/.well-known/agent-card.json")
-            data = response.json()
+        response = test_client.get("/.well-known/agent-card.json")
+        data = response.json()
 
-            capabilities = data["capabilities"]
-            assert "extensions" not in capabilities
+        capabilities = data["capabilities"]
+        assert "extensions" not in capabilities
 
     def test_authenticated_agent_card(self, test_client):
         """Test authenticated extended agent card includes extensions."""
@@ -247,16 +276,14 @@ class TestAgentCardExtension:
 class TestErrorHandlingAndValidation:
     """Tests for endpoint validation and error handling."""
 
-    def test_commands_get_unauthorized(self, test_client):
+    def test_commands_get_unauthorized(self, test_client, mock_settings):
         """Test unauthorized access to commands endpoint."""
-        with patch("a2a_acp.main.get_settings") as mock_settings:
-            settings = MagicMock()
-            settings.auth_token = "required-token"
-            mock_settings.return_value = settings
+        settings = mock_settings.return_value
+        settings.auth_token = "required-token"
 
-            response = test_client.get("/a2a/commands/get")
-            assert response.status_code == 401
-            assert "bearer token" in response.json()["detail"]
+        response = test_client.get("/a2a/commands/get")
+        assert response.status_code == 401
+        assert "bearer token" in response.json()["detail"]
 
     def test_command_execute_missing_arguments(self, test_client):
         """Test execute command with missing required arguments."""
@@ -272,16 +299,11 @@ class TestErrorHandlingAndValidation:
 
     def test_command_execute_invalid_command(self, test_client, mock_tool_manager):
         """Test execute non-existent command."""
-        # Mock no tools
-        mock = MagicMock()
-        mock.load_tools = AsyncMock(return_value={})
-        mock_tool_manager.return_value = mock
-
         request_data = {"command": "nonexistent", "arguments": {}}
+        # Ensure no tools available for this test
+        mock_tool_manager.load_tools = AsyncMock(return_value={})
 
         response = test_client.post("/a2a/command/execute", json=request_data)
-        # Should still create task, but perhaps validate command exists?
-        # Current impl doesn't validate command existence, just creates task
         assert response.status_code == 200
 
     def test_endpoints_return_proper_errors_on_internal_failure(self, test_client, mock_task_manager):
@@ -299,38 +321,36 @@ class TestConfigurationToggling:
     """Tests for configuration flag controlling endpoint availability."""
 
     @pytest.mark.parametrize("enabled", [True, False])
-    def test_endpoints_availability_based_on_config(self, test_client, enabled):
+    def test_endpoints_availability_based_on_config(self, test_client, enabled, mock_settings):
         """Test endpoints available only when extension enabled."""
-        with patch("a2a_acp.settings.get_settings") as mock_settings:
-            settings = MagicMock()
-            settings.development_tool_extension_enabled = enabled
-            mock_settings.return_value = settings
+        settings = mock_settings.return_value
+        settings.development_tool_extension_enabled = enabled
+        settings.auth_token = None
 
-            response = test_client.get("/a2a/commands/get")
-            if enabled:
-                assert response.status_code == 200
-            else:
-                assert response.status_code == 404
+        response = test_client.get("/a2a/commands/get")
+        if enabled:
+            assert response.status_code == 200
+        else:
+            assert response.status_code == 404
 
-            response_exec = test_client.post("/a2a/command/execute", json={"command": "echo", "arguments": {}})
-            if enabled:
-                assert response_exec.status_code in [200, 422]  # Valid or validation error
-            else:
-                assert response_exec.status_code == 404
+        response_exec = test_client.post("/a2a/command/execute", json={"command": "echo", "arguments": {}})
+        if enabled:
+            assert response_exec.status_code in [200, 422]  # Valid or validation error
+        else:
+            assert response_exec.status_code == 404
 
-    def test_agent_card_always_available(self, test_client):
+    def test_agent_card_always_available(self, test_client, mock_settings):
         """Test agent card endpoint always available, but extensions conditional."""
         # Even if extension disabled, card should return 200
-        with patch("a2a_acp.settings.get_settings") as mock_settings:
-            settings = MagicMock()
-            settings.development_tool_extension_enabled = False
-            mock_settings.return_value = settings
+        settings = mock_settings.return_value
+        settings.development_tool_extension_enabled = False
+        settings.auth_token = None
 
-            response = test_client.get("/.well-known/agent-card.json")
-            assert response.status_code == 200
-            data = response.json()
-            capabilities = data["capabilities"]
-            assert "extensions" not in capabilities  # But no extensions
+        response = test_client.get("/.well-known/agent-card.json")
+        assert response.status_code == 200
+        data = response.json()
+        capabilities = data["capabilities"]
+        assert "extensions" not in capabilities  # But no extensions
 
 
 def test_integration_commands_to_task_execution(test_client, mock_task_manager):

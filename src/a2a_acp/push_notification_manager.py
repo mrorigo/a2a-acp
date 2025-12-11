@@ -368,9 +368,24 @@ class PushNotificationManager:
             logger.error("HTTP client not initialized")
             return False
 
+        event_type_str = event.get("event", "")
         # Create notification payload
         payload = self._create_notification_payload(event)
         payload_dict = payload.to_dict()
+        dev_tool_meta = event.get("development_tool_metadata")
+        if dev_tool_meta:
+            kind_map = {
+                EventType.TASK_STATUS_CHANGE.value: DevelopmentToolEventKind.TOOL_CALL_UPDATE,
+                EventType.TASK_MESSAGE.value: DevelopmentToolEventKind.THOUGHT,
+                EventType.TASK_ARTIFACT.value: DevelopmentToolEventKind.TOOL_CALL_UPDATE,
+                EventType.TASK_INPUT_REQUIRED.value: DevelopmentToolEventKind.TOOL_CALL_CONFIRMATION,
+            }
+            kind = kind_map.get(event_type_str, DevelopmentToolEventKind.UNSPECIFIED)
+            dev_event = DevelopmentToolEvent(
+                kind=kind,
+                data=dev_tool_meta
+            )
+            payload_dict["development_tool_event"] = dev_event.to_dict()
 
         # Prepare headers
         headers = {
@@ -515,29 +530,8 @@ class PushNotificationManager:
                 timestamp=timestamp,
                 data=event
             )
-    
-        # Extend with DevelopmentToolEvent if metadata present
-        payload_dict = base_payload.to_dict()
-        dev_tool_meta = event.get("development_tool_metadata")
-        if dev_tool_meta:
-            # Map event type to DevelopmentToolEventKind
-            kind_map = {
-                EventType.TASK_STATUS_CHANGE.value: DevelopmentToolEventKind.TOOL_CALL_UPDATE,
-                EventType.TASK_MESSAGE.value: DevelopmentToolEventKind.THOUGHT,
-                EventType.TASK_ARTIFACT.value: DevelopmentToolEventKind.TOOL_CALL_UPDATE,
-                EventType.TASK_INPUT_REQUIRED.value: DevelopmentToolEventKind.TOOL_CALL_CONFIRMATION,
-                # Add more mappings as needed
-            }
-            kind = kind_map.get(event_type_str, DevelopmentToolEventKind.UNSPECIFIED)
-            
-            dev_event = DevelopmentToolEvent(
-                kind=kind,
-                data=dev_tool_meta
-            )
-            payload_dict["development_tool_event"] = dev_event.to_dict()
-    
-        # Return the enhanced payload as dict for serialization
-        return payload_dict
+
+        return base_payload
 
     def _get_authentication_headers(
         self,

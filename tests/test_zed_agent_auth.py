@@ -1,9 +1,7 @@
 
-import asyncio
-import json
 from unittest.mock import MagicMock, patch, AsyncMock
 import pytest
-from a2a_acp.zed_agent import ZedAgentConnection, AgentProcessError
+from a2a_acp.zed_agent import ZedAgentConnection
 
 class TestZedAgentAuthenticationExtended:
     """Test extended authentication functionality for codex and openai keys."""

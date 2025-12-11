@@ -15,10 +15,9 @@ import uuid
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
-from .models import NotificationPayload, TaskStatusChangePayload, TaskMessagePayload, TaskArtifactPayload
 
 if TYPE_CHECKING:
-    from .push_notification_manager import PushNotificationManager
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -323,7 +322,7 @@ class StreamingManager:
 
     async def _broadcast_to_websockets(self, task_id: str, event: Dict[str, Any]) -> None:
         """Broadcast notification to WebSocket connections."""
-        notification = {
+        {
             "type": "notification",
             "task_id": task_id,
             "event": event.get("event", "unknown"),

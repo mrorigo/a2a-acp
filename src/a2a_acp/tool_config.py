@@ -11,7 +11,7 @@ import asyncio
 import logging
 import os
 import yaml
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
@@ -115,6 +115,33 @@ class BashTool:
     updated_at: datetime = field(default_factory=datetime.now)
     error_mapping: Dict[int, ToolErrorMappingEntry] = field(default_factory=dict)
 
+    def __post_init__(self):
+        """Normalize nested configuration structures for consistent typing."""
+        self.parameters = [self._normalize_parameter(p) for p in (self.parameters or [])]
+        self.config = self._normalize_config(self.config)
+
+    def _normalize_parameter(self, param: Any) -> ToolParameter:
+        """Ensure tool parameters are stored as ToolParameter instances."""
+        if isinstance(param, ToolParameter):
+            return param
+        if isinstance(param, dict):
+            return ToolParameter(**param)
+        if hasattr(param, "__dict__"):
+            return ToolParameter(**vars(param))
+        raise TypeError(f"Unsupported parameter definition type: {type(param)}")
+
+    def _normalize_config(self, config_value: Any) -> ToolConfig:
+        """Ensure tool configuration is a ToolConfig dataclass."""
+        if isinstance(config_value, ToolConfig):
+            return config_value
+        if isinstance(config_value, dict):
+            allowed = {f.name for f in fields(ToolConfig)}
+            filtered = {k: v for k, v in config_value.items() if k in allowed}
+            return ToolConfig(**filtered)
+        if config_value is None:
+            return ToolConfig()
+        raise TypeError(f"Unsupported tool config type: {type(config_value)}")
+
     def validate_parameters(self, params: Dict[str, Any]) -> tuple[bool, List[str]]:
         """Validate provided parameters against tool definition."""
         errors = []
@@ -139,7 +166,6 @@ class BashTool:
 
     def render_script(self, parameters: Dict[str, Any]) -> str:
         """Render the bash script template with provided parameters."""
-        import re
 
         # Simple template rendering - replace {{param}} with values
         script = self.script

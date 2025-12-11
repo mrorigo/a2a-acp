@@ -5,26 +5,18 @@ Tests the core push notification components including models, database operation
 notification delivery, and streaming functionality.
 """
 
-import asyncio
 import json
 import pytest
-import sqlite3
-import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from src.a2a_acp.models import (
     TaskPushNotificationConfig,
     NotificationDelivery,
-    NotificationPayload,
     TaskStatusChangePayload,
     TaskMessagePayload,
-    TaskArtifactPayload,
     DeliveryStatus,
-    EventType,
-    NotificationFilter,
-    NotificationAnalytics
+    NotificationFilter
 )
 from src.a2a_acp.push_notification_manager import PushNotificationManager
 from src.a2a_acp.streaming_manager import StreamingManager, StreamingConnection
@@ -93,17 +85,17 @@ class TestPushNotificationModels:
         )
 
         # Should send status_change notifications
-        assert filter_config.should_send_notification("status_change", 14) == True
+        assert filter_config.should_send_notification("status_change", 14)
 
         # Should not send artifact notifications
-        assert filter_config.should_send_notification("task_artifact", 14) == False
+        assert not filter_config.should_send_notification("task_artifact", 14)
 
         # Should not send during quiet hours (22:00-08:00)
-        assert filter_config.should_send_notification("status_change", 23) == False
-        assert filter_config.should_send_notification("status_change", 2) == False
+        assert not filter_config.should_send_notification("status_change", 23)
+        assert not filter_config.should_send_notification("status_change", 2)
 
         # Should send outside quiet hours
-        assert filter_config.should_send_notification("status_change", 14) == True
+        assert filter_config.should_send_notification("status_change", 14)
 
 
 class TestPushNotificationManager:
@@ -207,7 +199,7 @@ class TestPushNotificationManager:
 
         success = await push_manager.delete_config("test-task", "test-config")
 
-        assert success == True
+        assert success
         mock_database.delete_push_notification_config.assert_called_once_with("test-task", "test-config")
 
     @pytest.mark.asyncio
@@ -217,7 +209,7 @@ class TestPushNotificationManager:
 
         success = await push_manager.send_notification("test-task", {"event": "test"})
 
-        assert success == True  # Should return True even with no configs
+        assert success  # Should return True even with no configs
 
     @pytest.mark.asyncio
     async def test_send_notification_with_configs(self, push_manager, mock_database):
@@ -242,7 +234,7 @@ class TestPushNotificationManager:
                 "new_state": "completed"
             })
 
-            assert success == True
+            assert success
             mock_post.assert_called_once()
 
             # Verify the request was made with correct data
@@ -391,17 +383,17 @@ class TestStreamingManager:
             task_filter={"task-1", "task-2"}
         )
 
-        assert connection.should_receive_notification("task-1") == True
-        assert connection.should_receive_notification("task-2") == True
-        assert connection.should_receive_notification("task-3") == False
+        assert connection.should_receive_notification("task-1")
+        assert connection.should_receive_notification("task-2")
+        assert not connection.should_receive_notification("task-3")
 
     def test_should_receive_notification_no_filter(self):
         """Test notification filtering without task filter (all tasks)."""
         connection = StreamingConnection(connection_id="test-connection")
 
-        assert connection.should_receive_notification("task-1") == True
-        assert connection.should_receive_notification("task-2") == True
-        assert connection.should_receive_notification("any-task") == True
+        assert connection.should_receive_notification("task-1")
+        assert connection.should_receive_notification("task-2")
+        assert connection.should_receive_notification("any-task")
 
     @pytest.mark.asyncio
     async def test_register_sse_connection(self, streaming_manager):
@@ -519,7 +511,7 @@ class TestDatabaseOperations:
 
         # Delete the configuration
         success = await test_db.delete_push_notification_config("test-task", "test-config")
-        assert success == True
+        assert success
 
         # Verify it's gone
         config = await test_db.get_push_notification_config("test-task", "test-config")
@@ -630,7 +622,7 @@ class TestIntegrationScenarios:
                 "new_state": "completed"
             })
 
-            assert success == True
+            assert success
 
     @pytest.mark.asyncio
     async def test_retry_logic_on_failure(self):
@@ -688,7 +680,7 @@ class TestIntegrationScenarios:
             })
 
             # Should succeed after retries
-            assert success == True
+            assert success
             assert mock_post.call_count == 3  # Initial attempt + 2 retries
 
     def test_notification_payload_serialization(self):

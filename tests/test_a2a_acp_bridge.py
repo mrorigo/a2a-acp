@@ -9,7 +9,6 @@ import json
 import os
 import tempfile
 import time
-from pathlib import Path
 from typing import Optional, Literal, Union, Any
 from unittest.mock import MagicMock, patch
 
@@ -26,8 +25,7 @@ from src.a2a.models import (
 from src.a2a_acp.main import create_app
 from src.a2a_acp.database import SessionDatabase, A2AContext, ACPSession
 # A2A-ACP bridge tests - using A2A protocol types exclusively
-from src.a2a_acp.task_manager import A2ATaskManager, a2a_task_manager
-from src.a2a_acp.context_manager import A2AContextManager, a2a_context_manager
+from src.a2a_acp.task_manager import A2ATaskManager
 from src.a2a_acp.context_manager import A2AContextManager
 from src.a2a_acp.zed_agent import ZedAgentConnection, AgentProcessError
 
@@ -145,7 +143,7 @@ class TestTaskManager:
     def test_task_model_structure(self):
         """Test that A2A models are available."""
         # Test that we can import A2A models for task management
-        from src.a2a.models import Task, TaskState, Message, TextPart
+        from src.a2a.models import TaskState, Message, TextPart
 
         # Verify A2A types are available
         assert TaskState.SUBMITTED == "submitted"
@@ -212,9 +210,9 @@ class TestA2ATaskManager:
         task_manager = A2ATaskManager()
 
         # Create multiple tasks
-        task1 = await task_manager.create_task("context1", "agent1")
-        task2 = await task_manager.create_task("context2", "agent2")
-        task3 = await task_manager.create_task("context1", "agent1")
+        await task_manager.create_task("context1", "agent1")
+        await task_manager.create_task("context2", "agent2")
+        await task_manager.create_task("context1", "agent1")
 
         # List all tasks
         all_tasks = await task_manager.list_tasks()
@@ -310,7 +308,6 @@ class TestA2AContextManager:
     @pytest.mark.asyncio
     async def test_add_task_to_context(self):
         """Test adding a task to a context."""
-        from src.a2a.models import Task, TaskStatus, TaskState
 
         context_manager = A2AContextManager()
         task_manager = A2ATaskManager()
@@ -413,7 +410,6 @@ class TestZedAgentIntegration:
         connection = ZedAgentConnection(["echo"])
 
         # Mock the JSON-RPC communication
-        original_request = connection.request
 
         async def mock_request(method, params=None, handler=None):
             if method == "session/load" and params:
@@ -442,7 +438,6 @@ class TestZedAgentIntegration:
         connection = ZedAgentConnection(["echo"])
 
         # Track notifications received
-        notifications = []
 
         async def mock_request(method, params=None, handler=None):
             if method == "session/load":
@@ -537,7 +532,7 @@ class TestZedAgentIntegration:
 
     def test_zed_agent_session_parameter_validation(self):
         """Test that session methods validate parameters correctly."""
-        connection = ZedAgentConnection(["echo"])
+        ZedAgentConnection(["echo"])
 
         # Test start_session parameter validation
         # (Implementation would depend on actual validation logic)
@@ -645,7 +640,7 @@ class TestInputRequiredFunctionality:
         task.status.state = TaskState.INPUT_REQUIRED
 
         # Create user input message
-        user_input = Message(
+        Message(
             role="user",
             parts=[TextPart(kind="text", text="Here's the additional information you requested")],
             messageId="msg-input-1",
@@ -683,10 +678,8 @@ class TestInputRequiredFunctionality:
 
         # Test state transition: submitted -> working -> input_required -> working -> completed
         task = await task_manager.create_task("test-context", "test-agent")
-        task_id = task.id
 
         # Initial state should be submitted (based on our implementation)
-        initial_state = task.status.state
 
         # Transition to working
         task.status.state = TaskState.WORKING
@@ -828,7 +821,6 @@ class TestStreamingCompliance:
     def test_jsonrpc_streaming_emits_spec_events(self, monkeypatch):
         """Ensure message/stream emits status-update events and final task without null fields."""
         from src.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
-        from src.a2a_acp.task_manager import A2ATaskManager
 
         async def fake_execute_task(
             self,
@@ -966,7 +958,6 @@ class TestDummyAgentIntegration:
     def test_http_streaming_endpoint_matches_spec(self, monkeypatch):
         """Ensure HTTP /a2a/message/stream SSE responses validate against the spec."""
         from src.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
-        from src.a2a_acp.task_manager import A2ATaskManager
 
         async def fake_execute_task(
             self,
@@ -1036,7 +1027,6 @@ class TestJSONRPCContract:
 
     def test_send_message_and_get_task_responses(self, monkeypatch):
         from src.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
-        from src.a2a_acp.task_manager import A2ATaskManager
 
         async def fake_execute_task(
             self,

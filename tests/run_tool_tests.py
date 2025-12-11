@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Dict, Any
 
 
 class ToolTestRunner:
@@ -131,7 +131,7 @@ class ToolTestRunner:
                     import importlib.util
                     spec = importlib.util.spec_from_file_location("dummy_agent", test_file)
                     if spec is not None:
-                        module = importlib.util.module_from_spec(spec)
+                        importlib.util.module_from_spec(spec)
                         # Just test that it can be loaded without syntax errors
                         print(f"✅ PASSED: {description} - Module structure is valid")
                     else:
@@ -232,7 +232,7 @@ class ToolTestRunner:
         ]
 
         if failed_tests:
-            print(f"\n❌ Failed Tests:")
+            print("\n❌ Failed Tests:")
             for test_file, result in failed_tests:
                 print(f"  {test_file}: {result.get('error', 'Unknown error')}")
 

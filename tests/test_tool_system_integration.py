@@ -8,7 +8,6 @@ A2A event emission and protocol compliance verification.
 
 import subprocess
 import pytest
-from pathlib import Path
 
 
 class TestToolSystemIntegration:

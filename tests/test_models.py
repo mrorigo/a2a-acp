@@ -1,6 +1,5 @@
 import pytest
 from datetime import datetime
-from typing import Dict, Any
 import json
 
 from a2a_acp.models import (
@@ -24,7 +23,6 @@ from a2a_acp.models import (
     SlashCommand,
     ExecuteSlashCommandRequest,
     ExecuteSlashCommandResponse,
-    NotificationAnalytics,  # Existing model for backward compatibility test
     TaskPushNotificationConfig,  # Existing model for backward compatibility test
 )
 

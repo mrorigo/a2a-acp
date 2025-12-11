@@ -6,8 +6,7 @@ import sys
 import time
 import threading
 import random
-import asyncio
-from typing import Any, Dict, Optional, List, Tuple
+from typing import Any, Dict, Optional
 
 SESSION_ID = "session-test"
 TOOL_TESTING_ENABLED = True  # Enable tool call simulation for testing

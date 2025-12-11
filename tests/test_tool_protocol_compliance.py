@@ -5,8 +5,6 @@ Tests to ensure the tool execution system properly complies with A2A and ZedACP 
 Verifies event emission, state management, and cross-protocol interactions.
 """
 
-import asyncio
-import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
@@ -15,9 +13,9 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from a2a.models import AgentCard, AgentSkill, Task, TaskStatus, TaskState, Message
+from a2a.models import AgentSkill, TaskState
 from a2a_acp.tool_config import BashTool, ToolConfig, ToolParameter
-from a2a_acp.bash_executor import BashToolExecutor, ToolExecutionResult
+from a2a_acp.bash_executor import ToolExecutionResult
 from a2a_acp.sandbox import ExecutionContext
 from a2a_acp.audit import AuditEventType, AuditDatabase, AuditLogger
 

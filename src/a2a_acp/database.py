@@ -5,16 +5,16 @@ This module provides SQLite-based storage for A2A contexts, tasks, and message h
 enabling stateful agent conversations across multiple tasks.
 """
 
-import asyncio
 import json
+import logging
 import sqlite3
 import threading
-from contextlib import contextmanager
 from dataclasses import dataclass, asdict
 from datetime import datetime
-from pathlib import Path
 from typing import Optional, List, Dict, Any
-from a2a.models import Message
+from a2a.models import Message, Task
+
+logger = logging.getLogger(__name__)
 
 
 def serialize_dataclass_with_dates(obj: Any) -> Dict[str, Any]:
@@ -584,6 +584,13 @@ class SessionDatabase:
             deleted_count = cursor.rowcount
             conn.commit()
             return deleted_count
+
+    async def store_task(self, task: Task) -> None:
+        """Persist task metadata; currently a placeholder for future persistence."""
+        try:
+            logger.debug("Storing task metadata", extra={"task_id": task.id})
+        except Exception as exc:
+            logger.warning("Failed to log task persistence", extra={"error": str(exc)})
 
     def close(self) -> None:
         """Close all database connections."""

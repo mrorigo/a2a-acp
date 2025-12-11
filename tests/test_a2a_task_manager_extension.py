@@ -80,6 +80,7 @@ def mock_governor_manager():
 def task_manager(mock_push_notification_manager, mock_governor_manager):
     manager = A2ATaskManager(push_notification_manager=mock_push_notification_manager)
     manager.governor_manager = mock_governor_manager
+    manager._base_governor_manager = mock_governor_manager
     return manager
 
 
@@ -367,6 +368,7 @@ class TestTaskStatusUpdates:
         self, task_manager, sample_task, sample_context
     ):
         """Test that task status changes include DevelopmentToolEvent in notifications."""
+        task_manager._active_tasks[sample_task.id] = sample_context
         sample_context.task = sample_task
         sample_task.metadata = {"development-tool": {"events": []}}
 
@@ -375,9 +377,10 @@ class TestTaskStatusUpdates:
         sample_task.status.state = new_state
         sample_task.status.timestamp = current_timestamp()
 
-        # Mock send_task_notification to capture payload
-        mock_send = AsyncMock()
-        task_manager._send_task_notification = mock_send
+        mock_push = AsyncMock()
+        mock_push_manager = MagicMock()
+        mock_push_manager.send_notification = mock_push
+        task_manager.push_notification_manager = mock_push_manager
 
         # Trigger status change (e.g., via execute_task completion)
         await task_manager._send_task_notification(
@@ -392,9 +395,8 @@ class TestTaskStatusUpdates:
         )
 
         # Verify notification payload includes DevelopmentToolEvent
-        mock_send.assert_called_once()
-        call_args = mock_send.call_args[0][2]  # Third arg is payload
-        payload = call_args
+        mock_push.assert_called_once()
+        payload = mock_push.call_args[0][1]
 
         assert "development_tool_metadata" in payload
         dev_meta = payload["development_tool_metadata"]
@@ -801,16 +803,14 @@ async def test_integration_tool_permission_to_completion(task_manager, sample_ta
     ]
 
     with patch("a2a_acp.task_manager.ZedAgentConnection") as mock_zed:
-        instance = mock_zed.return_value.__aenter__.return_value
-        instance.initialize = AsyncMock()
-        instance.start_session.return_value = "mock_session"
-        instance.prompt.return_value = {}  # Default
+        mock_connection.initialize = AsyncMock()
+        mock_zed.return_value.__aenter__.return_value = mock_connection
 
         # Mock permission handler to approve
         async def mock_permission_handler(request):
             return ToolPermissionDecision(option_id="approve")
 
-        instance.permission_handler = mock_permission_handler
+        mock_connection.permission_handler = mock_permission_handler
 
         # Mock translator
         translator_mock = MagicMock()

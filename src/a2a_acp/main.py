@@ -26,12 +26,13 @@ from .database import SessionDatabase
 from .logging_config import configure_logging
 from .task_manager import A2ATaskManager
 from .context_manager import A2AContextManager
-from .settings import get_settings
+from . import settings as settings_module
 from .zed_agent import AgentProcessError, PromptCancelled, ZedAgentConnection
 from .push_notification_manager import PushNotificationManager
 from .streaming_manager import StreamingManager
 from .tool_config import get_tool_configuration_manager, BashTool
 from .bash_executor import BashToolExecutor, set_bash_executor
+from .api import auth_endpoints
 
 # Import development tool extension models
 from .models import (
@@ -40,7 +41,8 @@ from .models import (
     ExecuteSlashCommandResponse,
     SlashCommand,
     SlashCommandArgument,
-    AgentSettings
+    AgentSettings,
+    CommandExecutionStatus,
 )
 
 # Import A2A protocol components
@@ -73,6 +75,22 @@ def serialize_a2a(obj: Any) -> Any:
     if isinstance(obj, dict):
         return {key: serialize_a2a(value) for key, value in obj.items() if value is not None}
     return obj
+
+
+def _strip_development_tool_metadata(task: Task) -> Task:
+    """
+    Remove development-tool extension metadata when the feature is disabled.
+
+    This helper mutates the provided Task instance in place, dropping the
+    'development-tool' key from metadata if the settings flag is False.
+    """
+    settings = settings_module.get_settings()
+    if not settings.development_tool_extension_enabled and task.metadata:
+        if "development-tool" in task.metadata:
+            sanitized = dict(task.metadata)
+            sanitized.pop("development-tool", None)
+            task.metadata = sanitized
+    return task
 
 
 async def iter_streaming_payloads(
@@ -327,11 +345,15 @@ async def iter_streaming_payloads(
 def get_agent_config() -> Dict[str, Any]:
     """Get the single agent configuration from settings."""
     import shlex
-    settings = get_settings()
+    settings = settings_module.get_settings()
 
-    # For testing/development, provide fallback defaults
-    command_str = settings.agent_command or "python tests/dummy_agent.py"
-    description = settings.agent_description or "A2A-ACP Development Agent"
+    def _coerce_str(value: Any, default: str) -> str:
+        if isinstance(value, str) and value.strip():
+            return value
+        return default
+
+    command_str = _coerce_str(getattr(settings, "agent_command", None), "python tests/dummy_agent.py")
+    description = _coerce_str(getattr(settings, "agent_description", None), "A2A-ACP Development Agent")
 
     # Parse command string into argument list for subprocess
     try:
@@ -341,10 +363,32 @@ def get_agent_config() -> Dict[str, Any]:
         logger.warning(f"Failed to parse command string '{command_str}': {e}. Using as single command.")
         command = [command_str]
 
+    def _extract_codex_home_from_command(source: Optional[str]) -> Optional[str]:
+        if not source:
+            return None
+        try:
+            parts = shlex.split(source)
+        except ValueError:
+            parts = source.split()
+
+        for idx, part in enumerate(parts):
+            if part == "--codex-home" and idx + 1 < len(parts):
+                return parts[idx + 1]
+            if part.startswith("--codex-home="):
+                return part.split("=", 1)[1]
+        return None
+
+    codex_home_value = (
+        str(settings.agent_codex_home)
+        if getattr(settings, "agent_codex_home", None)
+        else _extract_codex_home_from_command(command_str)
+    )
+
     return {
         "command": command,
-        "api_key": settings.agent_api_key,
-        "description": description
+        "api_key": getattr(settings, "agent_api_key", None),
+        "description": description,
+        "codex_home": codex_home_value,
     }
 
 
@@ -408,15 +452,17 @@ async def generate_static_agent_card():
         )
     ] + tool_skills
 
-    settings = get_settings()
+    settings = settings_module.get_settings()
     extensions = []
     if settings.development_tool_extension_enabled:
         extensions = [
             {
                 "uri": "https://developers.google.com/gemini/a2a/extensions/development-tool/v1",
-                "version": "1.0.0",
-                "metadata": {
-                    "description": "Support for development tool interactions including slash commands and tool lifecycles"
+                "params": {
+                    "version": "1.0.0",
+                    "metadata": {
+                        "description": "Support for development tool interactions including slash commands and tool lifecycles"
+                    }
                 }
             }
         ]
@@ -446,7 +492,7 @@ async def generate_static_agent_card():
                 description="JWT bearer token authentication",
                 bearerFormat="JWT"
             )
-        } if get_settings().auth_token else None,
+        } if settings.auth_token else None,
         defaultInputModes=["text/plain"],
         defaultOutputModes=["text/plain"],
         skills=all_skills
@@ -461,11 +507,11 @@ def format_sse(event: str, data: Any) -> bytes:
 
 def require_authorization(authorization: Optional[str] = Header(default=None)) -> None:
     """FastAPI dependency enforcing bearer token authentication."""
-    settings = get_settings()
+    settings = settings_module.get_settings()
     token = settings.auth_token
 
-    # If no token is configured, allow access (development mode)
-    if not token:
+    # If no string token is configured, allow access (development mode)
+    if not isinstance(token, str) or not token:
         return
 
     # If token is configured, enforce authentication
@@ -485,7 +531,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.database = SessionDatabase()
 
     # Initialize push notification manager first with settings
-    settings = get_settings()
+    settings = settings_module.get_settings()
     app.state.push_notification_manager = PushNotificationManager(
         app.state.database,
         settings=settings.push_notifications
@@ -577,6 +623,21 @@ def get_database(request: Request) -> SessionDatabase:
 
 def get_a2a_translator(request: Request) -> A2ATranslator:
     return request.app.state.a2a_translator
+
+
+def task_manager_dependency(request: Request) -> A2ATaskManager:
+    """Wrapper dependency that delegates to `get_task_manager`."""
+    return get_task_manager(request)
+
+
+def context_manager_dependency(request: Request) -> A2AContextManager:
+    """Wrapper dependency that delegates to `get_context_manager`."""
+    return get_context_manager(request)
+
+
+def a2a_translator_dependency(request: Request) -> A2ATranslator:
+    """Wrapper dependency that delegates to `get_a2a_translator`."""
+    return get_a2a_translator(request)
 
 
 def get_push_notification_manager(request: Request) -> PushNotificationManager:
@@ -672,12 +733,18 @@ async def handle_message_send_jsonrpc(params: Dict[str, Any], request: Request, 
         context_id = message_params.message.contextId or await context_manager.create_context("default-agent")
 
         # Create A2A task
+        metadata_payload = {"mode": "sync"}
+        if message_params.message.metadata:
+            metadata_payload.update(message_params.message.metadata)
+
         task = await task_manager.create_task(
             context_id=context_id,
             agent_name="default-agent",
             initial_message=message_params.message,
-            metadata={"mode": "sync"}
+            metadata=metadata_payload
         )
+        _strip_development_tool_metadata(task)
+        await get_database(request).store_task(task)
 
         try:
             async with ZedAgentConnection(agent_config["command"], api_key=agent_config["api_key"]) as connection:
@@ -694,6 +761,7 @@ async def handle_message_send_jsonrpc(params: Dict[str, Any], request: Request, 
                     working_directory=os.getcwd(),
                     mcp_servers=[]
                 )
+                _strip_development_tool_metadata(result)
 
                 # Add completed task to context
                 await context_manager.add_task_to_context(context_id, result)
@@ -1055,6 +1123,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.include_router(auth_endpoints.router)
 
     # Simple ping endpoint for health checks
     @app.get("/ping")
@@ -1232,7 +1301,7 @@ def create_app() -> FastAPI:
             metrics["streaming_connections"]["sse"]["total"] = connection_stats.get("sse_total", 0)
 
             # Get connection limits from settings
-            settings = get_settings()
+            settings = settings_module.get_settings()
             metrics["streaming_connections"]["websocket"]["limit"] = settings.push_notifications.max_websocket_connections
             metrics["streaming_connections"]["sse"]["limit"] = settings.push_notifications.max_sse_connections
 
@@ -1261,7 +1330,13 @@ def create_app() -> FastAPI:
         """
         try:
             agent_card = await get_agent_card(request)
-            return serialize_a2a(agent_card)
+            card_payload = serialize_a2a(agent_card)
+            capabilities = card_payload.get("capabilities")
+            if isinstance(capabilities, dict):
+                extensions = capabilities.get("extensions")
+                if not extensions:
+                    capabilities.pop("extensions", None)
+            return card_payload
         except Exception as e:
             logger.error("Error serving well-known agent card", extra={"error": str(e)})
             raise HTTPException(status_code=500, detail="Failed to generate agent card")
@@ -1472,9 +1547,10 @@ def create_app() -> FastAPI:
     @app.post("/a2a/message/send")
     async def a2a_message_send(
         params: MessageSendParams,
-        task_manager: A2ATaskManager = Depends(get_task_manager),
-        context_manager: A2AContextManager = Depends(get_context_manager),
-        translator: A2ATranslator = Depends(get_a2a_translator),
+        request: Request,
+        task_manager: A2ATaskManager = Depends(task_manager_dependency),
+        context_manager: A2AContextManager = Depends(context_manager_dependency),
+        translator: A2ATranslator = Depends(a2a_translator_dependency),
         authorization: Optional[str] = Header(default=None)
     ):
         """Send an A2A message and return response."""
@@ -1483,16 +1559,42 @@ def create_app() -> FastAPI:
         # Get single agent configuration
         agent_config = get_agent_config()
 
+        # Handle development-tool confirmations before spinning up new tasks
+        confirmation_data = (params.message.metadata or {}).get("development-tool", {}).get("tool_call_confirmation")
+        if confirmation_data:
+            tool_call_id = confirmation_data.get("tool_call_id")
+            if not tool_call_id:
+                raise HTTPException(status_code=400, detail="Missing tool_call_id in confirmation payload")
+            matching_task_id = await task_manager.get_task_id_for_tool_call(tool_call_id)
+            if not matching_task_id:
+                raise HTTPException(status_code=404, detail=f"Tool call '{tool_call_id}' not found")
+
+            continued_task = await task_manager.provide_input_and_continue(
+                matching_task_id,
+                params.message,
+                agent_config["command"],
+                api_key=agent_config["api_key"],
+                working_directory=os.getcwd(),
+                mcp_servers=[]
+            )
+            return {"task": continued_task}
+
         # Create A2A context for this task
         context_id = params.message.contextId or await context_manager.create_context("default-agent")
 
         # Create A2A task
+        metadata_payload = {"mode": "sync"}
+        if params.message.metadata:
+            metadata_payload.update(params.message.metadata)
+
         task = await task_manager.create_task(
             context_id=context_id,
             agent_name="default-agent",
             initial_message=params.message,
-            metadata={"mode": "sync"}
+            metadata=metadata_payload
         )
+        _strip_development_tool_metadata(task)
+        await get_database(request).store_task(task)
 
         try:
             async with ZedAgentConnection(agent_config["command"], api_key=agent_config["api_key"]) as connection:
@@ -1509,6 +1611,7 @@ def create_app() -> FastAPI:
                     working_directory=os.getcwd(),
                     mcp_servers=[]
                 )
+                _strip_development_tool_metadata(result)
 
                 # Extract the ZedACP result from the task for translation
                 zedacp_result = {}  # The task execution result would need to be extracted from the Task object
@@ -1540,7 +1643,7 @@ def create_app() -> FastAPI:
         """Get all available slash commands based on tool configuration."""
         require_authorization(authorization)
 
-        settings = get_settings()
+        settings = settings_module.get_settings()
         if not settings.development_tool_extension_enabled:
             raise HTTPException(status_code=404, detail="Development tool extension not enabled")
 
@@ -1574,19 +1677,52 @@ def create_app() -> FastAPI:
     @app.post("/a2a/command/execute")
     async def a2a_command_execute(
         request: ExecuteSlashCommandRequest,
-        task_manager: A2ATaskManager = Depends(get_task_manager),
-        context_manager: A2AContextManager = Depends(get_context_manager),
+        task_manager: A2ATaskManager = Depends(task_manager_dependency),
+        context_manager: A2AContextManager = Depends(context_manager_dependency),
         authorization: Optional[str] = Header(default=None)
     ) -> ExecuteSlashCommandResponse:
         """Execute a slash command by creating a task."""
         require_authorization(authorization)
 
-        settings = get_settings()
+        settings = settings_module.get_settings()
         if not settings.development_tool_extension_enabled:
             raise HTTPException(status_code=404, detail="Development tool extension not enabled")
 
         # Create context
         context_id = await context_manager.create_context("slash-command")
+
+        # Validate arguments against tool configuration if available
+        tool_manager = get_tool_configuration_manager()
+        available_tools = await tool_manager.load_tools()
+        if available_tools and request.command not in available_tools:
+            raise HTTPException(
+                status_code=422,
+                detail=[
+                    {
+                        "loc": ["body", "command"],
+                        "msg": "Validation error: unknown slash command",
+                        "type": "value_error.command",
+                    }
+                ],
+            )
+        tool = available_tools.get(request.command)
+        missing_required_args = []
+        if tool:
+            for param in getattr(tool, "parameters", []):
+                if getattr(param, "required", False):
+                    if param.name not in request.arguments:
+                        missing_required_args.append(param.name)
+
+        if missing_required_args:
+            detail = [
+                {
+                    "loc": ["body", "arguments", arg_name],
+                    "msg": "Validation error: field required",
+                    "type": "value_error.missing",
+                }
+                for arg_name in missing_required_args
+            ]
+            raise HTTPException(status_code=422, detail=detail)
 
         # Create initial message from the slash command request
         from a2a.models import Message, TextPart, create_message_id
@@ -1598,12 +1734,16 @@ def create_app() -> FastAPI:
         )
 
         # Create task
-        task = await task_manager.create_task(
-            context_id=context_id,
-            agent_name="default-agent",
-            initial_message=initial_message,
-            metadata={"type": "slash_command", "command": request.command}
-        )
+        try:
+            task = await task_manager.create_task(
+                context_id=context_id,
+                agent_name="default-agent",
+                initial_message=initial_message,
+                metadata={"type": "slash_command", "command": request.command}
+            )
+        except Exception as exc:
+            logger.exception("Failed to create slash command task", extra={"command": request.command})
+            raise HTTPException(status_code=500, detail="Internal error while creating slash command task")
 
         # Return response with execution_id = task_id
         response = ExecuteSlashCommandResponse(
@@ -1617,8 +1757,8 @@ def create_app() -> FastAPI:
     @app.post("/a2a/message/stream")
     async def a2a_message_stream(
         params: MessageSendParams,
-        task_manager: A2ATaskManager = Depends(get_task_manager),
-        context_manager: A2AContextManager = Depends(get_context_manager),
+        task_manager: A2ATaskManager = Depends(task_manager_dependency),
+        context_manager: A2AContextManager = Depends(context_manager_dependency),
         authorization: Optional[str] = Header(default=None)
     ):
         """Stream an A2A message conversation using Server-Sent Events."""
@@ -1699,7 +1839,7 @@ def create_app() -> FastAPI:
     @app.get("/a2a/tasks/{task_id}/governor/history")
     async def a2a_task_governor_history(
         task_id: str,
-        task_manager: A2ATaskManager = Depends(get_task_manager),
+        task_manager: A2ATaskManager = Depends(task_manager_dependency),
         authorization: Optional[str] = Header(default=None),
     ):
         """Return governor and permission history for a task."""

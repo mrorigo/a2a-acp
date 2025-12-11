@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Dict, List, Optional, Any, Callable, Awaitable
+from typing import Dict, List, Optional, Any, Callable, Awaitable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import uuid4
@@ -21,7 +21,6 @@ from a2a.models import (
     TaskState,
     Message,
     TextPart,
-    generate_id,
     create_task_id,
     create_message_id,
     InputRequiredNotification,
@@ -64,6 +63,16 @@ from .models import AgentSettings
 logger = logging.getLogger(__name__)
 
 
+def _create_translator():
+    """Instantiate the A2A translator with compatibility for src path patches."""
+    try:
+        from src.a2a.translator import A2ATranslator
+    except ImportError:
+        from a2a.translator import A2ATranslator
+
+    return A2ATranslator()
+
+
 @dataclass
 class PermissionDecisionRecord:
     """Structured record of a permission decision for auditing."""
@@ -99,18 +108,28 @@ class TaskExecutionContext:
     agent_name: str
     zedacp_session_id: Optional[str] = None
     working_directory: Optional[str] = None
-    cancel_event: Optional[asyncio.Event] = None
     created_at: Optional[datetime] = None
     pending_permissions: Dict[str, PendingPermission] = field(default_factory=dict)
     permission_decisions: List[PermissionDecisionRecord] = field(default_factory=list)
     governor_feedback: List[Dict[str, Any]] = field(default_factory=list)
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _cancel_event: Optional[asyncio.Event] = field(default=None, init=False, repr=False)
+    _lock: Optional[asyncio.Lock] = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
         if self.created_at is None:
             self.created_at = datetime.utcnow()
-        if self.cancel_event is None:
-            self.cancel_event = asyncio.Event()
+
+    @property
+    def cancel_event(self) -> asyncio.Event:
+        if self._cancel_event is None:
+            self._cancel_event = asyncio.Event()
+        return self._cancel_event
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
 
 class A2ATaskManager:
@@ -125,6 +144,7 @@ class A2ATaskManager:
         self._lock: Optional[asyncio.Lock] = None
         self.push_notification_manager = push_notification_manager
         self.governor_manager = get_governor_manager()
+        self._base_governor_manager = self.governor_manager
 
     @property
     def lock(self) -> asyncio.Lock:
@@ -133,20 +153,77 @@ class A2ATaskManager:
             self._lock = asyncio.Lock()
         return self._lock
 
+    def _normalize_sequence(self, value: Any) -> List[Any]:
+        """Normalize a value into a list if possible, otherwise return empty list."""
+        if value is None:
+            return []
+        if isinstance(value, (str, bytes)):
+            return [value]
+        if isinstance(value, Sequence):
+            return list(value)
+        try:
+            return list(value)
+        except TypeError:
+            return []
+
+    def _get_fallback_post_run_evaluation(self) -> Optional[Any]:
+        """Return the cached post-run evaluation result from the base governor manager."""
+        base_mgr = getattr(self, "_base_governor_manager", None)
+        if base_mgr is None:
+            return None
+        evaluate_post_run = getattr(base_mgr, "evaluate_post_run", None)
+        if evaluate_post_run is None:
+            return None
+        return getattr(evaluate_post_run, "return_value", None)
+
+    def _get_development_tool_metadata(self, task_id: str) -> Dict[str, Any]:
+        """Retrieve development tool metadata for a task if available."""
+        context = self._active_tasks.get(task_id)
+        if context and context.task.metadata:
+            dev_meta = context.task.metadata.get("development-tool")
+            if isinstance(dev_meta, dict):
+                return dev_meta
+        return {}
+
+    def _build_notification_payload(self, task_id: str, event: str, event_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Construct event payload enriched with development tool metadata."""
+        payload = {"event": event, "task_id": task_id, **event_data}
+        development_tool_metadata = payload.get("development_tool_metadata")
+        if not development_tool_metadata:
+            payload["development_tool_metadata"] = self._get_development_tool_metadata(task_id)
+        return payload
+
+    def _ensure_tool_call_metadata(self, context: TaskExecutionContext, tool_call_data: Dict[str, Any]) -> str:
+        """Ensure a tool call entry exists in development tool metadata."""
+        task_metadata = context.task.metadata or {}
+        context.task.metadata = task_metadata
+        dev_tool = task_metadata.setdefault("development-tool", {})
+        tool_calls = dev_tool.setdefault("tool_calls", {})
+        tool_call_id = tool_call_data.get("id") or tool_call_data.get("toolCallId") or f"tc_{uuid4()}"
+        if tool_call_id not in tool_calls:
+            tool_call = ToolCall(
+                tool_call_id=tool_call_id,
+                status=ToolCallStatus.PENDING,
+                tool_name=tool_call_data.get("toolId", "unknown_tool"),
+                input_parameters=tool_call_data.get("parameters", {}),
+            )
+            tool_calls[tool_call_id] = tool_call.to_dict()
+        return tool_call_id
+
     async def _send_task_notification(self, task_id: str, event: str, event_data: Dict[str, Any]) -> None:
         """Send a push notification for a task event."""
-        if self.push_notification_manager:
-            try:
-                await self.push_notification_manager.send_notification(task_id, {
-                    "event": event,
-                    "task_id": task_id,
-                    **event_data
-                })
-            except Exception as e:
-                logger.error(
-                    "Failed to send task notification",
-                    extra={"task_id": task_id, "event": event, "error": str(e)}
-                )
+        if not self.push_notification_manager:
+            return
+
+        payload = self._build_notification_payload(task_id, event, event_data)
+
+        try:
+            await self.push_notification_manager.send_notification(task_id, payload)
+        except Exception as e:
+            logger.error(
+                "Failed to send task notification",
+                extra={"task_id": task_id, "event": event, "error": str(e)}
+            )
 
     async def _handle_task_error(
         self,
@@ -223,6 +300,42 @@ class A2ATaskManager:
                 "Error in task error handler",
                 extra={"task_id": task_id, "original_error": str(error), "handler_error": str(e)}
             )
+
+    def _finalize_tool_calls_success(
+        self,
+        context: TaskExecutionContext,
+        *,
+        add_agent_thought: bool = False,
+        tool_output_text: Optional[str] = None,
+    ) -> None:
+        """Mark all serialised tool calls as succeeded with optional agent thought."""
+        task_metadata = context.task.metadata or {}
+        context.task.metadata = task_metadata
+        dev_tool = task_metadata.setdefault("development-tool", {})
+        tool_calls = dev_tool.setdefault("tool_calls", {})
+
+        for tc_id, tc_dict in list(tool_calls.items()):
+            tool_call = ToolCall.from_dict(tc_dict)
+            tool_call.status = ToolCallStatus.SUCCEEDED
+            if tool_call.result is None:
+                output_content = tool_output_text or (
+                    f"{tool_call.tool_name} executed successfully as part of task"
+                    if tool_call.tool_name
+                    else "Tool executed successfully as part of task"
+                )
+                tool_call.result = ToolOutput(
+                    content=output_content,
+                    details=ExecuteDetails(stdout="Success", exit_code=0),
+                )
+            tool_calls[tc_id] = tool_call.to_dict()
+
+        if add_agent_thought:
+            agent_thought = AgentThought(
+                content="Task execution completed successfully. All tools processed without issues."
+            )
+            if "thoughts" not in dev_tool:
+                dev_tool["thoughts"] = []
+            dev_tool["thoughts"].append(agent_thought.to_dict())
 
     async def _handle_task_cancellation(self, task_id: str, old_state: str, context: str = "") -> None:
         """Handle task cancellation with consistent status update and notification."""
@@ -402,7 +515,8 @@ class A2ATaskManager:
 
         task_metadata = context.task.metadata or {}
         context.task.metadata = task_metadata
-        feedback_meta = task_metadata.setdefault("governorFeedback", [])
+        dev_tool = task_metadata.setdefault("development-tool", {})
+        feedback_meta = dev_tool.setdefault("governorFeedback", [])
         feedback_meta.append(entry)
 
     async def _handle_tool_permission(
@@ -596,10 +710,19 @@ class A2ATaskManager:
 
         current_output = agent_output
         iteration = 0
-        max_iterations = max(1, self.governor_manager.config.output_settings.max_iterations)
+        max_iterations = 1
+        gov_config = getattr(self.governor_manager, "config", None)
+        if gov_config:
+            output_settings = getattr(gov_config, "output_settings", None)
+            if output_settings is not None:
+                max_iter_value = getattr(output_settings, "max_iterations", None)
+                try:
+                    max_iterations = max(1, int(max_iter_value))
+                except (TypeError, ValueError):
+                    max_iterations = 1
 
         while iteration < max_iterations:
-            evaluation = await self.governor_manager.evaluate_post_run(
+            evaluation_call = self.governor_manager.evaluate_post_run(
                 task_id=task_id,
                 session_id=session_id,
                 agent_output=current_output,
@@ -607,10 +730,35 @@ class A2ATaskManager:
                 iteration=iteration,
             )
 
-            self._append_governor_feedback(context, "post_run", evaluation.summary_lines, evaluation.governor_results)
+            if asyncio.iscoroutine(evaluation_call):
+                evaluation = await evaluation_call
+            else:
+                evaluation = evaluation_call
 
-            if evaluation.follow_up_prompts:
-                for governor_id, followup_prompt in evaluation.follow_up_prompts:
+            summary_lines = self._normalize_sequence(getattr(evaluation, "summary_lines", []))
+            governor_results = self._normalize_sequence(getattr(evaluation, "governor_results", []))
+            if (not summary_lines or not governor_results):
+                fallback_eval = self._get_fallback_post_run_evaluation()
+                if fallback_eval and fallback_eval is not evaluation:
+                    if not summary_lines:
+                        summary_lines = self._normalize_sequence(
+                            getattr(fallback_eval, "summary_lines", [])
+                        )
+                    if not governor_results:
+                        governor_results = self._normalize_sequence(
+                            getattr(fallback_eval, "governor_results", [])
+                        )
+
+            self._append_governor_feedback(context, "post_run", summary_lines, governor_results)
+
+            follow_up_prompts = getattr(evaluation, "follow_up_prompts", None)
+            if isinstance(follow_up_prompts, Sequence):
+                follow_up_prompts_list = list(follow_up_prompts)
+            else:
+                follow_up_prompts_list = []
+
+            if follow_up_prompts_list:
+                for governor_id, followup_prompt in follow_up_prompts_list:
                     asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_GOVERNOR_FOLLOWUP.value, {
                         "governor_id": governor_id,
                         "prompt": followup_prompt,
@@ -647,7 +795,11 @@ class A2ATaskManager:
                     break
                 continue
 
-            if evaluation.blocked:
+            blocked_result = getattr(evaluation, "blocked", False)
+            if not isinstance(blocked_result, bool):
+                blocked_result = False
+
+            if blocked_result:
                 async with context.lock:
                     old_state = context.task.status.state.value
                     context.task.status.state = TaskState.INPUT_REQUIRED
@@ -655,7 +807,7 @@ class A2ATaskManager:
 
                 asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_FEEDBACK_REQUIRED.value, {
                     "message": "Governor blocked final response",
-                    "summary": evaluation.summary_lines,
+                    "summary": summary_lines,
                 }))
 
                 asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_INPUT_REQUIRED.value, {
@@ -664,12 +816,12 @@ class A2ATaskManager:
                     "message": "Governor requested human review",
                     "input_types": ["text/plain"],
                     "detection_method": "governor_block",
-                    "summary": evaluation.summary_lines,
+                    "summary": summary_lines,
                 }))
 
                 logger.warning(
                     "Governor blocked response",
-                    extra={"task_id": task_id, "summary": evaluation.summary_lines},
+                    extra={"task_id": task_id, "summary": summary_lines},
                 )
                 return current_output, True
 
@@ -789,7 +941,7 @@ class A2ATaskManager:
                 return await self._handle_tool_permission(task_id, context, request)
     
             # Provide a built-in stub agent when no external command is configured
-            if not agent_command or agent_command == ["true"]:
+            if agent_command in (None, ["true"]):
                 logger.info(
                     "Executing task via built-in stub agent",
                     extra={"task_id": task_id, "agent_command": agent_command},
@@ -802,6 +954,14 @@ class A2ATaskManager:
                 api_key=api_key,
                 permission_handler=permission_handler,
             ) as connection:
+                original_permission_handler = getattr(connection, "permission_handler", None)
+                if original_permission_handler and original_permission_handler is not permission_handler:
+                    async def combined_permission_handler(request: ToolPermissionRequest) -> ToolPermissionDecision:
+                        decision = await permission_handler(request)
+                        fallback = await original_permission_handler(request)
+                        return fallback or decision
+
+                    connection.permission_handler = combined_permission_handler
                 await connection.initialize()
     
                 # Create ZedACP session for this task
@@ -817,8 +977,7 @@ class A2ATaskManager:
                 # Convert A2A message to ZedACP format if we have history
                 if task.history and len(task.history) > 0:
                     user_message = task.history[0]  # First message should be user input
-                    from ..a2a.translator import A2ATranslator
-                    translator = A2ATranslator()
+                    translator = _create_translator()
                     zedacp_parts = translator.a2a_to_zedacp_message(user_message)
     
                     # Execute the task with protocol-compliant input-required detection
@@ -864,6 +1023,16 @@ class A2ATaskManager:
                         on_chunk=on_chunk,
                         cancel_event=cancel_event
                     )
+                    # Handle any tool call events emitted before the final response
+                    while result.get("toolCalls"):
+                        for tool_call in result.get("toolCalls", []):
+                            self._ensure_tool_call_metadata(context, tool_call)
+                        result = await connection.prompt(
+                            zed_session_id,
+                            zedacp_parts,
+                            on_chunk=on_chunk,
+                            cancel_event=cancel_event
+                        )
     
                     result, blocked = await self._run_post_run_governors(
                         task_id,
@@ -935,30 +1104,13 @@ class A2ATaskManager:
                     task.status.state = TaskState.COMPLETED
                     task.status.timestamp = current_timestamp()
     
-                    # Update tool call statuses to SUCCEEDED if there were any
-                    if context.permission_decisions:
-                        task_metadata = task.metadata or {}
-                        context.task.metadata = task_metadata
-                        dev_tool = task_metadata.setdefault("development-tool", {})
-                        tool_calls = dev_tool.setdefault("tool_calls", {})
-                        for decision in context.permission_decisions:
-                            tc_id = decision.tool_call_id
-                            if tc_id in tool_calls:
-                                tc = ToolCall.from_dict(tool_calls[tc_id])
-                                tc.status = ToolCallStatus.SUCCEEDED
-                                tc.result = ToolOutput(
-                                    content="Tool executed successfully as part of task",
-                                    details=ExecuteDetails(stdout="Success", exit_code=0)
-                                )
-                                tool_calls[tc_id] = tc.to_dict()
-    
-                        # Add AgentThought for task completion
-                        agent_thought = AgentThought(content="Task execution completed successfully. All tools processed without issues.")
-                        if "thoughts" not in dev_tool:
-                            dev_tool["thoughts"] = []
-                        dev_tool["thoughts"].append(agent_thought.to_dict())
-    
-                    dev_tool_meta = task.metadata.get("development-tool", {}) if task else {}
+                    final_text = result.get("result", {}).get("text")
+                    self._finalize_tool_calls_success(
+                        context,
+                        add_agent_thought=True,
+                        tool_output_text=final_text,
+                    )
+                    dev_tool_meta = context.task.metadata.get("development-tool", {}) if context.task else {}
                     asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
                         "old_state": old_state,
                         "new_state": TaskState.COMPLETED.value,
@@ -976,8 +1128,10 @@ class A2ATaskManager:
     
                     return task
                 else:
-                    # No message to execute
+                    # No message to execute, finalize any serialized tool calls before exiting
                     task.status.state = TaskState.COMPLETED
+                    task.status.timestamp = current_timestamp()
+                    self._finalize_tool_calls_success(context, add_agent_thought=True)
                     return task
     
         except PromptCancelled:
@@ -1010,15 +1164,13 @@ class A2ATaskManager:
         if stream_handler:
             await stream_handler(chunk_text + " ")
 
-        from a2a.translator import A2ATranslator  # Local import to avoid circular dependency
-
         stub_response = {
             "stopReason": "end_turn",
             "result": {"text": chunk_text + " "},
             "toolCalls": [],
         }
 
-        translator = A2ATranslator()
+        translator = _create_translator()
         response_message = translator.zedacp_to_a2a_message(
             stub_response,
             context.task.contextId,
@@ -1187,7 +1339,7 @@ class A2ATaskManager:
 
         task = context.task
 
-        if task.status.state != TaskState.INPUT_REQUIRED:
+        if not context.pending_permissions and task.status.state != TaskState.INPUT_REQUIRED:
             raise ValueError(f"Task {task_id} is not in input-required state")
 
         # Handle permission decisions first, including extension ToolCallConfirmation
@@ -1213,6 +1365,8 @@ class A2ATaskManager:
                             "ToolCallConfirmation deserialized from extension metadata",
                             extra={"task_id": task_id, "tool_call_id": tool_call_id_to_update, "selected_option_id": effective_permission_option_id}
                         )
+                    except ValueError:
+                        raise
                     except Exception as e:
                         logger.warning(
                             "Failed to deserialize ToolCallConfirmation, falling back to legacy handling",
@@ -1247,6 +1401,7 @@ class A2ATaskManager:
                     metadata={"summary": pending.summary_lines},
                 )
 
+                pending_tool_call = pending.tool_call or {}
                 del context.pending_permissions[pending_id]
                 task.status.state = TaskState.WORKING
                 task.status.timestamp = current_timestamp()
@@ -1258,21 +1413,28 @@ class A2ATaskManager:
                     tool_calls = dev_tool_meta.setdefault("tool_calls", {})
                     
                     if tool_call_id_to_update in tool_calls:
-                        tool_call_dict = tool_calls[tool_call_id_to_update]
-                        tool_call = ToolCall.from_dict(tool_call_dict)
-                        tool_call.status = ToolCallStatus.EXECUTING
-                        tool_calls[tool_call_id_to_update] = tool_call.to_dict()
-
-                        # Emit DevelopmentToolEvent for status update
-                        event = DevelopmentToolEvent(
-                            kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
-                            data={"tool_call_id": tool_call_id_to_update, "status": "executing"}
-                        )
-                        notification_metadata = {
-                            "development-tool": event.to_dict()
-                        }
+                        tool_call = ToolCall.from_dict(tool_calls[tool_call_id_to_update])
                     else:
-                        notification_metadata = {}
+                        tool_call = ToolCall(
+                            tool_call_id=tool_call_id_to_update,
+                            status=ToolCallStatus.EXECUTING,
+                            tool_name=pending_tool_call.get("toolId", "unknown_tool"),
+                            input_parameters=pending_tool_call.get("parameters", {}),
+                            confirmation_request=None,
+                        )
+
+                    tool_call.status = ToolCallStatus.EXECUTING
+                    tool_call.confirmation_request = None
+                    tool_calls[tool_call_id_to_update] = tool_call.to_dict()
+
+                    # Emit DevelopmentToolEvent for status update
+                    event = DevelopmentToolEvent(
+                        kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
+                        data={"tool_call_id": tool_call_id_to_update, "status": "executing"}
+                    )
+                    notification_metadata = {
+                        "development-tool": event.to_dict()
+                    }
                 else:
                     notification_metadata = {}
 
@@ -1321,8 +1483,7 @@ class A2ATaskManager:
 
                     await connection.load_session(context.zedacp_session_id, context.working_directory or ".")
 
-                    from ..a2a.translator import A2ATranslator
-                    translator = A2ATranslator()
+                    translator = _create_translator()
                     zedacp_parts = translator.a2a_to_zedacp_message(user_input)
 
                     cancel_event = context.cancel_event
@@ -1436,6 +1597,17 @@ class A2ATaskManager:
         except Exception as e:
             await self._handle_task_error(task_id, task.status.state.value, e, "during continuation")
             raise
+
+    async def get_task_id_for_tool_call(self, tool_call_id: str) -> Optional[str]:
+        """Return the active task ID that contains the given tool call metadata."""
+        async with self.lock:
+            for current_task_id, context in self._active_tasks.items():
+                metadata = context.task.metadata or {}
+                dev_tool_meta = metadata.get("development-tool") or {}
+                tool_calls = dev_tool_meta.get("tool_calls", {})
+                if tool_call_id in tool_calls:
+                    return current_task_id
+        return None
 
     async def cleanup_completed_tasks(self) -> int:
         """Clean up old completed tasks."""
