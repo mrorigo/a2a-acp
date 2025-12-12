@@ -27,7 +27,8 @@ Get started in minutes with our streamlined setup:
 
 ### Advanced Features
 - **[Tool Execution System](tool-execution.md)** - Bash-based tool execution capabilities
-- **[Development Tool Extension](configuration.md#development-tool-extension-configuration)** - Slash commands and tool lifecycles
+- **[Development Tool Extension](development-tool-extension.md)** - Slash commands, tool lifecycles, and agent interactions
+- **[Interactive Conversations](interactive-conversations.md)** - Input-required workflows and human-in-the-loop
 
 ## 🛠️ Development
 
@@ -42,10 +43,6 @@ Get started in minutes with our streamlined setup:
 ### Deployment & Operations
 - **[Deployment Guide](deployment.md)** - Production deployment instructions
 - **[Troubleshooting](troubleshooting.md)** - Common issues and solutions
-
-## 📋 Migration Guides
-
-- **[Multi-Agent to Single-Agent](multi-to-single-agent.md)** - Architecture migration guide (when needed)
 
 ## 🔗 External Resources
 
@@ -67,22 +64,23 @@ This documentation is organized to provide both quick access to essential inform
 
 ```
 user-docs/
-├── index.md                 # This file - documentation hub
-├── installation.md          # Quick installation guide
-├── configuration.md         # Configuration management
-├── quick-start.md           # 5-minute getting started tutorial
-├── oauth-authentication.md  # OAuth 2.0 authentication guide
-├── architecture.md          # System architecture overview
-├── api-methods.md           # Complete API reference
-├── deployment.md            # Production deployment
-├── troubleshooting.md       # Common issues and solutions
-├── tool-execution.md        # Bash-based tool execution system
-├── interactive-conversations.md # Input-required workflows
-├── push-notifications.md    # HTTP webhook notifications
-├── events.md                # Event emission system guide
-├── development-setup.md      # Local development environment
-├── testing.md               # Comprehensive testing guide (240+ tests)
-└── [topic-specific guides]  # Additional detailed documentation
+├── index.md                        # This file - documentation hub
+├── installation.md                 # Quick installation guide
+├── configuration.md                # Configuration management
+├── quick-start.md                  # 5-minute getting started tutorial
+├── oauth-authentication.md         # OAuth 2.0 authentication guide
+├── development-tool-extension.md   # Development tool extension guide
+├── architecture.md                 # System architecture overview
+├── api-methods.md                  # Complete API reference
+├── deployment.md                   # Production deployment
+├── troubleshooting.md              # Common issues and solutions
+├── tool-execution.md               # Bash-based tool execution system
+├── interactive-conversations.md    # Input-required workflows
+├── push-notifications.md           # HTTP webhook notifications
+├── events.md                       # Event emission system guide
+├── development-setup.md            # Local development environment
+├── testing.md                      # Comprehensive testing guide (240+ tests)
+└── [topic-specific guides]         # Additional detailed documentation
 ```
 
 ### Getting Help
