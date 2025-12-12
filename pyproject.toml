@@ -1,6 +1,6 @@
 [project]
 name = "a2a-acp"
-version = "0.1.0"
+version = "0.2.0"
 description = "A native A2A protocol server that exposes ZedACP agents over HTTP using JSON-RPC 2.0."
 authors = [{ name = "Autonomous Developer Agent" }]
 readme = "README.md"
