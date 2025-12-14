@@ -338,9 +338,21 @@ class ZedAgentConnection:
                     self._logger.info("Using API key authentication", extra={"method_id": api_key_method_id})
                     await self.authenticate(api_key_method_id, self._api_key)
                 elif api_key_method:
-                    raise AgentProcessError("Agent requires API key authentication but no API key provided")
+                    # Try chatgpt method as fallback when no API key is provided
+                    chatgpt_method = next((m for m in auth_methods if m.get("id") == "chatgpt"), None)
+                    if chatgpt_method:
+                        self._logger.info("Using ChatGPT authentication with existing auth.json", extra={"method_id": "chatgpt"})
+                        await self.authenticate("chatgpt")
+                    else:
+                        raise AgentProcessError("Agent requires API key authentication but no API key provided and no chatgpt method available")
                 else:
-                    raise AgentProcessError(f"Agent requires authentication but no supported method found. Available: {[m.get('id') for m in auth_methods]}")
+                    # No API key method available, try chatgpt method if available
+                    chatgpt_method = next((m for m in auth_methods if m.get("id") == "chatgpt"), None)
+                    if chatgpt_method:
+                        self._logger.info("Using ChatGPT authentication with existing auth.json", extra={"method_id": "chatgpt"})
+                        await self.authenticate("chatgpt")
+                    else:
+                        raise AgentProcessError(f"Agent requires authentication but no supported method found. Available: {[m.get('id') for m in auth_methods]}")
             else:
                 self._logger.debug("No authentication required")
 
