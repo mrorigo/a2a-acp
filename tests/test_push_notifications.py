@@ -8,9 +8,10 @@ notification delivery, and streaming functionality.
 import json
 import pytest
 from datetime import datetime, timedelta
+from datetime import timezone
 from unittest.mock import AsyncMock, patch
 
-from src.a2a_acp.models import (
+from a2a_acp.models import (
     TaskPushNotificationConfig,
     NotificationDelivery,
     TaskStatusChangePayload,
@@ -18,9 +19,9 @@ from src.a2a_acp.models import (
     DeliveryStatus,
     NotificationFilter
 )
-from src.a2a_acp.push_notification_manager import PushNotificationManager
-from src.a2a_acp.streaming_manager import StreamingManager, StreamingConnection
-from src.a2a_acp.database import SessionDatabase
+from a2a_acp.push_notification_manager import PushNotificationManager
+from a2a_acp.streaming_manager import StreamingManager, StreamingConnection
+from a2a_acp.database import SessionDatabase
 
 
 class TestPushNotificationModels:
@@ -52,7 +53,7 @@ class TestPushNotificationModels:
             delivery_status=DeliveryStatus.DELIVERED.value,
             response_code=200,
             response_body='{"success": true}',
-            attempted_at=datetime.utcnow()
+            attempted_at=datetime.now(timezone.utc)
         )
 
         assert delivery.id == "delivery-1"
@@ -64,7 +65,7 @@ class TestPushNotificationModels:
         payload = TaskStatusChangePayload(
             event="status_change",
             task_id="task-1",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             data={"old_state": "working", "new_state": "completed"},
             old_state="working",
             new_state="completed"
@@ -110,7 +111,7 @@ class TestPushNotificationManager:
     def push_manager(self, mock_database):
         """Create a push notification manager for testing."""
         # Create test settings to avoid validation errors
-        from src.a2a_acp.settings import PushNotificationSettings
+        from a2a_acp.settings import PushNotificationSettings
 
         test_settings = PushNotificationSettings(
             enabled=True,
@@ -315,7 +316,7 @@ class TestPushNotificationManager:
             task_id="task-1",
             event_type="status_change",
             delivery_status=DeliveryStatus.DELIVERED.value,
-            attempted_at=datetime.utcnow()
+            attempted_at=datetime.now(timezone.utc)
         )
 
         push_manager.analytics.update_from_delivery(delivery)
@@ -435,7 +436,7 @@ class TestStreamingManager:
         """Test cleaning up stale connections."""
         # Create a connection and manually set old last_activity
         connection_id, connection = await streaming_manager.register_sse_connection()
-        connection.last_activity = datetime.utcnow() - timedelta(hours=2)  # 2 hours old
+        connection.last_activity = datetime.now(timezone.utc) - timedelta(hours=2)  # 2 hours old
 
         # Cleanup connections older than 1 hour
         cleaned_count = await streaming_manager.cleanup_stale_connections(max_age_seconds=3600)
@@ -532,7 +533,7 @@ class TestDatabaseOperations:
             delivery_status=DeliveryStatus.DELIVERED.value,
             response_code=200,
             response_body='{"success": true}',
-            delivered_at=datetime.utcnow().isoformat()
+            delivered_at=datetime.now(timezone.utc).isoformat()
         )
 
         # Retrieve delivery history
@@ -573,7 +574,7 @@ class TestIntegrationScenarios:
         # For now, we'll test the key integration points
 
         mock_db = AsyncMock(spec=SessionDatabase)
-        from src.a2a_acp.settings import PushNotificationSettings
+        from a2a_acp.settings import PushNotificationSettings
 
         test_settings = PushNotificationSettings(
             enabled=True,
@@ -628,7 +629,7 @@ class TestIntegrationScenarios:
     async def test_retry_logic_on_failure(self):
         """Test retry logic when notification delivery fails."""
         mock_db = AsyncMock(spec=SessionDatabase)
-        from src.a2a_acp.settings import PushNotificationSettings
+        from a2a_acp.settings import PushNotificationSettings
 
         test_settings = PushNotificationSettings(
             enabled=True,
@@ -688,7 +689,7 @@ class TestIntegrationScenarios:
         payload = TaskStatusChangePayload(
             event="status_change",
             task_id="test-task",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             data={"test": "data"},
             old_state="working",
             new_state="completed"

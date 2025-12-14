@@ -7,17 +7,18 @@ This is critical functionality that needs extensive test coverage.
 
 import asyncio
 import pytest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime
 
-from src.a2a.models import Task, TaskStatus, TaskState, Message, TextPart
-from src.a2a_acp.task_manager import A2ATaskManager, TaskExecutionContext
-from src.a2a_acp.governor_manager import (
+from a2a_acp.a2a.models import Task, TaskStatus, TaskState, Message, TextPart
+from a2a_acp.task_manager import A2ATaskManager, TaskExecutionContext
+from pydantic import ValidationError
+from a2a_acp.governor_manager import (
     PermissionEvaluationResult,
     GovernorResult,
     PostRunEvaluationResult,
 )
-from src.a2a_acp.zed_agent import ToolPermissionRequest
+from a2a_acp.zed_agent import ToolPermissionRequest
 
 
 class TestA2ATaskManager:
@@ -263,7 +264,7 @@ class TestA2ATaskManager:
         result = await task_manager.cancel_task("nonexistent")
         assert result is False
 
-    @patch('src.a2a_acp.task_manager.ZedAgentConnection')
+    @patch('a2a_acp.task_manager.ZedAgentConnection')
     @pytest.mark.asyncio
     async def test_execute_task_success(self, mock_zed_connection, task_manager):
         """Test successful task execution."""
@@ -277,7 +278,7 @@ class TestA2ATaskManager:
         mock_zed_connection.return_value = mock_connection_instance
 
         # Mock translator
-        with patch('src.a2a.translator.A2ATranslator') as mock_translator_class:
+        with patch('a2a_acp.task_manager.A2ATranslator') as mock_translator_class:
             mock_translator = MagicMock()
             mock_translator.a2a_to_zedacp_message = MagicMock(return_value=[{"type": "text", "text": "Hello"}])
             mock_translator.zedacp_to_a2a_message = MagicMock()
@@ -307,7 +308,7 @@ class TestA2ATaskManager:
             mock_connection_instance.start_session.assert_called_once()
             mock_connection_instance.prompt.assert_called_once()
 
-    @patch('src.a2a_acp.task_manager.ZedAgentConnection')
+    @patch('a2a_acp.task_manager.ZedAgentConnection')
     @pytest.mark.asyncio
     async def test_execute_task_with_message(self, mock_zed_connection, task_manager):
         """Test task execution with initial message."""
@@ -321,7 +322,7 @@ class TestA2ATaskManager:
         mock_zed_connection.return_value = mock_connection_instance
 
         # Mock translator
-        with patch('src.a2a.translator.A2ATranslator') as mock_translator_class:
+        with patch('a2a_acp.task_manager.A2ATranslator') as mock_translator_class:
             mock_translator = MagicMock()
             mock_translator.a2a_to_zedacp_message = MagicMock(return_value=[{"type": "text", "text": "Hello"}])
             mock_translator.zedacp_to_a2a_message = MagicMock()
@@ -350,7 +351,7 @@ class TestA2ATaskManager:
             mock_translator.a2a_to_zedacp_message.assert_called_once_with(message)
             assert result.status.state == TaskState.COMPLETED
 
-    @patch('src.a2a_acp.task_manager.ZedAgentConnection')
+    @patch('a2a_acp.task_manager.ZedAgentConnection')
     @pytest.mark.asyncio
     async def test_execute_task_input_required(self, mock_zed_connection, task_manager):
         """Test task execution when input is required during execution."""
@@ -363,7 +364,7 @@ class TestA2ATaskManager:
         mock_zed_connection.return_value = mock_connection_instance
 
         # Mock translator
-        with patch('src.a2a.translator.A2ATranslator') as mock_translator_class:
+        with patch('a2a_acp.task_manager.A2ATranslator') as mock_translator_class:
             mock_translator = MagicMock()
             mock_translator.a2a_to_zedacp_message = MagicMock(return_value=[{"type": "text", "text": "Hello"}])
             mock_translator_class.return_value = mock_translator
@@ -418,7 +419,7 @@ class TestA2ATaskManager:
             if task.id in task_manager._active_tasks:
                 del task_manager._active_tasks[task.id]
 
-    @patch('src.a2a_acp.task_manager.ZedAgentConnection')
+    @patch('a2a_acp.task_manager.ZedAgentConnection')
     @pytest.mark.asyncio
     async def test_execute_task_input_required_with_types(self, mock_zed_connection, task_manager):
         """Test input-required detection with specific input types parsing."""
@@ -431,7 +432,7 @@ class TestA2ATaskManager:
         mock_zed_connection.return_value = mock_connection_instance
 
         # Mock translator
-        with patch('src.a2a.translator.A2ATranslator') as mock_translator_class:
+        with patch('a2a_acp.task_manager.A2ATranslator') as mock_translator_class:
             mock_translator = MagicMock()
             mock_translator.a2a_to_zedacp_message = MagicMock(return_value=[{"type": "text", "text": "Process data"}])
             mock_translator_class.return_value = mock_translator
@@ -552,7 +553,7 @@ class TestA2ATaskManager:
                 ["echo", "test"]
             )
 
-    @patch('src.a2a_acp.task_manager.ZedAgentConnection')
+    @patch('a2a_acp.task_manager.ZedAgentConnection')
     @pytest.mark.asyncio
     async def test_provide_input_and_continue_success_with_existing_session(self, mock_zed_connection, task_manager):
         """Test successful input continuation with existing ZedACP session."""
@@ -566,7 +567,7 @@ class TestA2ATaskManager:
         mock_zed_connection.return_value = mock_connection_instance
 
         # Mock translator
-        with patch('src.a2a.translator.A2ATranslator') as mock_translator_class:
+        with patch('a2a_acp.task_manager.A2ATranslator') as mock_translator_class:
             mock_translator = MagicMock()
             mock_translator.a2a_to_zedacp_message = MagicMock(return_value=[{"type": "text", "text": "More input"}])
             # Return a proper Message object for the response
@@ -685,7 +686,7 @@ class TestA2ATaskManager:
                 working_directory="/test"
             )
 
-    @patch('src.a2a_acp.task_manager.ZedAgentConnection')
+    @patch('a2a_acp.task_manager.ZedAgentConnection')
     @pytest.mark.asyncio
     async def test_provide_input_and_continue_with_mcp_servers(self, mock_zed_connection, task_manager):
         """Test input continuation with MCP servers."""
@@ -699,7 +700,7 @@ class TestA2ATaskManager:
         mock_zed_connection.return_value = mock_connection_instance
 
         # Mock translator
-        with patch('src.a2a.translator.A2ATranslator') as mock_translator_class:
+        with patch('a2a_acp.task_manager.A2ATranslator') as mock_translator_class:
             mock_translator = MagicMock()
             mock_translator.a2a_to_zedacp_message = MagicMock(return_value=[{"type": "text", "text": "MCP input"}])
             mock_translator.zedacp_to_a2a_message = MagicMock()
@@ -752,8 +753,8 @@ class TestA2ATaskManager:
         context.working_directory = "/test"
 
         # Mock cancellation during execution
-        with patch('src.a2a_acp.task_manager.ZedAgentConnection') as mock_zed_connection, \
-             patch('src.a2a.translator.A2ATranslator') as mock_translator_class:
+        with patch('a2a_acp.task_manager.ZedAgentConnection') as mock_zed_connection, \
+             patch('a2a_acp.task_manager.A2ATranslator') as mock_translator_class:
 
             # Setup connection mock that raises PromptCancelled
             mock_connection_instance = AsyncMock()
@@ -763,7 +764,7 @@ class TestA2ATaskManager:
             mock_connection_instance.load_session = AsyncMock()
 
             # Import PromptCancelled for mocking
-            from src.a2a_acp.zed_agent import PromptCancelled
+            from a2a_acp.zed_agent import PromptCancelled
             mock_connection_instance.prompt = AsyncMock(side_effect=PromptCancelled("User cancelled"))
             mock_zed_connection.return_value = mock_connection_instance
 
@@ -803,8 +804,8 @@ class TestA2ATaskManager:
         context.working_directory = "/test"
 
         # Mock agent process error during continuation
-        with patch('src.a2a_acp.task_manager.ZedAgentConnection') as mock_zed_connection, \
-             patch('src.a2a.translator.A2ATranslator') as mock_translator_class:
+        with patch('a2a_acp.task_manager.ZedAgentConnection') as mock_zed_connection, \
+             patch('a2a_acp.task_manager.A2ATranslator') as mock_translator_class:
 
             # Setup connection mock that raises AgentProcessError
             mock_connection_instance = AsyncMock()
@@ -814,7 +815,7 @@ class TestA2ATaskManager:
             mock_connection_instance.load_session = AsyncMock()
 
             # Import AgentProcessError for mocking
-            from src.a2a_acp.zed_agent import AgentProcessError
+            from a2a_acp.zed_agent import AgentProcessError
             mock_connection_instance.prompt = AsyncMock(side_effect=AgentProcessError("Agent crashed"))
             mock_zed_connection.return_value = mock_connection_instance
 
@@ -870,7 +871,7 @@ class TestA2ATaskManager:
         # Set task1 to completed and mock old creation time
         task1.status.state = TaskState.COMPLETED
         context1 = task_manager._active_tasks[task1.id]
-        context1.created_at = datetime.utcnow().replace(year=2020)  # Very old
+        context1.created_at = datetime.now(timezone.utc).replace(year=2020)  # Very old
 
         # Set task2 to working (should not be cleaned)
         task2.status.state = TaskState.WORKING
@@ -906,16 +907,14 @@ class TestA2ATaskManager:
 
     @pytest.mark.asyncio
     async def test_task_creation_with_missing_required_fields(self, task_manager):
-        """Test that Task creation fails with proper validation errors when required fields are missing."""
-        # Test missing status field
-        with pytest.raises(Exception):  # pydantic validation error
-            from a2a.models import TaskStatus, TaskState, current_timestamp
+        """Test that Task creation fails when required fields are missing."""
+        # Omitting the required `status` field should raise a validation error
+        with pytest.raises(ValidationError):
             Task(
                 id="task_123",
                 contextId="ctx_123",
-                status=TaskStatus(state=TaskState.SUBMITTED, timestamp=current_timestamp()),
                 history=None,
-                artifacts=None
+                artifacts=None,
             )
 
     @pytest.mark.asyncio
@@ -1025,9 +1024,12 @@ class TestA2ATaskManager:
         async def fake_eval_post_run(**kwargs):
             return evaluations.pop(0)
 
-        task_manager.governor_manager.evaluate_post_run = AsyncMock(side_effect=fake_eval_post_run)
-
-        result, blocked = await task_manager._run_post_run_governors(
+        with patch.object(
+            task_manager.governor_manager,
+            "evaluate_post_run",
+            AsyncMock(side_effect=fake_eval_post_run),
+        ):
+            result, blocked = await task_manager._run_post_run_governors(
             task.id,
             context,
             connection,
@@ -1068,7 +1070,7 @@ class TestA2ATaskManagerIntegration:
         assert call_args[0][1]["event"] == "task_created"
         assert call_args[0][1]["new_state"] == TaskState.SUBMITTED.value
 
-    @patch('src.a2a_acp.task_manager.ZedAgentConnection')
+    @patch('a2a_acp.task_manager.ZedAgentConnection')
     @pytest.mark.asyncio
     async def test_execute_task_with_mcp_servers(self, mock_zed_connection, task_manager_with_notifications):
         """Test task execution with MCP servers."""
@@ -1082,7 +1084,7 @@ class TestA2ATaskManagerIntegration:
         mock_zed_connection.return_value = mock_connection_instance
 
         # Mock translator
-        with patch('src.a2a.translator.A2ATranslator') as mock_translator_class:
+        with patch('a2a_acp.task_manager.A2ATranslator') as mock_translator_class:
             mock_translator = MagicMock()
             mock_translator.a2a_to_zedacp_message = MagicMock(return_value=[{"type": "text", "text": "Hello"}])
             mock_translator.zedacp_to_a2a_message = MagicMock()

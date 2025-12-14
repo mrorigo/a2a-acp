@@ -11,23 +11,24 @@ import tempfile
 import time
 from typing import Optional, Literal, Union, Any
 from unittest.mock import MagicMock, patch
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ValidationError
 
-from src.a2a.models import (
+from a2a_acp.a2a.models import (
     Message,
     Task,
     TaskStatusUpdateEvent,
     TaskArtifactUpdateEvent,
 )
-from src.a2a_acp.main import create_app
-from src.a2a_acp.database import SessionDatabase, A2AContext, ACPSession
+from a2a_acp.main import create_app
+from a2a_acp.database import SessionDatabase, A2AContext, ACPSession
 # A2A-ACP bridge tests - using A2A protocol types exclusively
-from src.a2a_acp.task_manager import A2ATaskManager
-from src.a2a_acp.context_manager import A2AContextManager
-from src.a2a_acp.zed_agent import ZedAgentConnection, AgentProcessError
+from a2a_acp.task_manager import A2ATaskManager
+from a2a_acp.context_manager import A2AContextManager
+from a2a_acp.zed_agent import ZedAgentConnection, AgentProcessError
 
 os.environ.setdefault("A2A_AGENT_COMMAND", "python tests/dummy_agent.py")
 
@@ -78,7 +79,7 @@ class TestAgentConfiguration:
 
     def test_agent_config_function(self):
         """Test that agent configuration can be loaded."""
-        from src.a2a_acp.main import get_agent_config
+        from a2a_acp.main import get_agent_config
 
         # This will use fallback defaults since no env vars are set
         config = get_agent_config()
@@ -89,7 +90,7 @@ class TestAgentConfiguration:
 
     def test_settings_include_agent_config(self):
         """Test that settings include agent configuration fields."""
-        from src.a2a_acp.settings import get_settings
+        from a2a_acp.settings import get_settings
 
         settings = get_settings()
         assert hasattr(settings, 'agent_command')
@@ -112,7 +113,6 @@ class TestA2ACPBridgeDatabase:
 
     def test_database_context_models(self):
         """Test A2A context model structure."""
-        from datetime import datetime
 
         # Test A2AContext model
         context = A2AContext(
@@ -120,8 +120,8 @@ class TestA2ACPBridgeDatabase:
             agent_name="test-agent",
             zed_session_id="test-session",
             working_directory="/tmp",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
 
         assert context.context_id == "test-context"
@@ -143,7 +143,7 @@ class TestTaskManager:
     def test_task_model_structure(self):
         """Test that A2A models are available."""
         # Test that we can import A2A models for task management
-        from src.a2a.models import TaskState, Message, TextPart
+        from a2a_acp.a2a.models import TaskState, Message, TextPart
 
         # Verify A2A types are available
         assert TaskState.SUBMITTED == "submitted"
@@ -362,8 +362,8 @@ class TestContextManager:
             agent_name="test-agent",
             zed_session_id="test-zed-session",
             working_directory="/tmp",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
 
         assert session.acp_session_id == "test-session"
@@ -591,7 +591,7 @@ class TestInputRequiredFunctionality:
 
     def test_input_required_notification_model(self):
         """Test InputRequiredNotification model structure."""
-        from src.a2a.models import InputRequiredNotification
+        from a2a_acp.a2a.models import InputRequiredNotification
 
         notification = InputRequiredNotification(
             taskId="task-123",
@@ -619,7 +619,7 @@ class TestInputRequiredFunctionality:
         assert task.status.state != "input-required"
 
         # Manually set to input-required for testing
-        from src.a2a.models import TaskState
+        from a2a_acp.a2a.models import TaskState
         task.status.state = TaskState.INPUT_REQUIRED
 
         # Test getting input-required tasks
@@ -630,7 +630,7 @@ class TestInputRequiredFunctionality:
     @pytest.mark.asyncio
     async def test_task_input_continuation_workflow(self):
         """Test the complete input-required continuation workflow."""
-        from src.a2a.models import Message, TextPart, TaskState
+        from a2a_acp.a2a.models import Message, TextPart, TaskState
 
         task_manager = A2ATaskManager()
 
@@ -672,7 +672,7 @@ class TestInputRequiredFunctionality:
     @pytest.mark.asyncio
     async def test_input_required_state_transitions(self):
         """Test proper state transitions for input-required tasks."""
-        from src.a2a.models import TaskState
+        from a2a_acp.a2a.models import TaskState
 
         task_manager = A2ATaskManager()
 
@@ -699,7 +699,7 @@ class TestInputRequiredFunctionality:
 
     def test_input_required_timeout_handling(self):
         """Test input-required timeout handling."""
-        from src.a2a.models import InputRequiredNotification
+        from a2a_acp.a2a.models import InputRequiredNotification
 
         # Test notification with timeout
         notification = InputRequiredNotification(
@@ -724,7 +724,7 @@ class TestInputRequiredFunctionality:
     async def test_multiple_input_required_tasks(self):
         """Test handling multiple input-required tasks simultaneously."""
         task_manager = A2ATaskManager()
-        from src.a2a.models import TaskState
+        from a2a_acp.a2a.models import TaskState
 
         # Create multiple tasks and set some to input-required
         tasks = []
@@ -820,7 +820,7 @@ class TestStreamingCompliance:
 
     def test_jsonrpc_streaming_emits_spec_events(self, monkeypatch):
         """Ensure message/stream emits status-update events and final task without null fields."""
-        from src.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
+        from a2a_acp.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
 
         async def fake_execute_task(
             self,
@@ -852,11 +852,11 @@ class TestStreamingCompliance:
             return task
 
         monkeypatch.setattr(
-            "src.a2a_acp.task_manager.A2ATaskManager.execute_task",
+            "a2a_acp.task_manager.A2ATaskManager.execute_task",
             fake_execute_task,
         )
         monkeypatch.setattr(
-            "src.a2a_acp.main.ZedAgentConnection",
+            "a2a_acp.main.ZedAgentConnection",
             DummyZedAgentConnection,
         )
 
@@ -957,7 +957,7 @@ class TestDummyAgentIntegration:
 
     def test_http_streaming_endpoint_matches_spec(self, monkeypatch):
         """Ensure HTTP /a2a/message/stream SSE responses validate against the spec."""
-        from src.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
+        from a2a_acp.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
 
         async def fake_execute_task(
             self,
@@ -989,11 +989,11 @@ class TestDummyAgentIntegration:
             return task
 
         monkeypatch.setattr(
-            "src.a2a_acp.task_manager.A2ATaskManager.execute_task",
+            "a2a_acp.task_manager.A2ATaskManager.execute_task",
             fake_execute_task,
         )
         monkeypatch.setattr(
-            "src.a2a_acp.main.ZedAgentConnection",
+            "a2a_acp.main.ZedAgentConnection",
             DummyZedAgentConnection,
         )
 
@@ -1026,7 +1026,7 @@ class TestJSONRPCContract:
     """Tests ensuring JSON-RPC responses match the SDK models."""
 
     def test_send_message_and_get_task_responses(self, monkeypatch):
-        from src.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
+        from a2a_acp.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
 
         async def fake_execute_task(
             self,
@@ -1054,11 +1054,11 @@ class TestJSONRPCContract:
             return task
 
         monkeypatch.setattr(
-            "src.a2a_acp.task_manager.A2ATaskManager.execute_task",
+            "a2a_acp.task_manager.A2ATaskManager.execute_task",
             fake_execute_task,
         )
         monkeypatch.setattr(
-            "src.a2a_acp.main.ZedAgentConnection",
+            "a2a_acp.main.ZedAgentConnection",
             DummyZedAgentConnection,
         )
 

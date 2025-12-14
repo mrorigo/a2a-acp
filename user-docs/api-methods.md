@@ -272,6 +272,181 @@ curl -X GET http://localhost:8001/.well-known/agent-card.json
 
 **Authentication**: Not required (public discovery endpoint)
 
+## Direct REST Endpoints
+
+### OAuth Authentication Endpoints
+
+A2A-ACP provides dedicated REST endpoints for OAuth authentication flows:
+
+#### `POST /a2a/agents/{agent_id}/auth/start`
+Start OAuth authentication flow with PKCE.
+
+**Request:**
+```bash
+curl -X POST "http://localhost:8001/a2a/agents/codex-acp/auth/start" \
+  -H "Authorization: Bearer ${A2A_AUTH_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+**Response:**
+```json
+{
+  "authorize_url": "https://auth.openai.com/oauth/authorize?",
+  "state": "oauth_state_123",
+  "expires_at": 1710000000000
+}
+```
+
+#### `GET /a2a/agents/{agent_id}/auth/callback`
+OAuth callback endpoint for automatic redirects.
+
+**Request:**
+```
+http://localhost:8001/a2a/agents/codex-acp/auth/callback?code=xxx&state=yyy
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "agent_id": "codex-acp",
+  "account_id": null,
+  "expires": 1710000000000
+}
+```
+
+#### `POST /a2a/agents/{agent_id}/auth/manual`
+Manual callback URL processing for headless servers.
+
+**Request:**
+```bash
+curl -X POST "http://localhost:8001/a2a/agents/codex-acp/auth/manual" \
+  -H "Authorization: Bearer ${A2A_AUTH_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "callback_url": "http://localhost:8001/a2a/agents/codex-acp/auth/callback?code=xxx&state=yyy"
+  }'
+```
+
+#### `GET /a2a/agents/{agent_id}/auth/status`
+Check authentication status.
+
+**Request:**
+```bash
+curl "http://localhost:8001/a2a/agents/codex-acp/auth/status" \
+  -H "Authorization: Bearer ${A2A_AUTH_TOKEN}"
+```
+
+**Response:**
+```json
+{
+  "signed_in": true,
+  "expires": 1710000000000,
+  "account_id": null,
+  "authentication_method": "chatgpt"
+}
+```
+
+#### `POST /a2a/agents/{agent_id}/auth/refresh`
+Force token refresh.
+
+#### `DELETE /a2a/agents/{agent_id}/auth`
+Remove stored authentication token.
+
+#### `POST /a2a/agents/{agent_id}/auth/check-auth`
+Verify agent accepts current authentication token.
+
+### Development Tool Extension Endpoints
+
+#### `GET /a2a/commands/get`
+Get all available slash commands based on tool configuration.
+
+**Request:**
+```bash
+curl -X GET "http://localhost:8001/a2a/commands/get" \
+  -H "Authorization: Bearer ${A2A_AUTH_TOKEN}"
+```
+
+**Response:**
+```json
+{
+  "commands": [
+    {
+      "name": "git_status",
+      "description": "Check git repository status",
+      "arguments": []
+    },
+    {
+      "name": "database_query",
+      "description": "Execute SQL queries safely",
+      "arguments": [
+        {
+          "name": "database",
+          "type": "string",
+          "description": "Database name",
+          "required": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### `POST /a2a/command/execute`
+Execute a slash command.
+
+**Request:**
+```bash
+curl -X POST "http://localhost:8001/a2a/command/execute" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${A2A_AUTH_TOKEN}" \
+  -d '{
+    "command": "git_status",
+    "arguments": {}
+  }'
+```
+
+**Response:**
+```json
+{
+  "execution_id": "task_123",
+  "status": "executing"
+}
+```
+
+### Streaming Endpoints
+
+#### `GET /streaming/websocket`
+WebSocket endpoint for real-time task notifications.
+
+**Connection:**
+```javascript
+const ws = new WebSocket('ws://localhost:8001/streaming/websocket?task_filter=task1,task2', {
+  headers: { 'Authorization': 'Bearer your-token' }
+});
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log('Task update:', data);
+};
+```
+
+#### `GET /streaming/sse`
+Server-Sent Events endpoint for real-time notifications.
+
+**Connection:**
+```javascript
+const eventSource = new EventSource('http://localhost:8001/streaming/sse?task_filter=task1,task2', {
+  headers: { 'Authorization': 'Bearer your-token' }
+});
+
+eventSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log('Task update:', data);
+};
+```
+
 ### `GET /a2a/tasks/{task_id}/governor/history`
 
 Fetch the full governance audit trail for a task, including auto-approval decisions, outstanding permission prompts, and governor feedback.

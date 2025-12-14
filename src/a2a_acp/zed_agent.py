@@ -76,12 +76,32 @@ class ZedAgentConnection:
         self._permission_handler = permission_handler
         self._error_profile = self._resolve_error_profile(error_profile)
 
+    @property
+    def permission_handler(self) -> PermissionHandler | None:
+        return self._permission_handler
+
+    @permission_handler.setter
+    def permission_handler(self, handler: PermissionHandler | None) -> None:
+        self._permission_handler = handler
+
     def _ensure_locks(self) -> None:
         """Lazily create locks to avoid event loop issues in tests."""
-        if self._read_lock is None:
-            self._read_lock = asyncio.Lock()
+        self.ensure_read_lock()
+        self.ensure_write_lock()
+
+    def ensure_write_lock(self) -> asyncio.Lock:
+        """Get or create the write lock."""
         if self._write_lock is None:
             self._write_lock = asyncio.Lock()
+        assert self._write_lock is not None
+        return self._write_lock
+    
+    def ensure_read_lock(self) -> asyncio.Lock:
+        """Get or create the read lock."""
+        if self._read_lock is None:
+            self._read_lock = asyncio.Lock()
+        assert self._read_lock is not None
+        return self._read_lock
 
     async def __aenter__(self) -> "ZedAgentConnection":
         await self.start()
@@ -208,9 +228,8 @@ class ZedAgentConnection:
     async def _write_json(self, payload: dict[str, Any]) -> None:
         if not self._stdin:
             raise AgentProcessError("Agent stdin unavailable")
-        self._ensure_locks()
         data = json.dumps(payload)
-        async with self._write_lock:
+        async with self.ensure_write_lock(): # pylint: disable=may-be-none
             self._stdin.write(data.encode() + b"\n")
             await self._stdin.drain()
         self._logger.info("Sent JSON-RPC message to agent", extra={
@@ -224,11 +243,10 @@ class ZedAgentConnection:
         if not self._stdout:
             raise AgentProcessError("Agent stdout unavailable")
 
-        self._ensure_locks()
 
         # Read lines until we find valid JSON
         while True:
-            async with self._read_lock:
+            async with self.ensure_read_lock():
                 raw = await self._stdout.readline()
             if not raw:
                 stderr = self.stderr()
@@ -1110,7 +1128,7 @@ class ZedAgentConnection:
                     "options": options,
                 },
             )
-            outcome = response.get("outcome", {})
+            outcome = response.get("outcome", {}) if response else {}
             option_id = outcome.get("optionId")
 
         return option_id

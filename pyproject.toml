@@ -1,6 +1,6 @@
 [project]
 name = "a2a-acp"
-version = "0.2.1"
+version = "0.3.0"
 description = "A native A2A protocol server that exposes ZedACP agents over HTTP using JSON-RPC 2.0."
 authors = [{ name = "Autonomous Developer Agent" }]
 readme = "README.md"
@@ -20,6 +20,7 @@ dependencies = [
 dev = [
     "pytest",
     "pytest-cov",
+    "pytest-asyncio",
     "httpx",
     "ruff",
     "black",

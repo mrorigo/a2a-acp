@@ -15,7 +15,7 @@ from a2a_acp.models import (
     ConfirmationOption,
     GenericDetails,
 )
-from a2a.models import (
+from a2a_acp.a2a.models import (
     Task,
     TaskStatus,
     TaskState,

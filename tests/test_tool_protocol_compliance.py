@@ -13,7 +13,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from a2a.models import AgentSkill, TaskState
+from a2a_acp.a2a.models import AgentSkill, TaskState
 from a2a_acp.tool_config import BashTool, ToolConfig, ToolParameter
 from a2a_acp.bash_executor import ToolExecutionResult
 from a2a_acp.sandbox import ExecutionContext
@@ -153,7 +153,7 @@ class TestToolProtocolCompliance:
 
     def test_a2a_input_required_format(self, sample_tool, execution_context):
         """Test A2A INPUT_REQUIRED notification format for tool confirmation."""
-        from a2a.models import InputRequiredNotification
+        from a2a_acp.a2a.models import InputRequiredNotification
 
         # Create INPUT_REQUIRED notification for tool confirmation
         notification = InputRequiredNotification(

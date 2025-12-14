@@ -4,7 +4,8 @@ info:
   version: 0.1.0
   description: |
     HTTP interface for the A2A-ACP gateway. The API exposes health checks,
-    governance audit history, streaming utilities, and an A2A JSON-RPC bridge
+    governance audit history, streaming utilities, OAuth authentication endpoints,
+    development tool extension endpoints, and an A2A JSON-RPC bridge
     to governed Zed ACP agents.
 servers:
   - url: https://api.example.com
@@ -230,6 +231,363 @@ paths:
         '401':
           $ref: '#/components/responses/UnauthorizedError'
 
+  # WebSocket endpoint (OpenAPI 3.0.1 limitation - see components for details)
+  /streaming/websocket:
+    get:
+      summary: WebSocket endpoint for real-time task notifications
+      description: |
+        WebSocket connection endpoint for receiving real-time task updates.
+        Note: OpenAPI 3.0.1 has limited WebSocket support. This endpoint supports:
+        - Connection establishment with Bearer token authentication
+        - Optional task filtering via query parameter
+        - Real-time task status updates, messages, and artifacts
+      tags: [Streaming]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: task_filter
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comma-separated task identifiers to filter notifications
+      responses:
+        '101':
+          description: Switching Protocols - WebSocket handshake successful
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  # OAuth Authentication Endpoints
+  /a2a/agents/{agent_id}/auth/start:
+    post:
+      summary: Start OAuth authentication flow
+      tags: [OAuth]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Agent identifier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartRequest'
+      responses:
+        '200':
+          description: Authorization URL and PKCE state generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authorize_url:
+                    type: string
+                  state:
+                    type: string
+                  expires_at:
+                    type: integer
+                    format: int64
+                required: [authorize_url, state, expires_at]
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: OAuth flows disabled
+        '409':
+          description: Agent missing codex_home configuration
+        '500':
+          description: Internal server error
+
+  /a2a/agents/{agent_id}/auth/callback:
+    get:
+      summary: OAuth callback endpoint
+      tags: [OAuth]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Agent identifier
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+          description: OAuth authorization code
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+          description: PKCE state parameter
+      responses:
+        '200':
+          description: Authentication completed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  agent_id:
+                    type: string
+                  account_id:
+                    type: string
+                    nullable: true
+                  expires:
+                    type: integer
+                    format: int64
+                    nullable: true
+                required: [success, agent_id]
+        '400':
+          description: Invalid request (missing code or state)
+        '401':
+          description: Unauthorized (invalid token exchange)
+        '403':
+          description: OAuth flows disabled
+        '409':
+          description: Agent missing codex_home configuration
+        '502':
+          description: Agent did not accept authentication token
+
+  /a2a/agents/{agent_id}/auth/manual:
+    post:
+      summary: Manual OAuth callback for headless servers
+      tags: [OAuth]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Agent identifier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManualAuthRequest'
+      responses:
+        '200':
+          description: Authentication completed via manual callback
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  agent_id:
+                    type: string
+                  account_id:
+                    type: string
+                    nullable: true
+                  expires:
+                    type: integer
+                    format: int64
+                    nullable: true
+                required: [success, agent_id]
+        '400':
+          description: Invalid callback URL or missing parameters
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: OAuth flows disabled
+        '409':
+          description: Agent missing codex_home configuration
+        '502':
+          description: Agent did not accept authentication token
+
+  /a2a/agents/{agent_id}/auth/status:
+    get:
+      summary: Check authentication status
+      tags: [OAuth]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Agent identifier
+      responses:
+        '200':
+          description: Authentication status information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signed_in:
+                    type: boolean
+                  expires:
+                    type: integer
+                    format: int64
+                    nullable: true
+                  account_id:
+                    type: string
+                    nullable: true
+                  authentication_method:
+                    type: string
+                required: [signed_in, authentication_method]
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '409':
+          description: Agent missing codex_home configuration
+
+  /a2a/agents/{agent_id}/auth:
+    delete:
+      summary: Remove stored authentication token
+      tags: [OAuth]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Agent identifier
+      responses:
+        '204':
+          description: Token successfully removed
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          description: No token found to delete
+        '409':
+          description: Agent missing codex_home configuration
+        '500':
+          description: Internal server error
+
+  /a2a/agents/{agent_id}/auth/refresh:
+    post:
+      summary: Force token refresh
+      tags: [OAuth]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Agent identifier
+      responses:
+        '200':
+          description: Token refresh completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent_id:
+                    type: string
+                  expires:
+                    type: integer
+                    format: int64
+                  created_at:
+                    type: integer
+                    format: int64
+                required: [agent_id, expires]
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: OAuth flows disabled
+        '409':
+          description: Agent missing codex_home configuration
+
+  /a2a/agents/{agent_id}/auth/check-auth:
+    post:
+      summary: Verify agent accepts current authentication token
+      tags: [OAuth]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Agent identifier
+      responses:
+        '200':
+          description: Agent accepts the authentication token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  agent_id:
+                    type: string
+                required: [success, agent_id]
+        '401':
+          description: Token missing or agent rejected authentication
+        '409':
+          description: Agent missing codex_home configuration
+        '500':
+          description: Internal server error
+
+  # Development Tool Extension Endpoints
+  /a2a/commands/get:
+    get:
+      summary: Get all available slash commands
+      tags: [Development Tools]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of available slash commands
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetAllSlashCommandsResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          description: Development tool extension not enabled
+
+  /a2a/command/execute:
+    post:
+      summary: Execute a slash command
+      tags: [Development Tools]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteSlashCommandRequest'
+      responses:
+        '200':
+          description: Command execution started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecuteSlashCommandResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          description: Development tool extension not enabled
+        '422':
+          description: Validation error (missing required arguments, invalid command)
+        '500':
+          description: Internal server error
+
 components:
   securitySchemes:
     bearerAuth:
@@ -379,6 +737,26 @@ components:
               type: boolean
             stateTransitionHistory:
               type: boolean
+            extensions:
+              type: array
+              items:
+                type: object
+                properties:
+                  uri:
+                    type: string
+                  params:
+                    type: object
+                    properties:
+                      version:
+                        type: string
+                      metadata:
+                        type: object
+                        properties:
+                          description:
+                            type: string
+            websocket:
+              type: boolean
+              description: WebSocket streaming support
           additionalProperties:
             type: boolean
         skills:
@@ -641,3 +1019,101 @@ components:
         message:
           type: string
       required: [success, cleaned_connections]
+
+    # OAuth Request/Response Schemas
+    StartRequest:
+      type: object
+      properties:
+        client_id:
+          type: string
+          nullable: true
+          description: Optional OAuth client ID
+        redirect_uri:
+          type: string
+          nullable: true
+          description: Optional redirect URI
+        scope:
+          type: string
+          nullable: true
+          description: Optional OAuth scope
+      additionalProperties: false
+
+    ManualAuthRequest:
+      type: object
+      properties:
+        callback_url:
+          type: string
+          description: Full callback URL containing code and state parameters
+        state:
+          type: string
+          nullable: true
+          description: Optional state parameter
+      required: [callback_url]
+
+    # Development Tool Extension Schemas
+    SlashCommandArgument:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Argument name
+        type:
+          type: string
+          description: Argument type (e.g., "string", "number")
+        description:
+          type: string
+          description: Argument description
+        required:
+          type: boolean
+          description: Whether the argument is required
+      required: [name, type, description]
+
+    SlashCommand:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Command name
+        description:
+          type: string
+          description: Command description
+        arguments:
+          type: array
+          items:
+            $ref: '#/components/schemas/SlashCommandArgument'
+          description: List of command arguments
+      required: [name, description]
+
+    GetAllSlashCommandsResponse:
+      type: object
+      properties:
+        commands:
+          type: array
+          items:
+            $ref: '#/components/schemas/SlashCommand'
+          description: List of available slash commands
+      required: [commands]
+
+    ExecuteSlashCommandRequest:
+      type: object
+      properties:
+        command:
+          type: string
+          description: Name of the command to execute
+        arguments:
+          type: object
+          description: Command arguments as key-value pairs
+          additionalProperties: true
+      required: [command]
+
+    ExecuteSlashCommandResponse:
+      type: object
+      properties:
+        execution_id:
+          type: string
+          description: Unique identifier for the command execution (matches task ID)
+        status:
+          type: string
+          enum: [pending, executing, completed, failed]
+          description: Current execution status
+      required: [execution_id, status]

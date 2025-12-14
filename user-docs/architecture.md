@@ -35,7 +35,7 @@ Understand how A2A-ACP bridges Zed ACP agents to the A2A protocol.
 - **Request Validation**: Comprehensive request validation and sanitization
 - **Agent Discovery**: Well-known HTTP endpoint for capability advertisement
 
-### 2. Protocol Translator (`src/a2a/translator.py`)
+### 2. Protocol Translator (`src/a2a_acp/a2a/translator.py`)
 
 **Responsibility**: Bidirectional translation between A2A and Zed ACP protocols
 

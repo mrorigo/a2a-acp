@@ -12,7 +12,7 @@ from a2a_acp.main import create_app
 from a2a_acp.database import SessionDatabase
 from a2a_acp.models import TaskPushNotificationConfig  # Existing model
 from a2a_acp.settings import _get_push_notification_settings
-from a2a.models import create_message_id
+from a2a_acp.a2a.models import create_message_id
 
 
 class DummyZedAgentConnection:
@@ -37,6 +37,12 @@ class DummyZedAgentConnection:
         if method == "session/new":
             return {"sessionId": "session"}
         return {"authMethods": []}
+
+    async def prompt(self, session_id, prompt_parts, **kwargs):
+        return {"response": "ok", "toolCalls": []}
+
+    async def load_session(self, session_id, cwd):
+        return {"session": session_id}
 
 
 @pytest.fixture
@@ -83,7 +89,8 @@ def test_client_no_extension(mock_db, mock_push_manager):
         with patch("a2a_acp.main.get_database", return_value=mock_db), \
              patch("a2a_acp.main.get_context_manager", return_value=context_manager), \
              patch("a2a_acp.main.PushNotificationManager", return_value=mock_push_manager), \
-             patch("a2a_acp.main.ZedAgentConnection", DummyZedAgentConnection):
+             patch("a2a_acp.main.ZedAgentConnection", DummyZedAgentConnection), \
+             patch("a2a_acp.task_manager.ZedAgentConnection", DummyZedAgentConnection):
             from fastapi.testclient import TestClient
 
             with TestClient(app) as client:
@@ -112,7 +119,8 @@ def test_client_full(mock_db, mock_push_manager):
         with patch("a2a_acp.main.get_database", return_value=mock_db), \
              patch("a2a_acp.main.get_context_manager", return_value=context_manager), \
              patch("a2a_acp.main.PushNotificationManager", return_value=mock_push_manager), \
-             patch("a2a_acp.main.ZedAgentConnection", DummyZedAgentConnection):
+             patch("a2a_acp.main.ZedAgentConnection", DummyZedAgentConnection), \
+             patch("a2a_acp.task_manager.ZedAgentConnection", DummyZedAgentConnection):
             from fastapi.testclient import TestClient
             with TestClient(app) as client:
                 yield client

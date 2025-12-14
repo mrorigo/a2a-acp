@@ -263,7 +263,7 @@ def test_new_tool_type():
 ### Adding New API Methods
 
 ```python
-# 1. Add method to A2A server in src/a2a/server.py
+# 1. Add method to A2A server in src/a2a_acp/main.py
 async def handle_new_method(params):
     # Implementation
 
@@ -364,7 +364,7 @@ p.sort_stats('cumulative').print_stats(10)
 python -c "import sys; print('\n'.join(sys.path))"
 
 # Verify installation
-python -c "import src.a2a.models; print('✅ Core imports work')"
+python -c "import a2a_acp.a2a.models; print('✅ Core imports work')"
 ```
 
 ### Test Failures

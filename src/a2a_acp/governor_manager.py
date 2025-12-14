@@ -17,7 +17,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 GovernorPhase = Literal["permission", "post_run"]
-GovernorStatus = Literal["approve", "reject", "needs_attention", "error"]
+GovernorStatus = Literal["approve", "input_required", "reject", "needs_attention", "error"]
 GovernorType = Literal["script", "http", "python"]
 AutoDecisionType = Literal["approve", "reject", "manual"]
 

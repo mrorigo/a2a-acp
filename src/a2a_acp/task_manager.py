@@ -12,10 +12,10 @@ import logging
 import os
 from typing import Dict, List, Optional, Any, Callable, Awaitable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
-from a2a.models import (
+from a2a_acp.a2a.models import (
     Task,
     TaskStatus,
     TaskState,
@@ -26,6 +26,7 @@ from a2a.models import (
     InputRequiredNotification,
     current_timestamp,
 )
+from a2a_acp.a2a.translator import A2ATranslator
 
 from .zed_agent import (
     ZedAgentConnection,
@@ -65,11 +66,6 @@ logger = logging.getLogger(__name__)
 
 def _create_translator():
     """Instantiate the A2A translator with compatibility for src path patches."""
-    try:
-        from src.a2a.translator import A2ATranslator
-    except ImportError:
-        from a2a.translator import A2ATranslator
-
     return A2ATranslator()
 
 
@@ -96,7 +92,7 @@ class PendingPermission:
     summary_lines: List[str] = field(default_factory=list)
     governor_results: List[GovernorResult] = field(default_factory=list)
     policy_decision: Optional[AutoApprovalDecision] = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -117,7 +113,7 @@ class TaskExecutionContext:
 
     def __post_init__(self):
         if self.created_at is None:
-            self.created_at = datetime.utcnow()
+            self.created_at = datetime.now(timezone.utc)
 
     @property
     def cancel_event(self) -> asyncio.Event:
@@ -276,7 +272,7 @@ class A2ATaskManager:
                     dev_tool["thoughts"].append(agent_thought.to_dict())
 
                 if task:
-                    dev_tool_meta = task.metadata.get("development-tool", {}) if task else {}
+                    dev_tool_meta = task.metadata.get("development-tool", {}) if task and task.metadata else {}
 
             # Send notification for failure
             error_message = f"{context_str}: {str(error)}" if context_str else str(error)
@@ -481,7 +477,7 @@ class A2ATaskManager:
             source=source,
             option_id=option_id,
             governors_involved=[result.governor_id for result in governor_results],
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             metadata=metadata or {},
         )
         context.permission_decisions.append(record)
@@ -507,7 +503,7 @@ class A2ATaskManager:
     ) -> None:
         entry = {
             "phase": phase,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "summary": summary_lines,
             "results": self._serialize_governor_results(results),
         }
@@ -717,9 +713,9 @@ class A2ATaskManager:
             if output_settings is not None:
                 max_iter_value = getattr(output_settings, "max_iterations", None)
                 try:
-                    max_iterations = max(1, int(max_iter_value))
+                    max_iterations = max(1, int(max_iter_value if max_iter_value else max_iterations))
                 except (TypeError, ValueError):
-                    max_iterations = 1
+                    pass
 
         while iteration < max_iterations:
             evaluation_call = self.governor_manager.evaluate_post_run(
@@ -1110,7 +1106,7 @@ class A2ATaskManager:
                         add_agent_thought=True,
                         tool_output_text=final_text,
                     )
-                    dev_tool_meta = context.task.metadata.get("development-tool", {}) if context.task else {}
+                    dev_tool_meta = context.task.metadata.get("development-tool", {}) if context.task and context.task.metadata else {}
                     asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
                         "old_state": old_state,
                         "new_state": TaskState.COMPLETED.value,
@@ -1616,7 +1612,7 @@ class A2ATaskManager:
             if context.task.status.state in [TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED]:
                 # Keep for a while for history, then remove
                 if context.created_at:
-                    age = (datetime.utcnow() - context.created_at).total_seconds()
+                    age = (datetime.now(timezone.utc) - context.created_at).total_seconds()
                     if age > 3600:  # Remove after 1 hour
                         to_remove.append(task_id)
 

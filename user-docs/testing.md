@@ -590,7 +590,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 # Verify imports work
-python -c "import src.a2a.models; print('Imports OK')"
+python -c "import a2a_acp.a2a.models; print('Imports OK')"
 ```
 
 ---

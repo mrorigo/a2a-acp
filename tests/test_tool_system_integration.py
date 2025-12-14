@@ -224,7 +224,7 @@ class TestProtocolComplianceVerification:
 
     def test_input_required_notification_format(self):
         """Verify INPUT_REQUIRED notifications follow A2A specification."""
-        from a2a.models import InputRequiredNotification
+        from a2a_acp.a2a.models import InputRequiredNotification
 
         notification = InputRequiredNotification(
             taskId="task_123",

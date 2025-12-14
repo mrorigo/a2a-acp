@@ -11,9 +11,9 @@ import asyncio
 import logging
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
-from a2a.models import Task, Message, generate_id
+from a2a_acp.a2a.models import Task, Message, generate_id
 from .database import SessionDatabase
 
 # Global database instance
@@ -40,9 +40,9 @@ class ContextState:
         if self.messages is None:
             self.messages = []
         if self.created_at is None:
-            self.created_at = datetime.utcnow()
+            self.created_at = datetime.now(timezone.utc)
         if self.updated_at is None:
-            self.updated_at = datetime.utcnow()
+            self.updated_at = datetime.now(timezone.utc)
 
 
 class A2AContextManager:
@@ -128,7 +128,7 @@ class A2AContextManager:
                 context_state = self._active_contexts[context_id]
                 if context_state.tasks is not None:
                     context_state.tasks.append(task)
-                context_state.updated_at = datetime.utcnow()
+                context_state.updated_at = datetime.now(timezone.utc)
 
                 logger.debug("Added task to context",
                            extra={"context_id": context_id, "task_id": task.id})
@@ -140,7 +140,7 @@ class A2AContextManager:
                 context_state = self._active_contexts[context_id]
                 if context_state.messages is not None:
                     context_state.messages.append(message)
-                context_state.updated_at = datetime.utcnow()
+                context_state.updated_at = datetime.now(timezone.utc)
 
                 logger.debug("Added message to context",
                            extra={"context_id": context_id, "message_id": message.messageId})
@@ -197,7 +197,7 @@ class A2AContextManager:
     async def cleanup_old_contexts(self) -> int:
         """Clean up old inactive contexts."""
         # Mark old contexts as inactive (older than 24 hours)
-        cutoff_time = datetime.utcnow().timestamp() - (24 * 3600)
+        cutoff_time = datetime.now(timezone.utc).timestamp() - (24 * 3600)
 
         # Use the database cleanup method
         cleaned_count = await _db.cleanup_inactive_sessions(days_old=1)  # 24 hours = 1 day

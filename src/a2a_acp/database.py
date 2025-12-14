@@ -10,9 +10,9 @@ import logging
 import sqlite3
 import threading
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
-from a2a.models import Message, Task
+from a2a_acp.a2a.models import Message, Task
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +247,7 @@ class SessionDatabase:
         metadata: Optional[Dict[str, Any]] = None
     ) -> A2AContext:
         """Create a new A2A context record."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         context = A2AContext(
             context_id=context_id,
             agent_name=agent,
@@ -302,7 +302,7 @@ class SessionDatabase:
                 UPDATE acp_sessions
                 SET zed_session_id = ?, updated_at = ?
                 WHERE acp_session_id = ?
-            """, (zed_session_id, datetime.utcnow().isoformat(), acp_session_id))
+            """, (zed_session_id, datetime.now(timezone.utc).isoformat(), acp_session_id))
             conn.commit()
 
     async def append_message_history(
@@ -328,7 +328,7 @@ class SessionDatabase:
                 "role": message.role,
                 "parts": [part.model_dump() for part in message.parts]
             },
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             sequence_number=sequence_number,
             zed_message_data=zed_message
         )
@@ -413,7 +413,7 @@ class SessionDatabase:
 
     async def cleanup_inactive_sessions(self, days_old: int = 30) -> int:
         """Clean up old inactive sessions. Returns number of sessions deleted."""
-        cutoff_date = datetime.utcnow().isoformat()
+        cutoff_date = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.execute("""
                 DELETE FROM acp_sessions
@@ -575,7 +575,7 @@ class SessionDatabase:
         """Clean up old notification configurations. Returns number of configs deleted."""
         # For now, implement a simple cleanup strategy
         # This could be extended with more sophisticated lifecycle management
-        cutoff_date = datetime.utcnow().isoformat()
+        cutoff_date = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.execute("""
                 DELETE FROM push_notification_configs

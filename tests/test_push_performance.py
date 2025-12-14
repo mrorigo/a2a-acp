@@ -10,9 +10,9 @@ import json
 import pytest
 import time
 
-from src.a2a_acp.database import SessionDatabase
-from src.a2a_acp.models import TaskPushNotificationConfig
-from src.a2a_acp.push_notification_manager import PushNotificationManager
+from a2a_acp.database import SessionDatabase
+from a2a_acp.models import TaskPushNotificationConfig
+from a2a_acp.push_notification_manager import PushNotificationManager
 
 
 class TestPushNotificationPerformance:
@@ -239,7 +239,7 @@ class TestPushNotificationPerformance:
 
     def test_streaming_manager_performance(self, test_db):
         """Test streaming manager performance with many connections."""
-        from src.a2a_acp.streaming_manager import StreamingManager
+        from a2a_acp.streaming_manager import StreamingManager
 
         async def streaming_performance_test():
             push_mgr = PushNotificationManager(test_db)
@@ -439,7 +439,7 @@ class TestStressTests:
             start_time = time.time()
 
             # Test that payload creation works with large data
-            from src.a2a_acp.push_notification_manager import PushNotificationManager
+            from a2a_acp.push_notification_manager import PushNotificationManager
             mgr = PushNotificationManager(test_db)
 
             # Test payload creation multiple times

@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from src.a2a_acp.governor_manager import (
+from a2a_acp.governor_manager import (
     GovernorManager,
     GovernorConfig,
     GovernorDefinition,

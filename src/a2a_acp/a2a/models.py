@@ -533,4 +533,4 @@ def create_artifact_id() -> str:
 
 def get_current_timestamp() -> str:
     """Get current timestamp in ISO 8601 format."""
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(timezone.utc).isoformat() + "Z"

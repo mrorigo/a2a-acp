@@ -27,7 +27,7 @@ from .sandbox import (
 from .push_notification_manager import PushNotificationManager
 from .audit import get_audit_logger, AuditEventType
 from .error_profiles import ErrorProfile, ErrorContract, build_acp_error
-from a2a.models import InputRequiredNotification
+from a2a_acp.a2a.models import InputRequiredNotification
 from .models import (
     ToolOutput,
     ErrorDetails,

@@ -13,11 +13,11 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from src.a2a_acp.main import create_app
-from src.a2a_acp.database import SessionDatabase
-from src.a2a_acp.models import TaskPushNotificationConfig
-from src.a2a_acp.push_notification_manager import PushNotificationManager
-from src.a2a.models import TaskState
+from a2a_acp.main import create_app
+from a2a_acp.database import SessionDatabase
+from a2a_acp.models import TaskPushNotificationConfig
+from a2a_acp.push_notification_manager import PushNotificationManager
+from a2a_acp.a2a.models import TaskState
 
 
 class TestA2APushNotificationIntegration:
@@ -32,11 +32,11 @@ class TestA2APushNotificationIntegration:
     @pytest.fixture
     def test_client(self, test_db, monkeypatch):
         """Create a test client with the push notification system."""
-        from src.a2a_acp.task_manager import A2ATaskManager
-        from src.a2a_acp.context_manager import A2AContextManager
-        from src.a2a_acp.streaming_manager import StreamingManager
-        from src.a2a.translator import A2ATranslator
-        from src.a2a_acp.settings import PushNotificationSettings
+        from a2a_acp.task_manager import A2ATaskManager
+        from a2a_acp.context_manager import A2AContextManager
+        from a2a_acp.streaming_manager import StreamingManager
+        from a2a_acp.a2a.translator import A2ATranslator
+        from a2a_acp.settings import PushNotificationSettings
 
         # Set required environment variable for testing
         monkeypatch.setenv("A2A_AGENT_COMMAND", "python tests/dummy_agent.py")
@@ -389,10 +389,10 @@ class TestEndToEndWorkflows:
     @pytest.fixture
     def test_client(self, test_db, monkeypatch):
         """Create a test client."""
-        from src.a2a_acp.task_manager import A2ATaskManager
-        from src.a2a_acp.context_manager import A2AContextManager
-        from src.a2a_acp.streaming_manager import StreamingManager
-        from src.a2a.translator import A2ATranslator
+        from a2a_acp.task_manager import A2ATaskManager
+        from a2a_acp.context_manager import A2AContextManager
+        from a2a_acp.streaming_manager import StreamingManager
+        from a2a_acp.a2a.translator import A2ATranslator
 
         # Set required environment variable for testing
         monkeypatch.setenv("A2A_AGENT_COMMAND", "python tests/dummy_agent.py")
@@ -401,7 +401,7 @@ class TestEndToEndWorkflows:
         app.state.database = test_db
 
         # Initialize push notification manager with test database and settings
-        from src.a2a_acp.settings import PushNotificationSettings
+        from a2a_acp.settings import PushNotificationSettings
 
         # Create test settings for integration tests
         test_push_settings = PushNotificationSettings(
@@ -492,7 +492,7 @@ class TestEndToEndWorkflows:
                 assert len(creation_notifications) >= 1
 
                 # Update task status to working (should trigger status change notification)
-                from src.a2a.models import current_timestamp
+                from a2a_acp.a2a.models import current_timestamp
                 task.status.state = TaskState.WORKING
                 task.status.timestamp = current_timestamp()
 
@@ -614,10 +614,10 @@ class TestErrorRecovery:
     @pytest.fixture
     def test_client(self, test_db, monkeypatch):
         """Create a test client."""
-        from src.a2a_acp.task_manager import A2ATaskManager
-        from src.a2a_acp.context_manager import A2AContextManager
-        from src.a2a_acp.streaming_manager import StreamingManager
-        from src.a2a.translator import A2ATranslator
+        from a2a_acp.task_manager import A2ATaskManager
+        from a2a_acp.context_manager import A2AContextManager
+        from a2a_acp.streaming_manager import StreamingManager
+        from a2a_acp.a2a.translator import A2ATranslator
 
         # Set required environment variable for testing
         monkeypatch.setenv("A2A_AGENT_COMMAND", "python tests/dummy_agent.py")
@@ -626,7 +626,7 @@ class TestErrorRecovery:
         app.state.database = test_db
 
         # Initialize push notification manager with test database and settings
-        from src.a2a_acp.settings import PushNotificationSettings
+        from a2a_acp.settings import PushNotificationSettings
 
         # Create test settings for integration tests
         test_push_settings = PushNotificationSettings(

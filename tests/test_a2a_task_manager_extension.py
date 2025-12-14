@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 
-from a2a.models import (
+from a2a_acp.a2a.models import (
     Task,
     TaskStatus,
     TaskState,
@@ -142,17 +142,17 @@ class TestToolPermissionHandling:
             decision_source=None,
             summary_lines=["Requires manual approval"],
             policy_decision=None,
-            governor_results=[
-                GovernorResult(
-                    governor_id="test-governor",
-                    status="requires_input",
-                    option_id=None,
-                    score=0.5,
-                    messages=["Review required"],
-                    follow_up_prompt=None,
-                    metadata={},
-                )
-            ],
+                governor_results=[
+                    GovernorResult(
+                        governor_id="test-governor",
+                        status="input_required",
+                        option_id=None,
+                        score=0.5,
+                        messages=["Review required"],
+                        follow_up_prompt=None,
+                        metadata={},
+                    )
+                ],
             requires_manual=True,
         )
 
@@ -485,17 +485,17 @@ class TestAgentThoughtEmission:
             follow_up_prompts=[],
             blocked=False,
             summary_lines=["Analysis complete"],
-            governor_results=[
-                GovernorResult(
-                    governor_id="quality-check",
-                    status="passed",
-                    option_id=None,
-                    score=0.9,
-                    messages=["Good quality"],
-                    follow_up_prompt=None,
-                    metadata={"suggestion": "Consider adding tests"},
-                )
-            ],
+                governor_results=[
+                    GovernorResult(
+                        governor_id="quality-check",
+                        status="approve",
+                        option_id=None,
+                        score=0.9,
+                        messages=["Good quality"],
+                        follow_up_prompt=None,
+                        metadata={"suggestion": "Consider adding tests"},
+                    )
+                ],
         )
 
         # Mock Zed connection and prompt
@@ -549,7 +549,7 @@ class TestAgentThoughtEmission:
         assert len(feedback_entry["results"]) == 1
         result = feedback_entry["results"][0]
         assert result["governorId"] == "quality-check"
-        assert result["status"] == "passed"
+        assert result["status"] == "approve"
         assert "Good quality" in result["messages"]
 
     @pytest.mark.asyncio

@@ -45,8 +45,7 @@ from .models import (
     CommandExecutionStatus,
 )
 
-# Import A2A protocol components
-from a2a.models import (
+from a2a_acp.a2a.models import (
     Message,
     MessageSendParams,
     Task,
@@ -57,7 +56,7 @@ from a2a.models import (
     create_message_id,
     current_timestamp,
 )
-from a2a.translator import A2ATranslator
+from a2a_acp.a2a.translator import A2ATranslator
 
 # Import push notification models
 from .models import TaskPushNotificationConfig
@@ -394,7 +393,7 @@ def get_agent_config() -> Dict[str, Any]:
 
 async def generate_static_agent_card():
     """Generate a static AgentCard for the single configured agent."""
-    from a2a.models import (
+    from a2a_acp.a2a.models import (
         AgentCard, AgentCapabilities, AgentSkill, AgentProvider,
         SecurityScheme, HTTPAuthSecurityScheme
     )
@@ -717,7 +716,7 @@ def handle_push_notification_config_method(
 async def handle_message_send_jsonrpc(params: Dict[str, Any], request: Request, request_id: Any) -> Dict[str, Any]:
     """Handle message/send via JSON-RPC."""
     try:
-        from a2a.models import MessageSendParams
+        from a2a_acp.a2a.models import MessageSendParams
 
         # Parse MessageSendParams
         message_params = MessageSendParams(**params)
@@ -801,7 +800,7 @@ async def handle_message_send_jsonrpc(params: Dict[str, Any], request: Request, 
 async def handle_tasks_get_jsonrpc(params: Dict[str, Any], request: Request, request_id: Any) -> Dict[str, Any]:
     """Handle tasks/get via JSON-RPC."""
     try:
-        from a2a.models import TaskQueryParams
+        from a2a_acp.a2a.models import TaskQueryParams
 
         # Parse TaskQueryParams
         task_query = TaskQueryParams(**params)
@@ -850,7 +849,7 @@ async def handle_tasks_get_jsonrpc(params: Dict[str, Any], request: Request, req
 async def handle_tasks_list_jsonrpc(params: Dict[str, Any], request: Request, request_id: Any) -> Dict[str, Any]:
     """Handle tasks/list via JSON-RPC."""
     try:
-        from a2a.models import ListTasksParams, ListTasksResult
+        from a2a_acp.a2a.models import ListTasksParams, ListTasksResult
 
         # Parse ListTasksParams
         list_params = ListTasksParams(**params)
@@ -934,7 +933,7 @@ async def handle_tasks_list_jsonrpc(params: Dict[str, Any], request: Request, re
 async def handle_tasks_cancel_jsonrpc(params: Dict[str, Any], request: Request, request_id: Any) -> Dict[str, Any]:
     """Handle tasks/cancel via JSON-RPC."""
     try:
-        from a2a.models import TaskIdParams
+        from a2a_acp.a2a.models import TaskIdParams
 
         # Parse TaskIdParams
         task_id_params = TaskIdParams(**params)
@@ -956,7 +955,7 @@ async def handle_tasks_cancel_jsonrpc(params: Dict[str, Any], request: Request, 
                 }
             else:
                 # Task was cancelled and removed from active tasks
-                from a2a.models import Task, TaskStatus, TaskState
+                from a2a_acp.a2a.models import Task, TaskStatus, TaskState
                 cancelled_task = Task(
                     id=task_id_params.id,
                     contextId="unknown",
@@ -1617,7 +1616,7 @@ def create_app() -> FastAPI:
                 zedacp_result = {}  # The task execution result would need to be extracted from the Task object
 
                 # Convert ZedACP response back to A2A format
-                from a2a.models import TaskStatus, TaskState
+                from a2a_acp.a2a.models import TaskStatus, TaskState
                 a2a_response = translator.zedacp_to_a2a_message(zedacp_result, task.id, task.id)
 
                 # Update task with response
@@ -1725,7 +1724,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=422, detail=detail)
 
         # Create initial message from the slash command request
-        from a2a.models import Message, TextPart, create_message_id
+        from a2a_acp.a2a.models import Message, TextPart, create_message_id
         initial_message = Message(
             role="user",
             parts=[TextPart(text=f"/{request.command} {request.arguments}")],

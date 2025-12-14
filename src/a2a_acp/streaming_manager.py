@@ -8,7 +8,7 @@ notification streaming, enabling live updates for task events and notifications.
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Set, Optional, Any, TYPE_CHECKING
 import uuid
 
@@ -28,8 +28,8 @@ class StreamingConnection:
     def __init__(self, connection_id: str, task_filter: Optional[Set[str]] = None):
         self.connection_id = connection_id
         self.task_filter = task_filter or set()  # Empty set means all tasks
-        self.connected_at = datetime.utcnow()
-        self.last_activity = datetime.utcnow()
+        self.connected_at = datetime.now(timezone.utc)
+        self.last_activity = datetime.now(timezone.utc)
 
     def should_receive_notification(self, task_id: str) -> bool:
         """Check if this connection should receive notifications for the given task."""
@@ -37,7 +37,7 @@ class StreamingConnection:
 
     def update_activity(self):
         """Update last activity timestamp."""
-        self.last_activity = datetime.utcnow()
+        self.last_activity = datetime.now(timezone.utc)
 
 
 class StreamingManager:
@@ -149,7 +149,7 @@ class StreamingManager:
 
                         await websocket.send_text(json.dumps({
                             "type": "pong",
-                            "timestamp": datetime.utcnow().isoformat()
+                            "timestamp": datetime.now(timezone.utc).isoformat()
                         }))
 
                     elif message_type == "subscribe":
@@ -162,7 +162,7 @@ class StreamingManager:
                         await websocket.send_text(json.dumps({
                             "type": "subscription_updated",
                             "taskIds": task_ids,
-                            "timestamp": datetime.utcnow().isoformat()
+                            "timestamp": datetime.now(timezone.utc).isoformat()
                         }))
 
                     elif message_type == "unsubscribe":
@@ -174,7 +174,7 @@ class StreamingManager:
                         await websocket.send_text(json.dumps({
                             "type": "subscription_updated",
                             "taskIds": [],
-                            "timestamp": datetime.utcnow().isoformat()
+                            "timestamp": datetime.now(timezone.utc).isoformat()
                         }))
 
                 except json.JSONDecodeError:
@@ -268,7 +268,7 @@ class StreamingManager:
                     await asyncio.sleep(1)
 
                     # Send heartbeat every 30 seconds
-                    current_time = datetime.utcnow()
+                    current_time = datetime.now(timezone.utc)
                     if (current_time - connection.last_activity).seconds >= 30:
                         heartbeat_event = {
                             "type": "heartbeat",
@@ -327,7 +327,7 @@ class StreamingManager:
             "task_id": task_id,
             "event": event.get("event", "unknown"),
             "data": event,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
         async with self.lock:
@@ -375,12 +375,12 @@ class StreamingManager:
             # Calculate connection ages
             websocket_ages = []
             for conn in self.websocket_connections.values():
-                age = (datetime.utcnow() - conn.connected_at).total_seconds()
+                age = (datetime.now(timezone.utc) - conn.connected_at).total_seconds()
                 websocket_ages.append(age)
 
             sse_ages = []
             for conn in self.sse_connections.values():
-                age = (datetime.utcnow() - conn.connected_at).total_seconds()
+                age = (datetime.now(timezone.utc) - conn.connected_at).total_seconds()
                 sse_ages.append(age)
 
             return {
@@ -401,7 +401,7 @@ class StreamingManager:
         """Clean up stale connections that haven't been active for too long."""
         if max_age_seconds is None:
             max_age_seconds = self.cleanup_interval
-        cutoff_time = datetime.utcnow().timestamp() - max_age_seconds
+        cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
         cleaned_count = 0
 
         async with self.lock:

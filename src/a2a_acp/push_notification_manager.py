@@ -10,7 +10,7 @@ import asyncio
 import logging
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 import httpx
 from httpx import AsyncClient, Response, Timeout
@@ -470,7 +470,7 @@ class PushNotificationManager:
         """Create a standardized notification payload from event data."""
         event_type_str = event.get("event", "unknown")
         task_id = event.get("task_id", "")
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
     
         # Handle legacy event type strings by mapping them to enum values
         event_type_mapping = {
@@ -600,7 +600,7 @@ class PushNotificationManager:
                 delivery_status=delivery_status,
                 response_code=response_code,
                 response_body=response_body,
-                delivered_at=datetime.utcnow().isoformat() if delivery_status == DeliveryStatus.DELIVERED.value else None
+                delivered_at=datetime.now(timezone.utc).isoformat() if delivery_status == DeliveryStatus.DELIVERED.value else None
             )
         except Exception as e:
             logger.error(
@@ -630,7 +630,7 @@ class PushNotificationManager:
                 task_id=config.task_id,
                 event_type=event_type,
                 delivery_status=DeliveryStatus.DELIVERED.value if i < success_count else DeliveryStatus.FAILED.value,
-                attempted_at=datetime.utcnow()
+                attempted_at=datetime.now(timezone.utc)
             )
 
             self.analytics.update_from_delivery(delivery)
