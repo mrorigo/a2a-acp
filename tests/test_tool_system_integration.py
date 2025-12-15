@@ -29,7 +29,7 @@ class TestToolSystemIntegration:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
         yield process
         process.terminate()
@@ -57,7 +57,7 @@ class TestToolSystemIntegration:
 
         scenarios = [
             {"tool": "dangerous_operation", "approve": True, "expected": "completed"},
-            {"tool": "dangerous_operation", "approve": False, "expected": "cancelled"}
+            {"tool": "dangerous_operation", "approve": False, "expected": "cancelled"},
         ]
 
         for scenario in scenarios:
@@ -74,7 +74,7 @@ class TestToolSystemIntegration:
         concurrent_scenarios = [
             ["web_request", "web_request", "web_request"],
             ["database_query", "file_operation"],
-            ["dangerous_operation", "web_request"]
+            ["dangerous_operation", "web_request"],
         ]
 
         for scenario in concurrent_scenarios:
@@ -87,7 +87,7 @@ class TestToolSystemIntegration:
             {"error": "tool_not_found", "expected_zedacp": "invalid_request"},
             {"error": "permission_denied", "expected_zedacp": "permission_denied"},
             {"error": "execution_timeout", "expected_zedacp": "timeout"},
-            {"error": "resource_exhausted", "expected_zedacp": "resource_exhausted"}
+            {"error": "resource_exhausted", "expected_zedacp": "resource_exhausted"},
         ]
 
         for scenario in error_scenarios:
@@ -101,7 +101,7 @@ class TestToolSystemIntegration:
             "tool_process_crash",
             "database_connection_failure",
             "permission_service_unavailable",
-            "event_emission_failure"
+            "event_emission_failure",
         ]
 
         for scenario in failure_scenarios:
@@ -113,7 +113,7 @@ class TestToolSystemIntegration:
         load_scenarios = [
             {"concurrent_tools": 10, "duration": 30, "max_latency": 5.0},
             {"concurrent_tools": 50, "duration": 10, "max_latency": 2.0},
-            {"concurrent_tools": 100, "duration": 5, "max_latency": 1.0}
+            {"concurrent_tools": 100, "duration": 5, "max_latency": 1.0},
         ]
 
         for scenario in load_scenarios:
@@ -123,10 +123,26 @@ class TestToolSystemIntegration:
     def test_security_controls_effectiveness(self):
         """Test that security controls properly prevent attacks."""
         security_scenarios = [
-            {"attack": "command_injection", "payload": "; rm -rf /", "should_block": True},
-            {"attack": "path_traversal", "payload": "../../../etc/passwd", "should_block": True},
-            {"attack": "resource_exhaustion", "payload": "large_file", "should_limit": True},
-            {"attack": "unauthorized_access", "payload": "admin_only", "should_deny": True}
+            {
+                "attack": "command_injection",
+                "payload": "; rm -rf /",
+                "should_block": True,
+            },
+            {
+                "attack": "path_traversal",
+                "payload": "../../../etc/passwd",
+                "should_block": True,
+            },
+            {
+                "attack": "resource_exhaustion",
+                "payload": "large_file",
+                "should_limit": True,
+            },
+            {
+                "attack": "unauthorized_access",
+                "payload": "admin_only",
+                "should_deny": True,
+            },
         ]
 
         for scenario in security_scenarios:
@@ -143,7 +159,7 @@ class TestToolSystemIntegration:
             "permission_granted",
             "permission_denied",
             "security_violation_detected",
-            "resource_limit_exceeded"
+            "resource_limit_exceeded",
         ]
 
         for event in audit_events:
@@ -157,12 +173,18 @@ class TestToolSystemIntegration:
             ("tool_requested", "task_working"),
             ("confirmation_required", "input_required"),
             ("tool_completed", "task_completed"),
-            ("tool_failed", "task_failed")
+            ("tool_failed", "task_failed"),
         ]
 
         for zedacp_state, a2a_state in state_transitions:
             # Placeholder for state consistency test
-            assert a2a_state in ["task_submitted", "task_working", "input_required", "task_completed", "task_failed"]
+            assert a2a_state in [
+                "task_submitted",
+                "task_working",
+                "input_required",
+                "task_completed",
+                "task_failed",
+            ]
 
 
 class TestProtocolComplianceVerification:
@@ -180,10 +202,17 @@ class TestProtocolComplianceVerification:
             "tags": ["bash", "tool", "http", "api"],
             "examples": ["GET https://api.example.com/users"],
             "inputModes": ["text/plain"],
-            "outputModes": ["text/plain"]
+            "outputModes": ["text/plain"],
         }
 
-        required_fields = ["id", "name", "description", "tags", "inputModes", "outputModes"]
+        required_fields = [
+            "id",
+            "name",
+            "description",
+            "tags",
+            "inputModes",
+            "outputModes",
+        ]
         for field in required_fields:
             assert field in expected_skill_format
 
@@ -194,14 +223,19 @@ class TestProtocolComplianceVerification:
             "toolCallId": "call_123",
             "status": "completed",
             "content": [{"type": "text", "text": "HTTP 200: Success"}],
-            "rawOutput": "HTTP 200: Success"
+            "rawOutput": "HTTP 200: Success",
         }
 
         # Verify required fields for ZedACP
         assert "toolCallId" in tool_response
         assert "status" in tool_response
         assert "content" in tool_response
-        assert tool_response["status"] in ["completed", "failed", "cancelled", "pending_confirmation"]
+        assert tool_response["status"] in [
+            "completed",
+            "failed",
+            "cancelled",
+            "pending_confirmation",
+        ]
 
     def test_a2a_event_emission_compliance(self):
         """Verify A2A events follow specification format."""
@@ -213,7 +247,7 @@ class TestProtocolComplianceVerification:
             "timestamp": "2025-01-20T11:20:34.821Z",
             "success": True,
             "execution_time": 0.5,
-            "result": {"status_code": 200}
+            "result": {"status_code": 200},
         }
 
         # Verify A2A event format
@@ -232,10 +266,7 @@ class TestProtocolComplianceVerification:
             message="Execute dangerous operation?",
             inputTypes=["text/plain"],
             timeout=300,
-            metadata={
-                "tool_id": "dangerous_operation",
-                "confirmation_required": True
-            }
+            metadata={"tool_id": "dangerous_operation", "confirmation_required": True},
         )
 
         # Verify notification structure
@@ -259,7 +290,7 @@ def run_integration_tests():
         "test_performance_under_load",
         "test_security_controls_effectiveness",
         "test_audit_trail_completeness",
-        "test_protocol_state_consistency"
+        "test_protocol_state_consistency",
     ]
 
     print(f"Would run {len(tests)} integration tests")

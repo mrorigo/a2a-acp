@@ -67,36 +67,42 @@ class TestA2APushNotificationIntegration:
             max_sse_connections=500,
             connection_cleanup_interval=300,
             enable_metrics=True,
-            metrics_retention_hours=72
+            metrics_retention_hours=72,
         )
-        app.state.push_notification_manager = PushNotificationManager(test_db, settings=test_push_settings)
+        app.state.push_notification_manager = PushNotificationManager(
+            test_db, settings=test_push_settings
+        )
 
         # Initialize streaming manager with push notification manager and settings
         app.state.streaming_manager = StreamingManager(
             app.state.push_notification_manager,
             max_websocket_connections=test_push_settings.max_websocket_connections,
             max_sse_connections=test_push_settings.max_sse_connections,
-            cleanup_interval=test_push_settings.connection_cleanup_interval
+            cleanup_interval=test_push_settings.connection_cleanup_interval,
         )
 
         # Connect streaming manager back to push notification manager for broadcasting
-        app.state.push_notification_manager.streaming_manager = app.state.streaming_manager
+        app.state.push_notification_manager.streaming_manager = (
+            app.state.streaming_manager
+        )
 
         # Initialize other required managers
         app.state.task_manager = A2ATaskManager(app.state.push_notification_manager)
         app.state.context_manager = A2AContextManager()
         app.state.a2a_translator = A2ATranslator()
-    
+
         return TestClient(app)
 
-    def test_push_notification_config_set_get_delete_workflow(self, test_client, test_db):
+    def test_push_notification_config_set_get_delete_workflow(
+        self, test_client, test_db
+    ):
         """Test complete push notification configuration workflow."""
         # Step 1: Set a push notification configuration via A2A API
         config_payload = {
             "id": "integration-test-config",
             "taskId": "integration-test-task",
             "url": "https://httpbin.org/post",
-            "token": "test-integration-token"
+            "token": "test-integration-token",
         }
 
         # Use direct method call instead of HTTP for testing
@@ -106,7 +112,7 @@ class TestA2APushNotificationIntegration:
                 id=config_payload["id"],
                 task_id=config_payload["taskId"],
                 url=config_payload["url"],
-                token=config_payload["token"]
+                token=config_payload["token"],
             )
 
             push_mgr = test_client.app.state.push_notification_manager
@@ -114,8 +120,7 @@ class TestA2APushNotificationIntegration:
 
             # Retrieve the config
             retrieved_config = await push_mgr.get_config(
-                config_payload["taskId"],
-                config_payload["id"]
+                config_payload["taskId"], config_payload["id"]
             )
 
             assert retrieved_config is not None
@@ -131,15 +136,13 @@ class TestA2APushNotificationIntegration:
 
             # Delete the config
             delete_success = await push_mgr.delete_config(
-                config_payload["taskId"],
-                config_payload["id"]
+                config_payload["taskId"], config_payload["id"]
             )
             assert delete_success
 
             # Verify deletion
             deleted_config = await push_mgr.get_config(
-                config_payload["taskId"],
-                config_payload["id"]
+                config_payload["taskId"], config_payload["id"]
             )
             assert deleted_config is None
 
@@ -157,11 +160,13 @@ class TestA2APushNotificationIntegration:
             original_post = push_mgr.http_client.post
 
             async def capture_post(*args, **kwargs):
-                notification_requests.append({
-                    "url": args[0] if args else kwargs.get("url"),
-                    "data": kwargs.get("json"),
-                    "headers": kwargs.get("headers", {})
-                })
+                notification_requests.append(
+                    {
+                        "url": args[0] if args else kwargs.get("url"),
+                        "data": kwargs.get("json"),
+                        "headers": kwargs.get("headers", {}),
+                    }
+                )
                 # Return a successful mock response
                 mock_response = AsyncMock()
                 mock_response.is_success = True
@@ -176,17 +181,20 @@ class TestA2APushNotificationIntegration:
                 config = TaskPushNotificationConfig(
                     id="task-notification-test",
                     task_id="test-task-notifications",
-                    url="https://example.com/notify"
+                    url="https://example.com/notify",
                 )
                 await push_mgr.store_config(config)
 
                 # Send a test notification
-                await push_mgr.send_notification("test-task-notifications", {
-                    "event": "status_change",
-                    "task_id": "test-task-notifications",
-                    "old_state": "submitted",
-                    "new_state": "working"
-                })
+                await push_mgr.send_notification(
+                    "test-task-notifications",
+                    {
+                        "event": "status_change",
+                        "task_id": "test-task-notifications",
+                        "old_state": "submitted",
+                        "new_state": "working",
+                    },
+                )
 
                 # Verify notification was sent
                 assert len(notification_requests) == 1
@@ -207,28 +215,29 @@ class TestA2APushNotificationIntegration:
 
         async def test_streaming():
             # Test SSE connection registration
-            connection_id, connection = await streaming_mgr.register_sse_connection(["test-task"])
+            connection_id, connection = await streaming_mgr.register_sse_connection(
+                ["test-task"]
+            )
 
             assert connection_id is not None
             assert connection.task_filter == {"test-task"}
 
             # Test WebSocket connection registration
             from unittest.mock import AsyncMock
+
             mock_websocket = AsyncMock()
 
             ws_connection_id = await streaming_mgr.register_websocket_connection(
-                mock_websocket,
-                ["test-task"]
+                mock_websocket, ["test-task"]
             )
 
             assert ws_connection_id is not None
             assert ws_connection_id in streaming_mgr.websocket_connections
 
             # Test broadcasting notification
-            await streaming_mgr.broadcast_notification("test-task", {
-                "event": "test_event",
-                "data": "test_data"
-            })
+            await streaming_mgr.broadcast_notification(
+                "test-task", {"event": "test_event", "data": "test_data"}
+            )
 
             # Clean up
             await streaming_mgr.unregister_sse_connection(connection_id)
@@ -248,7 +257,9 @@ class TestA2APushNotificationIntegration:
             ]
 
             for config_id, task_id, url in configs_data:
-                config = TaskPushNotificationConfig(id=config_id, task_id=task_id, url=url)
+                config = TaskPushNotificationConfig(
+                    id=config_id, task_id=task_id, url=url
+                )
                 await push_mgr.store_config(config)
 
             # Test cleanup for failed task (should delete immediately)
@@ -265,7 +276,7 @@ class TestA2APushNotificationIntegration:
 
         asyncio.run(test_cleanup())
 
-    @patch('httpx.AsyncClient.post')
+    @patch("httpx.AsyncClient.post")
     def test_notification_delivery_tracking(self, mock_post, test_client, test_db):
         """Test that notification delivery attempts are properly tracked."""
         push_mgr = test_client.app.state.push_notification_manager
@@ -282,19 +293,24 @@ class TestA2APushNotificationIntegration:
             config = TaskPushNotificationConfig(
                 id="delivery-test",
                 task_id="test-delivery-task",
-                url="https://example.com/delivery"
+                url="https://example.com/delivery",
             )
             await push_mgr.store_config(config)
 
             # Send notification
-            await push_mgr.send_notification("test-delivery-task", {
-                "event": "status_change",
-                "old_state": "working",
-                "new_state": "completed"
-            })
+            await push_mgr.send_notification(
+                "test-delivery-task",
+                {
+                    "event": "status_change",
+                    "old_state": "working",
+                    "new_state": "completed",
+                },
+            )
 
             # Check delivery tracking
-            deliveries = await push_mgr.get_delivery_history(task_id="test-delivery-task")
+            deliveries = await push_mgr.get_delivery_history(
+                task_id="test-delivery-task"
+            )
 
             assert len(deliveries) == 1
             delivery = deliveries[0]
@@ -312,7 +328,7 @@ class TestA2APushNotificationIntegration:
             config = TaskPushNotificationConfig(
                 id="error-test",
                 task_id="test-error-task",
-                url="https://invalid-domain-that-does-not-exist.com/webhook"
+                url="https://invalid-domain-that-does-not-exist.com/webhook",
             )
             await push_mgr.store_config(config)
 
@@ -323,9 +339,9 @@ class TestA2APushNotificationIntegration:
             push_mgr.http_client.post = mock_post
 
             # Should handle error gracefully
-            success = await push_mgr.send_notification("test-error-task", {
-                "event": "test_event"
-            })
+            success = await push_mgr.send_notification(
+                "test-error-task", {"event": "test_event"}
+            )
 
             # Should still return False but not crash
             assert not success
@@ -334,14 +350,16 @@ class TestA2APushNotificationIntegration:
             deliveries = await push_mgr.get_delivery_history(task_id="test-error-task")
             print(f"DEBUG: Found {len(deliveries)} deliveries in database")
             for delivery in deliveries:
-                print(f"DEBUG: Delivery status: {delivery.delivery_status}, event_type: {delivery.event_type}")
+                print(
+                    f"DEBUG: Delivery status: {delivery.delivery_status}, event_type: {delivery.event_type}"
+                )
 
             assert len(deliveries) == 1
             assert deliveries[0].delivery_status == "failed"
 
         asyncio.run(test_error_handling())
 
-    @patch('httpx.AsyncClient.post')
+    @patch("httpx.AsyncClient.post")
     def test_concurrent_notification_sending(self, mock_post, test_client, test_db):
         """Test sending notifications concurrently to multiple endpoints."""
         push_mgr = test_client.app.state.push_notification_manager
@@ -360,16 +378,16 @@ class TestA2APushNotificationIntegration:
                 config = TaskPushNotificationConfig(
                     id=f"concurrent-config-{i}",
                     task_id="concurrent-test-task",
-                    url="https://example.com/webhook"
+                    url="https://example.com/webhook",
                 )
                 configs.append(config)
                 await push_mgr.store_config(config)
 
             # Send notification (should go to all 3 endpoints)
-            await push_mgr.send_notification("concurrent-test-task", {
-                "event": "concurrent_test",
-                "task_id": "concurrent-test-task"
-            })
+            await push_mgr.send_notification(
+                "concurrent-test-task",
+                {"event": "concurrent_test", "task_id": "concurrent-test-task"},
+            )
 
             # All 3 endpoints should have been called
             assert mock_post.call_count == 3
@@ -424,20 +442,24 @@ class TestEndToEndWorkflows:
             max_sse_connections=500,
             connection_cleanup_interval=300,
             enable_metrics=True,
-            metrics_retention_hours=72
+            metrics_retention_hours=72,
         )
-        app.state.push_notification_manager = PushNotificationManager(test_db, settings=test_push_settings)
+        app.state.push_notification_manager = PushNotificationManager(
+            test_db, settings=test_push_settings
+        )
 
         # Initialize streaming manager with push notification manager and settings
         app.state.streaming_manager = StreamingManager(
             app.state.push_notification_manager,
             max_websocket_connections=test_push_settings.max_websocket_connections,
             max_sse_connections=test_push_settings.max_sse_connections,
-            cleanup_interval=test_push_settings.connection_cleanup_interval
+            cleanup_interval=test_push_settings.connection_cleanup_interval,
         )
 
         # Connect streaming manager back to push notification manager for broadcasting
-        app.state.push_notification_manager.streaming_manager = app.state.streaming_manager
+        app.state.push_notification_manager.streaming_manager = (
+            app.state.streaming_manager
+        )
 
         # Initialize other required managers
         app.state.task_manager = A2ATaskManager(app.state.push_notification_manager)
@@ -467,7 +489,9 @@ class TestEndToEndWorkflows:
             original_send_task = task_mgr._send_task_notification
 
             async def track_task_notifications(task_id, event_type, event_data):
-                sent_notifications.append({"task_id": task_id, "event": {"event": event_type, **event_data}})
+                sent_notifications.append(
+                    {"task_id": task_id, "event": {"event": event_type, **event_data}}
+                )
                 # Call the original method directly to avoid recursion
                 if original_send_task != track_task_notifications:  # Safety check
                     return await original_send_task(task_id, event_type, event_data)
@@ -476,11 +500,9 @@ class TestEndToEndWorkflows:
             task_mgr._send_task_notification = track_task_notifications
 
             try:
-
                 # Create a task (should trigger creation notification)
                 task = await task_mgr.create_task(
-                    context_id="test-context",
-                    agent_name="test-agent"
+                    context_id="test-context", agent_name="test-agent"
                 )
 
                 # Wait a bit for background notifications to complete
@@ -488,33 +510,48 @@ class TestEndToEndWorkflows:
 
                 # Should have received task creation notification
                 # Note: Both tracking functions may capture this, so we expect at least 1
-                creation_notifications = [n for n in sent_notifications if n["event"]["event"] == "task_created"]
+                creation_notifications = [
+                    n
+                    for n in sent_notifications
+                    if n["event"]["event"] == "task_created"
+                ]
                 assert len(creation_notifications) >= 1
 
                 # Update task status to working (should trigger status change notification)
                 from a2a_acp.a2a.models import current_timestamp
+
                 task.status.state = TaskState.WORKING
                 task.status.timestamp = current_timestamp()
 
-                await push_mgr.send_notification(task.id, {
-                    "event": "status_change",
-                    "old_state": TaskState.SUBMITTED.value,
-                    "new_state": TaskState.WORKING.value
-                })
+                await push_mgr.send_notification(
+                    task.id,
+                    {
+                        "event": "status_change",
+                        "old_state": TaskState.SUBMITTED.value,
+                        "new_state": TaskState.WORKING.value,
+                    },
+                )
 
                 # Should have received status change notification
-                status_notifications = [n for n in sent_notifications if n["event"]["event"] == "status_change"]
+                status_notifications = [
+                    n
+                    for n in sent_notifications
+                    if n["event"]["event"] == "status_change"
+                ]
                 assert len(status_notifications) >= 1
 
                 # Complete the task (should trigger completion notification and cleanup)
                 task.status.state = TaskState.COMPLETED
                 task.status.timestamp = current_timestamp()
 
-                await push_mgr.send_notification(task.id, {
-                    "event": "status_change",
-                    "old_state": TaskState.WORKING.value,
-                    "new_state": TaskState.COMPLETED.value
-                })
+                await push_mgr.send_notification(
+                    task.id,
+                    {
+                        "event": "status_change",
+                        "old_state": TaskState.WORKING.value,
+                        "new_state": TaskState.COMPLETED.value,
+                    },
+                )
 
                 # Verify notifications were sent for key lifecycle events
                 event_types = [n["event"]["event"] for n in sent_notifications]
@@ -537,13 +574,13 @@ class TestEndToEndWorkflows:
                 TaskPushNotificationConfig(
                     id="filter-config-1",
                     task_id="filter-task",
-                    url="https://example.com/1"
+                    url="https://example.com/1",
                 ),
                 TaskPushNotificationConfig(
                     id="filter-config-2",
                     task_id="filter-task",
-                    url="https://example.com/2"
-                )
+                    url="https://example.com/2",
+                ),
             ]
 
             for config in configs:
@@ -558,7 +595,7 @@ class TestEndToEndWorkflows:
 
         asyncio.run(test_filtering())
 
-    @patch('httpx.AsyncClient.post')
+    @patch("httpx.AsyncClient.post")
     def test_performance_under_load(self, mock_post, test_client, test_db):
         """Test system performance with multiple concurrent operations."""
         push_mgr = test_client.app.state.push_notification_manager
@@ -579,17 +616,15 @@ class TestEndToEndWorkflows:
                 config = TaskPushNotificationConfig(
                     id=f"perf-config-{i}",
                     task_id=task_id,
-                    url=f"https://example.com/perf/{i}"
+                    url=f"https://example.com/perf/{i}",
                 )
                 await push_mgr.store_config(config)
 
-
             # Send notification to all configs
             start_time = time.time()
-            await push_mgr.send_notification(task_id, {
-                "event": "performance_test",
-                "task_id": task_id
-            })
+            await push_mgr.send_notification(
+                task_id, {"event": "performance_test", "task_id": task_id}
+            )
             end_time = time.time()
 
             # Should have sent to all configs (check mock call count)
@@ -649,20 +684,24 @@ class TestErrorRecovery:
             max_sse_connections=500,
             connection_cleanup_interval=300,
             enable_metrics=True,
-            metrics_retention_hours=72
+            metrics_retention_hours=72,
         )
-        app.state.push_notification_manager = PushNotificationManager(test_db, settings=test_push_settings)
+        app.state.push_notification_manager = PushNotificationManager(
+            test_db, settings=test_push_settings
+        )
 
         # Initialize streaming manager with push notification manager and settings
         app.state.streaming_manager = StreamingManager(
             app.state.push_notification_manager,
             max_websocket_connections=test_push_settings.max_websocket_connections,
             max_sse_connections=test_push_settings.max_sse_connections,
-            cleanup_interval=test_push_settings.connection_cleanup_interval
+            cleanup_interval=test_push_settings.connection_cleanup_interval,
         )
 
         # Connect streaming manager back to push notification manager for broadcasting
-        app.state.push_notification_manager.streaming_manager = app.state.streaming_manager
+        app.state.push_notification_manager.streaming_manager = (
+            app.state.streaming_manager
+        )
 
         # Initialize other required managers
         app.state.task_manager = A2ATaskManager(app.state.push_notification_manager)
@@ -690,7 +729,7 @@ class TestErrorRecovery:
                 config = TaskPushNotificationConfig(
                     id="recovery-test",
                     task_id="recovery-task",
-                    url="https://example.com/recovery"
+                    url="https://example.com/recovery",
                 )
 
                 # Should handle the error gracefully
@@ -702,7 +741,7 @@ class TestErrorRecovery:
 
         asyncio.run(test_recovery())
 
-    @patch('httpx.AsyncClient.post')
+    @patch("httpx.AsyncClient.post")
     def test_http_client_resilience(self, mock_post, test_client, test_db):
         """Test resilience to HTTP client issues."""
         push_mgr = test_client.app.state.push_notification_manager
@@ -731,14 +770,14 @@ class TestErrorRecovery:
             config = TaskPushNotificationConfig(
                 id="resilience-test",
                 task_id="resilience-task",
-                url="https://example.com/resilience"
+                url="https://example.com/resilience",
             )
             await push_mgr.store_config(config)
 
             # Should eventually succeed after retries
-            success = await push_mgr.send_notification("resilience-task", {
-                "event": "resilience_test"
-            })
+            success = await push_mgr.send_notification(
+                "resilience-task", {"event": "resilience_test"}
+            )
 
             assert success
             assert mock_post.call_count == 3  # Initial + 2 retries

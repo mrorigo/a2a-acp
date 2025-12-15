@@ -1,6 +1,5 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
-from typing import Any
 
 from a2a_acp.bash_executor import (
     BashToolExecutor,
@@ -27,15 +26,17 @@ from a2a_acp.task_manager import A2ATaskManager
 def mock_sandbox():
     """Mock sandbox manager."""
     mock = MagicMock()
-    mock.execute_in_sandbox = AsyncMock(return_value=ExecutionResult(
-        success=True,
-        stdout="Mock output",
-        stderr="",
-        return_code=0,
-        execution_time=0.1,
-        metadata={},
-        output_files=[],
-    ))
+    mock.execute_in_sandbox = AsyncMock(
+        return_value=ExecutionResult(
+            success=True,
+            stdout="Mock output",
+            stderr="",
+            return_code=0,
+            execution_time=0.1,
+            metadata={},
+            output_files=[],
+        )
+    )
     return mock
 
 
@@ -60,7 +61,12 @@ def sample_tool():
         description="Echo message",
         script="echo '{{message}}'",
         parameters=[
-            {"name": "message", "type": "string", "description": "Message", "required": True},
+            {
+                "name": "message",
+                "type": "string",
+                "description": "Message",
+                "required": True,
+            },
         ],
         config={"timeout": 30, "caching_enabled": False},
         version="1.0",
@@ -93,12 +99,16 @@ class TestLiveContentStreaming:
     """Tests for live content streaming with DevelopmentToolEvent."""
 
     @pytest.mark.asyncio
-    async def test_execute_tool_emits_started_event_with_executing_status(self, bash_executor, sample_tool, sample_context):
+    async def test_execute_tool_emits_started_event_with_executing_status(
+        self, bash_executor, sample_tool, sample_context
+    ):
         """Test tool execution emits started event with EXECUTING status."""
         parameters = {"message": "Hello"}
 
         # Execute tool
-        result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
+        result = await bash_executor.execute_tool(
+            sample_tool, parameters, sample_context
+        )
 
         # Verify success
         assert result.success is True
@@ -106,7 +116,9 @@ class TestLiveContentStreaming:
 
         # Verify push notification was called for started event
         bash_executor.push_notification_manager.send_notification.assert_called()
-        started_call = bash_executor.push_notification_manager.send_notification.call_args_list[0]
+        started_call = (
+            bash_executor.push_notification_manager.send_notification.call_args_list[0]
+        )
         assert started_call[0][0] == sample_context.task_id  # task_id
         event_data = started_call[0][1]
         assert event_data["event"] == "tool_started"
@@ -116,7 +128,9 @@ class TestLiveContentStreaming:
         assert dev_event.data["status"] == "executing"
 
     @pytest.mark.asyncio
-    async def test_streaming_emits_tool_call_update_during_execution(self, bash_executor, sample_tool, sample_context):
+    async def test_streaming_emits_tool_call_update_during_execution(
+        self, bash_executor, sample_tool, sample_context
+    ):
         """Test DevelopmentToolEvent emitted during execution for live updates."""
         parameters = {"message": "Hello"}
 
@@ -128,7 +142,9 @@ class TestLiveContentStreaming:
         assert bash_executor.push_notification_manager.send_notification.call_count >= 2
 
         # Check completed event
-        completed_call = bash_executor.push_notification_manager.send_notification.call_args_list[-1]
+        completed_call = (
+            bash_executor.push_notification_manager.send_notification.call_args_list[-1]
+        )
         event_data = completed_call[0][1]
         assert event_data["event"] == "tool_completed"
         dev_event = DevelopmentToolEvent.from_dict(event_data["development-tool"])
@@ -137,10 +153,12 @@ class TestLiveContentStreaming:
 
     @pytest.mark.asyncio
     @patch.object(BashToolExecutor, "_emit_tool_event")
-    async def test_live_content_in_event_data(self, mock_emit, bash_executor, sample_tool, sample_context):
+    async def test_live_content_in_event_data(
+        self, mock_emit, bash_executor, sample_tool, sample_context
+    ):
         """Test live_content is included in DevelopmentToolEvent data."""
         parameters = {"message": "Streaming message"}
-    
+
         # Mock execution with output
         mock_result = ExecutionResult(
             success=True,
@@ -151,7 +169,12 @@ class TestLiveContentStreaming:
             metadata={"live_content": True},
             output_files=[],
         )
-        with patch.object(bash_executor.sandbox, "execute_in_sandbox", new_callable=AsyncMock, return_value=mock_result):
+        with patch.object(
+            bash_executor.sandbox,
+            "execute_in_sandbox",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
             await bash_executor.execute_tool(sample_tool, parameters, sample_context)
 
         # Verify emit called with live_content
@@ -177,7 +200,7 @@ class TestToolOutputMapping:
     ):
         """Test successful execution maps to ToolOutput with ExecuteDetails."""
         parameters = {"message": "Success"}
-    
+
         mock_result = ExecutionResult(
             success=True,
             stdout="echo: Success",
@@ -187,9 +210,16 @@ class TestToolOutputMapping:
             metadata={},
             output_files=[],
         )
-        with patch.object(bash_executor.sandbox, "execute_in_sandbox", new_callable=AsyncMock, return_value=mock_result):
-            result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
-    
+        with patch.object(
+            bash_executor.sandbox,
+            "execute_in_sandbox",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            result = await bash_executor.execute_tool(
+                sample_tool, parameters, sample_context
+            )
+
         # Verify ToolOutput in metadata
         assert "tool_output" in result.metadata
         tool_output_dict = result.metadata["tool_output"]
@@ -206,7 +236,7 @@ class TestToolOutputMapping:
     ):
         """Test output files map to FileDiff in metadata."""
         parameters = {"message": "File output"}
-    
+
         mock_result = ExecutionResult(
             success=True,
             stdout="File created",
@@ -216,9 +246,16 @@ class TestToolOutputMapping:
             metadata={},
             output_files=["/tmp/output.txt", "/tmp/log.txt"],
         )
-        with patch.object(bash_executor.sandbox, "execute_in_sandbox", new_callable=AsyncMock, return_value=mock_result):
-            result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
-    
+        with patch.object(
+            bash_executor.sandbox,
+            "execute_in_sandbox",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            result = await bash_executor.execute_tool(
+                sample_tool, parameters, sample_context
+            )
+
         # Verify FileDiff in metadata
         assert "file_diffs" in result.metadata
         file_diffs = result.metadata["file_diffs"]
@@ -226,7 +263,9 @@ class TestToolOutputMapping:
         first_diff = FileDiff.from_dict(file_diffs[0])
         assert first_diff.path == "/tmp/output.txt"
         assert first_diff.old_content is None
-        assert "File created during tool execution" in first_diff.new_content  # Placeholder
+        assert (
+            "File created during tool execution" in first_diff.new_content
+        )  # Placeholder
 
     @pytest.mark.parametrize("tool_type", ["generic", "mcp", "file"])
     @pytest.mark.asyncio
@@ -254,7 +293,9 @@ class TestToolOutputMapping:
                 parameters=[],
                 config={"mcp_tool": True},
             )
-            mock_result = ExecutionResult(stdout="MCP output", return_code=0, metadata={"mcp": True})
+            mock_result = ExecutionResult(
+                stdout="MCP output", return_code=0, metadata={"mcp": True}
+            )
         else:  # file
             tool = BashTool(
                 id="file_tool",
@@ -269,11 +310,16 @@ class TestToolOutputMapping:
                 return_code=0,
                 output_files=["file.txt"],
             )
-    
+
         parameters = {}
-        with patch.object(bash_executor.sandbox, "execute_in_sandbox", new_callable=AsyncMock, return_value=mock_result):
+        with patch.object(
+            bash_executor.sandbox,
+            "execute_in_sandbox",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
             result = await bash_executor.execute_tool(tool, parameters, sample_context)
-    
+
         tool_output = ToolOutput.from_dict(result.metadata["tool_output"])
         if tool_type == "generic":
             assert isinstance(tool_output.details, ExecuteDetails)
@@ -294,7 +340,7 @@ class TestErrorDetailsHandling:
     ):
         """Test failed execution maps to ErrorDetails in metadata."""
         parameters = {"message": "Fail"}
-    
+
         mock_result = ExecutionResult(
             success=False,
             stdout="",
@@ -304,9 +350,16 @@ class TestErrorDetailsHandling:
             metadata={},
             output_files=[],
         )
-        with patch.object(bash_executor.sandbox, "execute_in_sandbox", new_callable=AsyncMock, return_value=mock_result):
-            result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
-    
+        with patch.object(
+            bash_executor.sandbox,
+            "execute_in_sandbox",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            result = await bash_executor.execute_tool(
+                sample_tool, parameters, sample_context
+            )
+
         assert result.success is False
         assert "error_details" in result.metadata
         error_details_dict = result.metadata["error_details"]
@@ -320,10 +373,17 @@ class TestErrorDetailsHandling:
     ):
         """Test exceptions during execution create ErrorDetails."""
         parameters = {"message": "Error"}
-    
-        with patch.object(bash_executor.sandbox, "execute_in_sandbox", new_callable=AsyncMock, side_effect=SandboxError("Sandbox failure")):
-            result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
-    
+
+        with patch.object(
+            bash_executor.sandbox,
+            "execute_in_sandbox",
+            new_callable=AsyncMock,
+            side_effect=SandboxError("Sandbox failure"),
+        ):
+            result = await bash_executor.execute_tool(
+                sample_tool, parameters, sample_context
+            )
+
         assert result.success is False
         assert "error_details" in result.metadata
         error_details = ErrorDetails.from_dict(result.metadata["error_details"])
@@ -338,8 +398,12 @@ class TestErrorDetailsHandling:
         parameters = {"invalid": "param"}  # Invalid params
 
         # Mock validation to fail
-        with patch.object(sample_tool, "validate_parameters", return_value=(False, ["Invalid param"])):
-            result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
+        with patch.object(
+            sample_tool, "validate_parameters", return_value=(False, ["Invalid param"])
+        ):
+            result = await bash_executor.execute_tool(
+                sample_tool, parameters, sample_context
+            )
 
         assert result.success is False
         error_details = ErrorDetails.from_dict(result.metadata["error_details"])
@@ -353,8 +417,14 @@ class TestErrorDetailsHandling:
         """Test TemplateRenderError maps to INVALID_PARAMS."""
         parameters = {"message": "{{unclosed"}  # Invalid template
 
-        with patch.object(bash_executor, "render_script", side_effect=TemplateRenderError("Template error")):
-            result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
+        with patch.object(
+            bash_executor,
+            "render_script",
+            side_effect=TemplateRenderError("Template error"),
+        ):
+            result = await bash_executor.execute_tool(
+                sample_tool, parameters, sample_context
+            )
 
         error_details = ErrorDetails.from_dict(result.metadata["error_details"])
         assert error_details.code == "-32602"
@@ -365,10 +435,12 @@ class TestOutputCollection:
     """Tests for output collection with extension schemas."""
 
     @pytest.mark.asyncio
-    async def test_output_collection_includes_all_fields(self, bash_executor, sample_tool, sample_context):
+    async def test_output_collection_includes_all_fields(
+        self, bash_executor, sample_tool, sample_context
+    ):
         """Test ToolExecutionResult collects all extension schema fields."""
         parameters = {"message": "Complete output"}
-    
+
         mock_result = ExecutionResult(
             success=True,
             stdout="Stdout content",
@@ -379,9 +451,16 @@ class TestOutputCollection:
             output_files=["file1.txt", "file2.log"],
             mcp_error=None,
         )
-        with patch.object(bash_executor.sandbox, "execute_in_sandbox", new_callable=AsyncMock, return_value=mock_result):
-            result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
-    
+        with patch.object(
+            bash_executor.sandbox,
+            "execute_in_sandbox",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            result = await bash_executor.execute_tool(
+                sample_tool, parameters, sample_context
+            )
+
         # Verify complete collection
         assert result.tool_id == "test_echo"
         assert result.success is True
@@ -394,7 +473,7 @@ class TestOutputCollection:
         assert result.metadata["error_profile"] == "acp_basic"  # Default
         assert result.output_files == ["file1.txt", "file2.log"]
         assert result.mcp_error is None
-    
+
         # Verify ToolOutput
         tool_output = ToolOutput.from_dict(result.metadata["tool_output"])
         assert tool_output.content == "Stdout content"
@@ -403,19 +482,23 @@ class TestOutputCollection:
         assert details.stdout == "Stdout content"
         assert details.stderr == "Stderr warning"
         assert details.exit_code == 0
-    
+
         # Verify FileDiff for output files
         assert "file_diffs" in result.metadata
         diffs = [FileDiff.from_dict(d) for d in result.metadata["file_diffs"]]
         assert len(diffs) == 2
         assert diffs[0].path == "file1.txt"
-        assert diffs[0].new_content == "File created during tool execution"  # Placeholder
+        assert (
+            diffs[0].new_content == "File created during tool execution"
+        )  # Placeholder
 
     @pytest.mark.asyncio
-    async def test_mcp_error_collection_in_output(self, bash_executor, sample_tool, sample_context):
+    async def test_mcp_error_collection_in_output(
+        self, bash_executor, sample_tool, sample_context
+    ):
         """Test MCP error is collected in metadata for failed executions."""
         parameters = {"message": "MCP fail"}
-    
+
         mock_result = ExecutionResult(
             success=False,
             stdout="",
@@ -426,18 +509,30 @@ class TestOutputCollection:
             output_files=[],
             mcp_error={"code": "MCP_NOT_FOUND", "message": "Server unavailable"},
         )
-        with patch.object(bash_executor.sandbox, "execute_in_sandbox", new_callable=AsyncMock, return_value=mock_result):
-            result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
-    
-        assert result.mcp_error == {"code": "MCP_NOT_FOUND", "message": "Server unavailable"}
+        with patch.object(
+            bash_executor.sandbox,
+            "execute_in_sandbox",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            result = await bash_executor.execute_tool(
+                sample_tool, parameters, sample_context
+            )
+
+        assert result.mcp_error == {
+            "code": "MCP_NOT_FOUND",
+            "message": "Server unavailable",
+        }
         assert "mcp_error" in result.metadata
         assert result.metadata["mcp_error"] == result.mcp_error
 
     @pytest.mark.asyncio
-    async def test_error_contract_applied_to_output(self, bash_executor, sample_tool, sample_context):
+    async def test_error_contract_applied_to_output(
+        self, bash_executor, sample_tool, sample_context
+    ):
         """Test error contract is applied to result metadata."""
         parameters = {"message": "Contract test"}
-    
+
         mock_result = ExecutionResult(
             success=False,
             stdout="",
@@ -447,9 +542,16 @@ class TestOutputCollection:
             metadata={},
             output_files=[],
         )
-        with patch.object(bash_executor.sandbox, "execute_in_sandbox", new_callable=AsyncMock, return_value=mock_result):
-            result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
-    
+        with patch.object(
+            bash_executor.sandbox,
+            "execute_in_sandbox",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            result = await bash_executor.execute_tool(
+                sample_tool, parameters, sample_context
+            )
+
         # Verify error contract in metadata
         assert "mcp_error" in result.metadata
         mcp_error = result.metadata["mcp_error"]
@@ -460,10 +562,12 @@ class TestOutputCollection:
         assert result.metadata["diagnostics"]["return_code"] == 127
 
     @pytest.mark.asyncio
-    async def test_sanitized_error_output_in_details(self, bash_executor, sample_tool, sample_context):
+    async def test_sanitized_error_output_in_details(
+        self, bash_executor, sample_tool, sample_context
+    ):
         """Test error output is sanitized before including in ErrorDetails."""
         parameters = {"message": "Sanitize test"}
-    
+
         mock_result = ExecutionResult(
             success=False,
             stdout="",
@@ -473,11 +577,20 @@ class TestOutputCollection:
             metadata={},
             output_files=[],
         )
-        with patch.object(bash_executor.sandbox, "execute_in_sandbox", new_callable=AsyncMock, return_value=mock_result):
-            result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
-    
+        with patch.object(
+            bash_executor.sandbox,
+            "execute_in_sandbox",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            result = await bash_executor.execute_tool(
+                sample_tool, parameters, sample_context
+            )
+
         error_details = ErrorDetails.from_dict(result.metadata["error_details"])
-        assert "Could not set process limits" not in error_details.details.get("sanitized_stderr", "")
+        assert "Could not set process limits" not in error_details.details.get(
+            "sanitized_stderr", ""
+        )
         assert "Permission denied" in error_details.details.get("sanitized_stderr", "")
 
 
@@ -485,10 +598,12 @@ class TestEdgeCases:
     """Tests for edge cases in tool execution with extensions."""
 
     @pytest.mark.asyncio
-    async def test_tool_execution_with_no_output(self, bash_executor, sample_tool, sample_context):
+    async def test_tool_execution_with_no_output(
+        self, bash_executor, sample_tool, sample_context
+    ):
         """Test tool with empty output still maps schemas correctly."""
         parameters = {"message": ""}
-    
+
         mock_result = ExecutionResult(
             success=True,
             stdout="",
@@ -498,9 +613,16 @@ class TestEdgeCases:
             metadata={},
             output_files=[],
         )
-        with patch.object(bash_executor.sandbox, "execute_in_sandbox", new_callable=AsyncMock, return_value=mock_result):
-            result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
-    
+        with patch.object(
+            bash_executor.sandbox,
+            "execute_in_sandbox",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            result = await bash_executor.execute_tool(
+                sample_tool, parameters, sample_context
+            )
+
         tool_output = ToolOutput.from_dict(result.metadata["tool_output"])
         assert tool_output.content == ""
         assert isinstance(tool_output.details, ExecuteDetails)
@@ -508,10 +630,12 @@ class TestEdgeCases:
         assert tool_output.details.exit_code == 0
 
     @pytest.mark.asyncio
-    async def test_tool_timeout_maps_to_error_details(self, bash_executor, sample_tool, sample_context):
+    async def test_tool_timeout_maps_to_error_details(
+        self, bash_executor, sample_tool, sample_context
+    ):
         """Test timeout creates appropriate ErrorDetails."""
         parameters = {"message": "Timeout"}
-    
+
         mock_result = ExecutionResult(
             success=False,
             stdout="",
@@ -521,21 +645,36 @@ class TestEdgeCases:
             metadata={"timeout": True},
             output_files=[],
         )
-        with patch.object(bash_executor.sandbox, "execute_in_sandbox", new_callable=AsyncMock, return_value=mock_result):
-            result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
-    
+        with patch.object(
+            bash_executor.sandbox,
+            "execute_in_sandbox",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            result = await bash_executor.execute_tool(
+                sample_tool, parameters, sample_context
+            )
+
         error_details = ErrorDetails.from_dict(result.metadata["error_details"])
         assert error_details.code == "124"
         assert "timeout" in error_details.message.lower()
         assert result.metadata["diagnostics"]["return_code"] == 124
 
     @pytest.mark.asyncio
-    async def test_validation_failure_prevents_execution(self, bash_executor, sample_tool, sample_context):
+    async def test_validation_failure_prevents_execution(
+        self, bash_executor, sample_tool, sample_context
+    ):
         """Test parameter validation failure prevents sandbox execution."""
         invalid_params = {"wrong": "param"}
 
-        with patch.object(sample_tool, "validate_parameters", return_value=(False, ["Invalid parameters"])):
-            result = await bash_executor.execute_tool(sample_tool, invalid_params, sample_context)
+        with patch.object(
+            sample_tool,
+            "validate_parameters",
+            return_value=(False, ["Invalid parameters"]),
+        ):
+            result = await bash_executor.execute_tool(
+                sample_tool, invalid_params, sample_context
+            )
 
         # Verify no sandbox call
         bash_executor.sandbox.execute_in_sandbox.assert_not_called()
@@ -543,10 +682,12 @@ class TestEdgeCases:
         assert "Parameter validation failed" in result.error
 
     @pytest.mark.asyncio
-    async def test_mcp_error_propagation(self, bash_executor, sample_tool, sample_context):
+    async def test_mcp_error_propagation(
+        self, bash_executor, sample_tool, sample_context
+    ):
         """Test MCP error is propagated in result and metadata."""
         parameters = {"message": "MCP error"}
-    
+
         mcp_error = {"code": "TOOL_NOT_FOUND", "message": "MCP tool unavailable"}
         mock_result = ExecutionResult(
             success=False,
@@ -558,9 +699,16 @@ class TestEdgeCases:
             output_files=[],
             mcp_error=mcp_error,
         )
-        with patch.object(bash_executor.sandbox, "execute_in_sandbox", new_callable=AsyncMock, return_value=mock_result):
-            result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
-    
+        with patch.object(
+            bash_executor.sandbox,
+            "execute_in_sandbox",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            result = await bash_executor.execute_tool(
+                sample_tool, parameters, sample_context
+            )
+
         assert result.mcp_error == mcp_error
         assert "mcp_error" in result.metadata
         assert result.metadata["mcp_error"] == mcp_error
@@ -568,7 +716,9 @@ class TestEdgeCases:
 
 
 @pytest.mark.asyncio
-async def test_integration_tool_execution_full_flow(bash_executor, sample_tool, sample_context, mock_push_manager):
+async def test_integration_tool_execution_full_flow(
+    bash_executor, sample_tool, sample_context, mock_push_manager
+):
     """Integration test: full tool execution flow with all extension emissions."""
     parameters = {"message": "Full flow test"}
 
@@ -582,12 +732,21 @@ async def test_integration_tool_execution_full_flow(bash_executor, sample_tool, 
         metadata={"test": "data"},
         output_files=["integration.log"],
     )
-    with patch.object(bash_executor.sandbox, "execute_in_sandbox", new_callable=AsyncMock, return_value=mock_result):
-        result = await bash_executor.execute_tool(sample_tool, parameters, sample_context)
+    with patch.object(
+        bash_executor.sandbox,
+        "execute_in_sandbox",
+        new_callable=AsyncMock,
+        return_value=mock_result,
+    ):
+        result = await bash_executor.execute_tool(
+            sample_tool, parameters, sample_context
+        )
 
     # Verify complete flow
     assert result.success is True
-    assert len(mock_push_manager.send_notification.call_args_list) >= 2  # started + completed
+    assert (
+        len(mock_push_manager.send_notification.call_args_list) >= 2
+    )  # started + completed
 
     # Verify ToolOutput mapping
     tool_output = ToolOutput.from_dict(result.metadata["tool_output"])

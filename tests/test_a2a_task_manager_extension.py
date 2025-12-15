@@ -2,7 +2,6 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone
-from typing import Dict, Any, List
 
 from a2a_acp.a2a.models import (
     Task,
@@ -26,18 +25,12 @@ from a2a_acp.task_manager import (
 
 from a2a_acp.models import (
     ToolCallStatus,
-    DevelopmentToolEventKind,
-    ConfirmationOption,
     GenericDetails,
     ToolOutput,
     ErrorDetails,
     ConfirmationRequest,
     ToolCall,
     AgentThought,
-    DevelopmentToolEvent,
-    ToolCallConfirmation,
-    AgentSettings,
-    ExecuteDetails,
     EventType,
 )
 
@@ -59,20 +52,24 @@ def mock_push_notification_manager():
 @pytest.fixture
 def mock_governor_manager():
     mock = MagicMock()
-    mock.evaluate_permission = AsyncMock(return_value=PermissionEvaluationResult(
-        selected_option_id=None,
-        decision_source="policy",
-        summary_lines=["Mock summary"],
-        policy_decision=None,
-        governor_results=[],
-        requires_manual=True,
-    ))
-    mock.evaluate_post_run = AsyncMock(return_value=MagicMock(
-        follow_up_prompts=[],
-        blocked=False,
-        summary_lines=["Post-run summary"],
-        governor_results=[],
-    ))
+    mock.evaluate_permission = AsyncMock(
+        return_value=PermissionEvaluationResult(
+            selected_option_id=None,
+            decision_source="policy",
+            summary_lines=["Mock summary"],
+            policy_decision=None,
+            governor_results=[],
+            requires_manual=True,
+        )
+    )
+    mock.evaluate_post_run = AsyncMock(
+        return_value=MagicMock(
+            follow_up_prompts=[],
+            blocked=False,
+            summary_lines=["Post-run summary"],
+            governor_results=[],
+        )
+    )
     return mock
 
 
@@ -119,7 +116,11 @@ def sample_tool_permission_request():
             "parameters": {"path": "/etc/passwd"},
         },
         options=[
-            {"optionId": "approve", "name": "Approve", "description": "Allow execution"},
+            {
+                "optionId": "approve",
+                "name": "Approve",
+                "description": "Allow execution",
+            },
             {"optionId": "deny", "name": "Deny", "description": "Block execution"},
         ],
     )
@@ -137,11 +138,12 @@ class TestToolPermissionHandling:
         sample_context.task.metadata = {}
 
         # Mock the governor evaluation to require manual decision
-        task_manager.governor_manager.evaluate_permission.return_value = PermissionEvaluationResult(
-            selected_option_id=None,
-            decision_source=None,
-            summary_lines=["Requires manual approval"],
-            policy_decision=None,
+        task_manager.governor_manager.evaluate_permission.return_value = (
+            PermissionEvaluationResult(
+                selected_option_id=None,
+                decision_source=None,
+                summary_lines=["Requires manual approval"],
+                policy_decision=None,
                 governor_results=[
                     GovernorResult(
                         governor_id="test-governor",
@@ -153,7 +155,8 @@ class TestToolPermissionHandling:
                         metadata={},
                     )
                 ],
-            requires_manual=True,
+                requires_manual=True,
+            )
         )
 
         decision = await task_manager._handle_tool_permission(
@@ -180,7 +183,10 @@ class TestToolPermissionHandling:
         assert tool_call.confirmation_request is not None
         assert len(tool_call.confirmation_request.options) == 2
         assert tool_call.confirmation_request.options[0].id == "approve"
-        assert tool_call.confirmation_request.details.description == "Tool permission required for read_file"
+        assert (
+            tool_call.confirmation_request.details.description
+            == "Tool permission required for read_file"
+        )
 
         # Verify pending permission was created
         assert len(sample_context.pending_permissions) == 1
@@ -203,13 +209,15 @@ class TestToolPermissionHandling:
             reason="Low risk tool",
             skip_governors=False,
         )
-        task_manager.governor_manager.evaluate_permission.return_value = PermissionEvaluationResult(
-            selected_option_id="approve",
-            decision_source="auto-approval",
-            summary_lines=["Auto-approved"],
-            policy_decision=auto_decision,
-            governor_results=[],
-            requires_manual=False,
+        task_manager.governor_manager.evaluate_permission.return_value = (
+            PermissionEvaluationResult(
+                selected_option_id="approve",
+                decision_source="auto-approval",
+                summary_lines=["Auto-approved"],
+                policy_decision=auto_decision,
+                governor_results=[],
+                requires_manual=False,
+            )
         )
 
         decision = await task_manager._handle_tool_permission(
@@ -423,8 +431,7 @@ class TestTaskStatusUpdates:
         # Create context with tool call metadata
         context = TaskExecutionContext(task=sample_task, agent_name="test")
         confirmation_request = ConfirmationRequest(
-            options=[],
-            details=GenericDetails(description="No confirmation")
+            options=[], details=GenericDetails(description="No confirmation")
         )
 
         sample_task.metadata = {
@@ -435,19 +442,21 @@ class TestTaskStatusUpdates:
                         status=ToolCallStatus.EXECUTING,
                         tool_name="exec_tool",
                         input_parameters={"cmd": "echo hello"},
-                        confirmation_request=confirmation_request
+                        confirmation_request=confirmation_request,
                     ).to_dict()
                 }
             }
         }
 
-        context.permission_decisions = [PermissionDecisionRecord(
-            tool_call_id="tc_exec_1",
-            source="user",
-            option_id="approve",
-            governors_involved=[],
-            timestamp=datetime.now(timezone.utc)
-        )]
+        context.permission_decisions = [
+            PermissionDecisionRecord(
+                tool_call_id="tc_exec_1",
+                source="user",
+                option_id="approve",
+                governors_involved=[],
+                timestamp=datetime.now(timezone.utc),
+            )
+        ]
 
         # Execute task
         agent_config = {"command": [], "api_key": None}
@@ -485,17 +494,17 @@ class TestAgentThoughtEmission:
             follow_up_prompts=[],
             blocked=False,
             summary_lines=["Analysis complete"],
-                governor_results=[
-                    GovernorResult(
-                        governor_id="quality-check",
-                        status="approve",
-                        option_id=None,
-                        score=0.9,
-                        messages=["Good quality"],
-                        follow_up_prompt=None,
-                        metadata={"suggestion": "Consider adding tests"},
-                    )
-                ],
+            governor_results=[
+                GovernorResult(
+                    governor_id="quality-check",
+                    status="approve",
+                    option_id=None,
+                    score=0.9,
+                    messages=["Good quality"],
+                    follow_up_prompt=None,
+                    metadata={"suggestion": "Consider adding tests"},
+                )
+            ],
         )
 
         # Mock Zed connection and prompt
@@ -522,7 +531,9 @@ class TestAgentThoughtEmission:
             )
 
             with patch.object(task_manager, "governor_manager") as mock_gov:
-                mock_gov.evaluate_post_run.return_value = task_manager.governor_manager.evaluate_post_run.return_value
+                mock_gov.evaluate_post_run.return_value = (
+                    task_manager.governor_manager.evaluate_post_run.return_value
+                )
 
                 # Simulate _run_post_run_governors call (extracted logic)
                 result, blocked = await task_manager._run_post_run_governors(
@@ -622,13 +633,18 @@ class TestAgentSettingsParsing:
         )
 
         # Verify working_directory was set from AgentSettings
-        assert task_manager._active_tasks[task.id].working_directory == "/project/workspace"
+        assert (
+            task_manager._active_tasks[task.id].working_directory
+            == "/project/workspace"
+        )
 
         # Verify logging (mocked, but structure correct)
         # In real, would log setting
 
     @pytest.mark.asyncio
-    async def test_create_task_falls_back_to_cwd_on_missing_settings(self, task_manager, monkeypatch):
+    async def test_create_task_falls_back_to_cwd_on_missing_settings(
+        self, task_manager, monkeypatch
+    ):
         """Test fallback to current directory if AgentSettings missing or invalid."""
         # Mock os.getcwd
         monkeypatch.setattr("os.getcwd", lambda: "/default/cwd")
@@ -664,20 +680,24 @@ class TestAgentSettingsParsing:
             initial_message=invalid_message,
         )
 
-        assert task_manager._active_tasks[task_invalid.id].working_directory == "/default/cwd"
+        assert (
+            task_manager._active_tasks[task_invalid.id].working_directory
+            == "/default/cwd"
+        )
 
 
 class TestErrorHandling:
     """Tests for error scenarios in extension integration."""
 
     @pytest.mark.asyncio
-    async def test_task_failure_updates_toolcall_to_failed(self, task_manager, sample_task, sample_context):
+    async def test_task_failure_updates_toolcall_to_failed(
+        self, task_manager, sample_task, sample_context
+    ):
         """Test task failure updates ToolCall status to FAILED with ErrorDetails."""
         # Set up tool call in metadata
         tool_call_id = "tc_fail_1"
         confirmation_request = ConfirmationRequest(
-            options=[],
-            details=GenericDetails(description="No confirmation")
+            options=[], details=GenericDetails(description="No confirmation")
         )
 
         sample_task.metadata = {
@@ -688,20 +708,22 @@ class TestErrorHandling:
                         status=ToolCallStatus.EXECUTING,
                         tool_name="failing_tool",
                         input_parameters={},
-                        confirmation_request=confirmation_request
+                        confirmation_request=confirmation_request,
                     ).to_dict()
                 }
             }
         }
         sample_context.task = sample_task
         sample_context.pending_permissions = {}  # No pending
-        sample_context.permission_decisions = [PermissionDecisionRecord(
-            tool_call_id=tool_call_id,
-            source="user",
-            option_id="approve",
-            governors_involved=[],
-            timestamp=datetime.now(timezone.utc)
-        )]
+        sample_context.permission_decisions = [
+            PermissionDecisionRecord(
+                tool_call_id=tool_call_id,
+                source="user",
+                option_id="approve",
+                governors_involved=[],
+                timestamp=datetime.now(timezone.utc),
+            )
+        ]
 
         task_manager._active_tasks[sample_task.id] = sample_context
 
@@ -733,7 +755,9 @@ class TestErrorHandling:
         assert "task failed due to error" in failure_thought.content.lower()
 
     @pytest.mark.asyncio
-    async def test_permission_future_cancelled_on_task_failure(self, task_manager, sample_task, sample_context):
+    async def test_permission_future_cancelled_on_task_failure(
+        self, task_manager, sample_task, sample_context
+    ):
         """Test pending permission futures are cancelled on task failure."""
         task_manager._active_tasks[sample_task.id] = sample_context
 
@@ -825,7 +849,11 @@ async def test_integration_tool_permission_to_completion(task_manager, sample_ta
 
         # Execute task
         agent_config = {"command": ["python", "-c", "pass"], "api_key": None}
-        with patch.object(task_manager, "_active_tasks", {task.id: TaskExecutionContext(task=task, agent_name="test")}):
+        with patch.object(
+            task_manager,
+            "_active_tasks",
+            {task.id: TaskExecutionContext(task=task, agent_name="test")},
+        ):
             result = await task_manager.execute_task(
                 task.id,
                 agent_config["command"],

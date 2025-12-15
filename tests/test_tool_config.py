@@ -13,8 +13,11 @@ from pathlib import Path
 from unittest.mock import patch, AsyncMock
 
 from a2a_acp.tool_config import (
-    BashTool, ToolConfig, ToolParameter,
-    ToolConfigurationManager, ToolConfigurationError
+    BashTool,
+    ToolConfig,
+    ToolParameter,
+    ToolConfigurationManager,
+    ToolConfigurationError,
 )
 from a2a_acp.error_profiles import ErrorProfile
 
@@ -29,7 +32,7 @@ class TestToolParameter:
             type="string",
             required=True,
             description="A test parameter",
-            default="default_value"
+            default="default_value",
         )
 
         assert param.name == "test_param"
@@ -75,10 +78,7 @@ class TestToolParameter:
         """Test parameter constraints like min/max and patterns."""
         # Number with constraints
         number_param = ToolParameter(
-            name="port",
-            type="number",
-            minimum=1,
-            maximum=65535
+            name="port", type="number", minimum=1, maximum=65535
         )
 
         is_valid, error = number_param.validate(8080)
@@ -99,7 +99,7 @@ class TestToolConfig:
             confirmation_message="Are you sure?",
             timeout=60,
             working_directory="/tmp",
-            environment_variables={"API_KEY": "secret"}
+            environment_variables={"API_KEY": "secret"},
         )
 
         assert config.requires_confirmation is True
@@ -129,12 +129,10 @@ class TestBashTool:
             name="Test Tool",
             description="A test tool",
             script="echo 'Hello, {{name}}!'",
-            parameters=[
-                ToolParameter(name="name", type="string", required=True)
-            ],
+            parameters=[ToolParameter(name="name", type="string", required=True)],
             config=ToolConfig(),
             tags=["test"],
-            examples=["Greet a user"]
+            examples=["Greet a user"],
         )
 
         assert tool.id == "test_tool"
@@ -153,19 +151,23 @@ class TestBashTool:
             description="Execute HTTP requests via curl",
             script="curl -X {{method}} '{{url}}' -H 'Authorization: Bearer {{token}}'",
             parameters=[
-                ToolParameter(name="method", type="string", required=True, default="GET"),
+                ToolParameter(
+                    name="method", type="string", required=True, default="GET"
+                ),
                 ToolParameter(name="url", type="string", required=True),
-                ToolParameter(name="token", type="string", required=True)
+                ToolParameter(name="token", type="string", required=True),
             ],
-            config=ToolConfig()
+            config=ToolConfig(),
         )
 
         # Test script rendering
-        rendered = tool.render_script({
-            "method": "POST",
-            "url": "https://api.example.com/users",
-            "token": "abc123"
-        })
+        rendered = tool.render_script(
+            {
+                "method": "POST",
+                "url": "https://api.example.com/users",
+                "token": "abc123",
+            }
+        )
 
         expected = "curl -X POST 'https://api.example.com/users' -H 'Authorization: Bearer abc123'"
         assert rendered == expected
@@ -179,9 +181,9 @@ class TestBashTool:
             script="echo '{{name}}'",
             parameters=[
                 ToolParameter(name="name", type="string", required=True),
-                ToolParameter(name="count", type="number", required=False, default=1)
+                ToolParameter(name="count", type="number", required=False, default=1),
             ],
-            config=ToolConfig()
+            config=ToolConfig(),
         )
 
         # Valid parameters
@@ -199,7 +201,9 @@ class TestBashTool:
         assert "name" in str(errors)
 
         # Invalid parameter type
-        is_valid, errors = tool.validate_parameters({"name": "test", "count": "not_a_number"})
+        is_valid, errors = tool.validate_parameters(
+            {"name": "test", "count": "not_a_number"}
+        )
         assert is_valid is False
         assert "count" in str(errors)
 
@@ -213,7 +217,7 @@ class TestBashTool:
             parameters=[],
             config=ToolConfig(),
             tags=["test", "utility"],
-            examples=["Run a simple test"]
+            examples=["Run a simple test"],
         )
 
         # Test metadata generation
@@ -249,16 +253,21 @@ class TestToolConfigurationManager:
                     "description": "Execute HTTP requests via curl",
                     "script": "curl -X {{method}} '{{url}}' -H 'Authorization: Bearer {{token}}'",
                     "parameters": [
-                        {"name": "method", "type": "string", "required": True, "default": "GET"},
+                        {
+                            "name": "method",
+                            "type": "string",
+                            "required": True,
+                            "default": "GET",
+                        },
                         {"name": "url", "type": "string", "required": True},
-                        {"name": "token", "type": "string", "required": True}
+                        {"name": "token", "type": "string", "required": True},
                     ],
                     "sandbox": {
                         "requires_confirmation": False,
                         "timeout": 30,
                         "working_directory": "/tmp",
-                        "environment_variables": {"API_KEY": "secret"}
-                    }
+                        "environment_variables": {"API_KEY": "secret"},
+                    },
                 },
                 "file_read": {
                     "name": "File Reader",
@@ -267,11 +276,8 @@ class TestToolConfigurationManager:
                     "parameters": [
                         {"name": "file_path", "type": "string", "required": True}
                     ],
-                    "sandbox": {
-                        "requires_confirmation": False,
-                        "timeout": 10
-                    }
-                }
+                    "sandbox": {"requires_confirmation": False, "timeout": 10},
+                },
             }
         }
 
@@ -279,7 +285,7 @@ class TestToolConfigurationManager:
     async def test_yaml_loading(self, temp_config_dir, sample_tools_config):
         """Test loading tools from YAML configuration."""
         config_file = temp_config_dir / "tools.yaml"
-        with open(config_file, 'w') as f:
+        with open(config_file, "w") as f:
             yaml.dump(sample_tools_config, f)
 
         config_file_path = str(temp_config_dir / "tools.yaml")
@@ -308,13 +314,13 @@ class TestToolConfigurationManager:
                     # Missing script
                     "parameters": [
                         {"name": "test", "type": "invalid_type"}  # Invalid type
-                    ]
+                    ],
                 }
             }
         }
 
         config_file = temp_config_dir / "tools.yaml"
-        with open(config_file, 'w') as f:
+        with open(config_file, "w") as f:
             yaml.dump(invalid_config, f)
 
         config_file_path = str(temp_config_dir / "tools.yaml")
@@ -328,7 +334,7 @@ class TestToolConfigurationManager:
     async def test_hot_reload_capability(self, temp_config_dir, sample_tools_config):
         """Test hot-reload functionality."""
         config_file = temp_config_dir / "tools.yaml"
-        with open(config_file, 'w') as f:
+        with open(config_file, "w") as f:
             yaml.dump(sample_tools_config, f)
 
         config_file_path = str(temp_config_dir / "tools.yaml")
@@ -342,10 +348,10 @@ class TestToolConfigurationManager:
             "description": "A newly added tool",
             "script": "echo 'new'",
             "parameters": [],
-            "sandbox": {"requires_confirmation": False}
+            "sandbox": {"requires_confirmation": False},
         }
 
-        with open(config_file_path, 'w') as f:
+        with open(config_file_path, "w") as f:
             yaml.dump(sample_tools_config, f)
 
         # Reload should pick up new tool
@@ -369,7 +375,7 @@ class TestToolConfigurationManager:
         }
 
         config_file = temp_config_dir / "tools.yaml"
-        with open(config_file, 'w') as f:
+        with open(config_file, "w") as f:
             yaml.dump(incomplete_config, f)
 
         config_file_path = str(temp_config_dir / "tools.yaml")
@@ -391,14 +397,14 @@ class TestToolConfigurationManager:
                     "parameters": [
                         {"name": "", "type": "string"},  # Empty name
                         {"name": "valid", "type": "invalid_type"},  # Invalid type
-                        {"name": "no_type"}  # Missing type
-                    ]
+                        {"name": "no_type"},  # Missing type
+                    ],
                 }
             }
         }
 
         config_file = temp_config_dir / "tools.yaml"
-        with open(config_file, 'w') as f:
+        with open(config_file, "w") as f:
             yaml.dump(config_with_bad_params, f)
 
         config_file_path = str(temp_config_dir / "tools.yaml")
@@ -414,7 +420,7 @@ class TestToolConfigurationManager:
         config_file = temp_config_dir / "tools.yaml"
 
         # Write invalid YAML
-        with open(config_file, 'w') as f:
+        with open(config_file, "w") as f:
             f.write("invalid: yaml: content: [\n  missing closing bracket")
 
         config_file_path = str(temp_config_dir / "tools.yaml")
@@ -436,7 +442,7 @@ class TestToolConfigurationManager:
     async def test_empty_configuration_handling(self, temp_config_dir):
         """Test handling of empty configurations."""
         config_file = temp_config_dir / "tools.yaml"
-        with open(config_file, 'w') as f:
+        with open(config_file, "w") as f:
             yaml.dump({"tools": {}}, f)
 
         config_file_path = str(temp_config_dir / "tools.yaml")
@@ -459,9 +465,9 @@ class TestToolConfigurationManager:
                         "1": {
                             "code": -32002,
                             "message": "Resource not found",
-                            "detail": {"path": "/tmp/file.txt"}
+                            "detail": {"path": "/tmp/file.txt"},
                         }
-                    }
+                    },
                 }
             }
         }
@@ -470,11 +476,15 @@ class TestToolConfigurationManager:
         with open(config_path, "w", encoding="utf-8") as handle:
             yaml.safe_dump(tool_config, handle)
 
-        manager_basic = ToolConfigurationManager([str(config_path)], error_profile=ErrorProfile.ACP_BASIC)
+        manager_basic = ToolConfigurationManager(
+            [str(config_path)], error_profile=ErrorProfile.ACP_BASIC
+        )
         with pytest.raises(ToolConfigurationError):
             await manager_basic.load_tools()
 
-        manager_extended = ToolConfigurationManager([str(config_path)], error_profile=ErrorProfile.EXTENDED_JSON)
+        manager_extended = ToolConfigurationManager(
+            [str(config_path)], error_profile=ErrorProfile.EXTENDED_JSON
+        )
         tools = await manager_extended.load_tools()
         assert tools["sample"].error_mapping[1].detail == {"path": "/tmp/file.txt"}
 
@@ -492,7 +502,7 @@ class TestSecurityValidation:
             "$(rm -rf /)",
             "`rm -rf /`",
             "; rm -rf /",
-            "|| rm -rf /"
+            "|| rm -rf /",
         ]
 
         for script in dangerous_scripts:
@@ -502,16 +512,29 @@ class TestSecurityValidation:
                 description="Dangerous tool for testing",
                 script=script,
                 parameters=[],
-                config=ToolConfig()
+                config=ToolConfig(),
             )
 
             # Should detect security violations
-            with patch('a2a_acp.sandbox.get_sandbox_manager') as mock_sandbox:
-                mock_sandbox.return_value.validate_script_security = AsyncMock(return_value=(False, ["Dangerous command detected"]))
+            with patch("a2a_acp.sandbox.get_sandbox_manager") as mock_sandbox:
+                mock_sandbox.return_value.validate_script_security = AsyncMock(
+                    return_value=(False, ["Dangerous command detected"])
+                )
 
                 # This would raise SandboxSecurityError in real usage
                 # The script should contain some dangerous pattern
-                dangerous_patterns = ["rm", "curl", "wget", "$", "`", ";", "||", "&&", ">", "/etc/passwd"]
+                dangerous_patterns = [
+                    "rm",
+                    "curl",
+                    "wget",
+                    "$",
+                    "`",
+                    ";",
+                    "||",
+                    "&&",
+                    ">",
+                    "/etc/passwd",
+                ]
                 assert any(pattern in script for pattern in dangerous_patterns)
 
     def test_safe_script_validation(self):
@@ -522,7 +545,7 @@ class TestSecurityValidation:
             "cat '/tmp/safe-file.txt'",
             "grep 'pattern' /tmp/log.txt",
             "date",
-            "pwd"
+            "pwd",
         ]
 
         for script in safe_scripts:
@@ -532,11 +555,18 @@ class TestSecurityValidation:
                 description="Safe tool for testing",
                 script=script,
                 parameters=[],
-                config=ToolConfig()
+                config=ToolConfig(),
             )
 
             # Should pass basic validation
-            assert "echo" in script or "curl" in script or "cat" in script or "grep" in script or "date" in script or "pwd" in script
+            assert (
+                "echo" in script
+                or "curl" in script
+                or "cat" in script
+                or "grep" in script
+                or "date" in script
+                or "pwd" in script
+            )
 
     def test_command_injection_prevention(self):
         """Test command injection prevention."""
@@ -547,14 +577,15 @@ class TestSecurityValidation:
             "echo 'test' || evil_command",
             "$(malicious_command)",
             "`evil_command`",
-            "echo 'test' > /dev/null; rm -rf /"
+            "echo 'test' > /dev/null; rm -rf /",
         ]
 
         for script in injection_attempts:
             # These should be flagged as security violations
-            assert any(pattern in script for pattern in [
-                ";", "&&", "||", "$", "`", "|", ">"
-            ])
+            assert any(
+                pattern in script for pattern in [";", "&&", "||", "$", "`", "|", ">"]
+            )
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

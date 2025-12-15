@@ -95,7 +95,7 @@ class ZedAgentConnection:
             self._write_lock = asyncio.Lock()
         assert self._write_lock is not None
         return self._write_lock
-    
+
     def ensure_read_lock(self) -> asyncio.Lock:
         """Get or create the read lock."""
         if self._read_lock is None:
@@ -120,7 +120,9 @@ class ZedAgentConnection:
             if isinstance(profile, ErrorProfile):
                 return profile
         except Exception:  # pragma: no cover - defensive guard
-            self._logger.debug("Failed to derive error profile from executor", exc_info=True)
+            self._logger.debug(
+                "Failed to derive error profile from executor", exc_info=True
+            )
 
         from .settings import get_settings
 
@@ -141,6 +143,7 @@ class ZedAgentConnection:
 
         # Set up environment variables
         import os
+
         env = None
         if self._api_key:
             env = os.environ.copy()
@@ -148,7 +151,10 @@ class ZedAgentConnection:
             # For now, set both to be compatible with different agent types
             env["OPENAI_API_KEY"] = self._api_key
             env["GEMINI_API_KEY"] = self._api_key
-            self._logger.debug("Setting API key environment variables", extra={"key_length": len(self._api_key)})
+            self._logger.debug(
+                "Setting API key environment variables",
+                extra={"key_length": len(self._api_key)},
+            )
         else:
             self._logger.debug("No API key provided for agent authentication")
 
@@ -169,7 +175,9 @@ class ZedAgentConnection:
         self._stdin = process.stdin
         self._stdout = process.stdout
         if process.stderr:
-            self._stderr_task = asyncio.create_task(self._collect_stderr(process.stderr))
+            self._stderr_task = asyncio.create_task(
+                self._collect_stderr(process.stderr)
+            )
 
     async def _collect_stderr(self, stream: StreamReader) -> None:
         try:
@@ -181,7 +189,9 @@ class ZedAgentConnection:
                 self._stderr_buffer.append(decoded_line)
                 # Log stderr output for debugging (but avoid flooding logs)
                 if decoded_line.strip():
-                    self._logger.info("Agent stderr output", extra={"stderr_line": decoded_line})
+                    self._logger.info(
+                        "Agent stderr output", extra={"stderr_line": decoded_line}
+                    )
         except asyncio.CancelledError:
             # Handle cancellation gracefully - this is expected during cleanup
             self._logger.debug("Stderr collection cancelled")
@@ -208,18 +218,26 @@ class ZedAgentConnection:
             self._logger.debug("stderr task cancelled")
         try:
             await asyncio.wait_for(self._process.wait(), timeout=1)
-            self._logger.debug("Agent process exited", extra={"returncode": self._process.returncode})
+            self._logger.debug(
+                "Agent process exited", extra={"returncode": self._process.returncode}
+            )
         except asyncio.TimeoutError:
             self._logger.debug("Agent process still running, terminating")
             self._process.terminate()
             try:
                 await asyncio.wait_for(self._process.wait(), timeout=2)
-                self._logger.debug("Agent process terminated gracefully", extra={"returncode": self._process.returncode})
+                self._logger.debug(
+                    "Agent process terminated gracefully",
+                    extra={"returncode": self._process.returncode},
+                )
             except asyncio.TimeoutError:
                 self._logger.warning("Agent process did not terminate, killing")
                 self._process.kill()
                 await self._process.wait()
-                self._logger.debug("Agent process killed", extra={"returncode": self._process.returncode})
+                self._logger.debug(
+                    "Agent process killed",
+                    extra={"returncode": self._process.returncode},
+                )
         self._process = None
         self._stdin = None
         self._stdout = None
@@ -229,20 +247,22 @@ class ZedAgentConnection:
         if not self._stdin:
             raise AgentProcessError("Agent stdin unavailable")
         data = json.dumps(payload)
-        async with self.ensure_write_lock(): # pylint: disable=may-be-none
+        async with self.ensure_write_lock():  # pylint: disable=may-be-none
             self._stdin.write(data.encode() + b"\n")
             await self._stdin.drain()
-        self._logger.info("Sent JSON-RPC message to agent", extra={
-            "method": payload.get("method"),
-            "id": payload.get("id"),
-            "payload": payload,
-            "raw_message": data
-        })
+        self._logger.info(
+            "Sent JSON-RPC message to agent",
+            extra={
+                "method": payload.get("method"),
+                "id": payload.get("id"),
+                "payload": payload,
+                "raw_message": data,
+            },
+        )
 
     async def _read_json(self) -> dict[str, Any]:
         if not self._stdout:
             raise AgentProcessError("Agent stdout unavailable")
-
 
         # Read lines until we find valid JSON
         while True:
@@ -264,25 +284,31 @@ class ZedAgentConnection:
                 continue  # Skip empty lines
 
             # Skip log lines (they contain ANSI color codes and don't start with '{')
-            if not decoded.startswith('{'):
+            if not decoded.startswith("{"):
                 # self._logger.debug("Skipping non-JSON line", extra={"line": repr(decoded)})
                 continue
 
             try:
                 payload = json.loads(decoded)
-                self._logger.info("Received JSON-RPC message from agent", extra={
-                    "method": payload.get("method"),
-                    "id": payload.get("id"),
-                    "has_result": "result" in payload,
-                    "has_error": "error" in payload,
-                    "result": payload.get("result"),
-                    "error": payload.get("error"),
-                    "full_payload": payload
-                })
+                self._logger.info(
+                    "Received JSON-RPC message from agent",
+                    extra={
+                        "method": payload.get("method"),
+                        "id": payload.get("id"),
+                        "has_result": "result" in payload,
+                        "has_error": "error" in payload,
+                        "result": payload.get("result"),
+                        "error": payload.get("error"),
+                        "full_payload": payload,
+                    },
+                )
                 return payload
             except json.JSONDecodeError as e:
                 # If it's not valid JSON, skip it and continue reading
-                self._logger.debug("Skipping invalid JSON", extra={"line": repr(decoded), "error": str(e)})
+                self._logger.debug(
+                    "Skipping invalid JSON",
+                    extra={"line": repr(decoded), "error": str(e)},
+                )
                 continue
 
     def _next_id(self) -> int:
@@ -312,23 +338,28 @@ class ZedAgentConnection:
             if handler:
                 await handler(payload)
 
-    async def notify(self, method: str, params: Optional[dict[str, Any]] = None) -> None:
+    async def notify(
+        self, method: str, params: Optional[dict[str, Any]] = None
+    ) -> None:
         """Send a JSON-RPC notification (no response expected)."""
         message: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
         if params is not None:
             message["params"] = params
-        self._logger.debug("Sending notification", extra={"method": method, "params": params})
+        self._logger.debug(
+            "Sending notification", extra={"method": method, "params": params}
+        )
         await self._write_json(message)
 
     async def initialize(self) -> dict[str, Any] | None:
         """Send initialize request."""
-        params = {"protocolVersion": 1, "clientName": "cli", "clientCapabilities": {      
-            "fs": {
-                "readTextFile": True,
-                "writeTextFile": True
+        params = {
+            "protocolVersion": 1,
+            "clientName": "cli",
+            "clientCapabilities": {
+                "fs": {"readTextFile": True, "writeTextFile": True},
+                # "terminal": True.    # Future capability flags can be added here
             },
-            # "terminal": True.    # Future capability flags can be added here
-            }}
+        }
         self._logger.info("=== INITIALIZE PHASE ===")
         self._logger.debug("Sending initialize request", extra={"params": params})
         try:
@@ -338,12 +369,20 @@ class ZedAgentConnection:
             # Check if authentication is required
             auth_methods = result.get("authMethods", []) if result else []
             if auth_methods:
-                self._logger.info("Authentication required", extra={"auth_methods": [m.get("id") for m in auth_methods]})
+                self._logger.info(
+                    "Authentication required",
+                    extra={"auth_methods": [m.get("id") for m in auth_methods]},
+                )
 
                 # Look for API key authentication method (support multiple agent types)
                 api_key_method = None
                 api_key_method_id = None
-                supported_api_key_methods = ["apikey", "gemini-api-key", "codex-api-key", "openai-api-key"]  # Support codex, gemini and openai
+                supported_api_key_methods = [
+                    "apikey",
+                    "gemini-api-key",
+                    "codex-api-key",
+                    "openai-api-key",
+                ]  # Support codex, gemini and openai
 
                 for method in auth_methods:
                     method_id = method.get("id")
@@ -353,24 +392,41 @@ class ZedAgentConnection:
                         break
 
                 if api_key_method and self._api_key and api_key_method_id:
-                    self._logger.info("Using API key authentication", extra={"method_id": api_key_method_id})
+                    self._logger.info(
+                        "Using API key authentication",
+                        extra={"method_id": api_key_method_id},
+                    )
                     await self.authenticate(api_key_method_id, self._api_key)
                 elif api_key_method:
                     # Try chatgpt method as fallback when no API key is provided
-                    chatgpt_method = next((m for m in auth_methods if m.get("id") == "chatgpt"), None)
+                    chatgpt_method = next(
+                        (m for m in auth_methods if m.get("id") == "chatgpt"), None
+                    )
                     if chatgpt_method:
-                        self._logger.info("Using ChatGPT authentication with existing auth.json", extra={"method_id": "chatgpt"})
+                        self._logger.info(
+                            "Using ChatGPT authentication with existing auth.json",
+                            extra={"method_id": "chatgpt"},
+                        )
                         await self.authenticate("chatgpt")
                     else:
-                        raise AgentProcessError("Agent requires API key authentication but no API key provided and no chatgpt method available")
+                        raise AgentProcessError(
+                            "Agent requires API key authentication but no API key provided and no chatgpt method available"
+                        )
                 else:
                     # No API key method available, try chatgpt method if available
-                    chatgpt_method = next((m for m in auth_methods if m.get("id") == "chatgpt"), None)
+                    chatgpt_method = next(
+                        (m for m in auth_methods if m.get("id") == "chatgpt"), None
+                    )
                     if chatgpt_method:
-                        self._logger.info("Using ChatGPT authentication with existing auth.json", extra={"method_id": "chatgpt"})
+                        self._logger.info(
+                            "Using ChatGPT authentication with existing auth.json",
+                            extra={"method_id": "chatgpt"},
+                        )
                         await self.authenticate("chatgpt")
                     else:
-                        raise AgentProcessError(f"Agent requires authentication but no supported method found. Available: {[m.get('id') for m in auth_methods]}")
+                        raise AgentProcessError(
+                            f"Agent requires authentication but no supported method found. Available: {[m.get('id') for m in auth_methods]}"
+                        )
             else:
                 self._logger.debug("No authentication required")
 
@@ -379,25 +435,33 @@ class ZedAgentConnection:
             self._logger.error("Initialize request failed", extra={"error": str(e)})
             raise
 
-    async def authenticate(self, method_id: str, api_key: str | None = None) -> dict[str, Any] | None:
+    async def authenticate(
+        self, method_id: str, api_key: str | None = None
+    ) -> dict[str, Any] | None:
         """Send authenticate request."""
         params = {"methodId": method_id}
         # self._logger.info("=== AUTHENTICATION PHASE ===")
-        self._logger.debug("Sending authenticate request", extra={"method_id": method_id, "has_api_key": api_key is not None})
+        self._logger.debug(
+            "Sending authenticate request",
+            extra={"method_id": method_id, "has_api_key": api_key is not None},
+        )
         try:
             result = await self.request("authenticate", params)
-            self._logger.info("Authentication completed successfully", extra={"method_id": method_id})
+            self._logger.info(
+                "Authentication completed successfully", extra={"method_id": method_id}
+            )
             return result
         except Exception as e:
-            self._logger.error("Authentication failed", extra={"error": str(e), "method_id": method_id})
+            self._logger.error(
+                "Authentication failed", extra={"error": str(e), "method_id": method_id}
+            )
             raise
 
-    async def start_session(self, cwd: str, mcp_servers: list[dict[str, Any]] | None = None) -> str:
+    async def start_session(
+        self, cwd: str, mcp_servers: list[dict[str, Any]] | None = None
+    ) -> str:
         """Create a new session and return its identifier."""
-        params = {
-            "cwd": cwd,
-            "mcpServers": mcp_servers or []
-        }
+        params = {"cwd": cwd, "mcpServers": mcp_servers or []}
         # self._logger.info("=== SESSION CREATION PHASE ===")
         self._logger.debug("Sending session/new request", extra={"params": params})
         try:
@@ -405,51 +469,58 @@ class ZedAgentConnection:
             if not result or "sessionId" not in result:
                 raise AgentProcessError("session/new missing sessionId")
             session_id = str(result["sessionId"])
-            self._logger.info("Session created successfully", extra={"session_id": session_id, "result": result})
+            self._logger.info(
+                "Session created successfully",
+                extra={"session_id": session_id, "result": result},
+            )
             return session_id
         except Exception as e:
             self._logger.error("Session creation failed", extra={"error": str(e)})
             raise
 
-    async def load_session(self, session_id: str, cwd: str, mcp_servers: list[dict[str, Any]] | None = None) -> None:
+    async def load_session(
+        self, session_id: str, cwd: str, mcp_servers: list[dict[str, Any]] | None = None
+    ) -> None:
         """Load an existing session by ID."""
-        params = {
-            "sessionId": session_id,
-            "cwd": cwd,
-            "mcpServers": mcp_servers or []
-        }
+        params = {"sessionId": session_id, "cwd": cwd, "mcpServers": mcp_servers or []}
         # self._logger.info("=== SESSION LOADING PHASE ===")
-        self._logger.debug("Sending session/load request", extra={"session_id": session_id, "params": params})
+        self._logger.debug(
+            "Sending session/load request",
+            extra={"session_id": session_id, "params": params},
+        )
 
         # Handle the session/load response
         # The agent will stream conversation history via session/update notifications
         async def load_handler(payload: dict[str, Any]) -> None:
-            self._logger.debug("Received notification during session load", extra={
-                "method": payload.get("method"),
-                "payload_keys": list(payload.keys())
-            })
+            self._logger.debug(
+                "Received notification during session load",
+                extra={
+                    "method": payload.get("method"),
+                    "payload_keys": list(payload.keys()),
+                },
+            )
 
             if payload.get("method") == "session/update":
                 params = payload.get("params", {})
                 update_data = params.get("update", {})
                 event = update_data.get("sessionUpdate")
-                self._logger.debug("Session load update", extra={
-                    "event": event,
-                    "update_keys": list(update_data.keys())
-                })
+                self._logger.debug(
+                    "Session load update",
+                    extra={"event": event, "update_keys": list(update_data.keys())},
+                )
                 # TODO: History replay notifications will be sent here
 
         try:
             result = await self.request("session/load", params, handler=load_handler)
-            self._logger.info("Session loaded successfully", extra={
-                "session_id": session_id,
-                "result": result
-            })
+            self._logger.info(
+                "Session loaded successfully",
+                extra={"session_id": session_id, "result": result},
+            )
         except Exception as e:
-            self._logger.error("Session loading failed", extra={
-                "session_id": session_id,
-                "error": str(e)
-            })
+            self._logger.error(
+                "Session loading failed",
+                extra={"session_id": session_id, "error": str(e)},
+            )
             raise
 
     async def prompt(
@@ -462,11 +533,14 @@ class ZedAgentConnection:
     ) -> dict[str, Any]:
         """Send a session/prompt request and return the final result."""
         # self._logger.info("=== PROMPT PHASE ===")
-        self._logger.debug("Sending session/prompt request", extra={
-            "session_id": session_id,
-            "prompt_length": len(prompt),
-            "has_cancel_event": cancel_event is not None
-        })
+        self._logger.debug(
+            "Sending session/prompt request",
+            extra={
+                "session_id": session_id,
+                "prompt_length": len(prompt),
+                "has_cancel_event": cancel_event is not None,
+            },
+        )
 
         # Accumulate chunks for the final result
         accumulated_chunks: list[str] = []
@@ -475,8 +549,7 @@ class ZedAgentConnection:
         def _record_tool_call_update(update: dict[str, Any]) -> None:
             """Normalize and store tool_call_update payloads for the final response."""
             cleaned_update = {
-                key: value for key, value in update.items()
-                if key != "sessionUpdate"
+                key: value for key, value in update.items() if key != "sessionUpdate"
             }
             executed_tool_calls.append(cleaned_update)
             self._logger.info(
@@ -509,10 +582,13 @@ class ZedAgentConnection:
             return response
 
         async def handler(payload: dict[str, Any]) -> None:
-            self._logger.debug("Handling notification during prompt", extra={
-                "method": payload.get("method"),
-                "payload_keys": list(payload.keys())
-            })
+            self._logger.debug(
+                "Handling notification during prompt",
+                extra={
+                    "method": payload.get("method"),
+                    "payload_keys": list(payload.keys()),
+                },
+            )
 
             # Handle agent-initiated requests (e.g., fs/read_text_file)
             if payload.get("id") is not None and payload.get("method"):
@@ -524,53 +600,76 @@ class ZedAgentConnection:
                 params = payload.get("params", {})
                 update_data = params.get("update", {})
                 event = update_data.get("sessionUpdate")
-                self._logger.debug("Received session/update notification", extra={
-                    "event": event,
-                    "params_keys": list(params.keys()),
-                    "update_keys": list(update_data.keys())
-                })
+                self._logger.debug(
+                    "Received session/update notification",
+                    extra={
+                        "event": event,
+                        "params_keys": list(params.keys()),
+                        "update_keys": list(update_data.keys()),
+                    },
+                )
 
                 if event == "agent_message_chunk":
                     # ZedACP protocol: agent_message_chunk is in params.update.content
                     update_data = params.get("update", {})
                     content = update_data.get("content", {})
                     text = content.get("text")
-                    self._logger.debug("Received agent_message_chunk", extra={
-                        "has_text": text is not None,
-                        "text_length": len(text) if text else 0,
-                        "text_preview": text[:100] + "..." if text and len(text) > 100 else (text or "None"),
-                        "content_keys": list(content.keys()),
-                        "update_keys": list(update_data.keys())
-                    })
+                    self._logger.debug(
+                        "Received agent_message_chunk",
+                        extra={
+                            "has_text": text is not None,
+                            "text_length": len(text) if text else 0,
+                            "text_preview": (
+                                text[:100] + "..."
+                                if text and len(text) > 100
+                                else (text or "None")
+                            ),
+                            "content_keys": list(content.keys()),
+                            "update_keys": list(update_data.keys()),
+                        },
+                    )
                     if text:
                         # Accumulate chunk for final result
                         accumulated_chunks.append(text)
-                        self._logger.debug("Accumulated chunk", extra={
-                            "chunk_length": len(text),
-                            "total_chunks": len(accumulated_chunks),
-                            "text_preview": text[:50] + "..." if len(text) > 50 else text
-                        })
+                        self._logger.debug(
+                            "Accumulated chunk",
+                            extra={
+                                "chunk_length": len(text),
+                                "total_chunks": len(accumulated_chunks),
+                                "text_preview": (
+                                    text[:50] + "..." if len(text) > 50 else text
+                                ),
+                            },
+                        )
 
                         # Also call external chunk handler if provided
                         if on_chunk:
-                            self._logger.debug("Processing agent message chunk", extra={
-                                "text_length": len(text),
-                                "text_preview": text[:100] + "..." if len(text) > 100 else text
-                            })
+                            self._logger.debug(
+                                "Processing agent message chunk",
+                                extra={
+                                    "text_length": len(text),
+                                    "text_preview": (
+                                        text[:100] + "..." if len(text) > 100 else text
+                                    ),
+                                },
+                            )
                             await on_chunk(text)
                     elif on_chunk:
-                        self._logger.warning("Received agent_message_chunk but no text content or no on_chunk handler", extra={
-                            "has_text": text is not None,
-                            "has_on_chunk": on_chunk is not None
-                        })
+                        self._logger.warning(
+                            "Received agent_message_chunk but no text content or no on_chunk handler",
+                            extra={
+                                "has_text": text is not None,
+                                "has_on_chunk": on_chunk is not None,
+                            },
+                        )
 
                 elif event == "input_required":
                     # ZedACP input_required notification - agent needs user input
                     update_data = params.get("update", {})
-                    self._logger.info("Agent requested input", extra={
-                        "event": event,
-                        "update_data": update_data
-                    })
+                    self._logger.info(
+                        "Agent requested input",
+                        extra={"event": event, "update_data": update_data},
+                    )
 
                     # Extract input requirement details
                     input_required_info = update_data.get("inputRequired", {})
@@ -580,7 +679,9 @@ class ZedAgentConnection:
                     # Create enhanced input required message with structured data
                     input_required_message = f"INPUT_REQUIRED: {text}"
                     if input_types:
-                        input_required_message += f"\nINPUT_TYPES: {','.join(input_types)}"
+                        input_required_message += (
+                            f"\nINPUT_TYPES: {','.join(input_types)}"
+                        )
 
                     if on_chunk:
                         await on_chunk(input_required_message)
@@ -589,17 +690,19 @@ class ZedAgentConnection:
                     accumulated_chunks.append(input_required_message)
 
                 elif event == "tool_call_update":
-                    self._logger.debug("Received tool_call_update session/update", extra={
-                        "update_keys": list(update_data.keys())
-                    })
+                    self._logger.debug(
+                        "Received tool_call_update session/update",
+                        extra={"update_keys": list(update_data.keys())},
+                    )
                     if isinstance(update_data, dict):
                         _record_tool_call_update(update_data)
 
             # Handle tool call updates (ZedACP tool execution results)
             elif payload.get("method") == "tool_call_update":
-                self._logger.debug("Received tool_call_update notification", extra={
-                    "payload_keys": list(payload.keys())
-                })
+                self._logger.debug(
+                    "Received tool_call_update notification",
+                    extra={"payload_keys": list(payload.keys())},
+                )
 
                 # Tool call updates indicate tool execution results from the agent
                 # These are typically sent when the agent processes tool calls
@@ -616,12 +719,16 @@ class ZedAgentConnection:
             async def check_external_cancellation():
                 # logger.info("Waiting for external cancellation", extra={"session_id": session_id})
                 await cancel_event.wait()
-                logger.info("External cancellation detected", extra={"session_id": session_id})
+                logger.info(
+                    "External cancellation detected", extra={"session_id": session_id}
+                )
                 # Send cancellation to the agent when external cancellation is requested
                 try:
                     await self.cancel(session_id)
                 except Exception as e:
-                    logger.warning("Failed to send cancellation to agent", extra={"error": str(e)})
+                    logger.warning(
+                        "Failed to send cancellation to agent", extra={"error": str(e)}
+                    )
                 raise PromptCancelled("External cancellation requested")
 
             cancel_task = asyncio.create_task(check_external_cancellation())
@@ -645,12 +752,20 @@ class ZedAgentConnection:
 
             if cancel_task in done:
                 # External cancellation was requested
-                logger.info("External cancellation completed first", extra={"session_id": session_id})
-                self._logger.info("External cancellation detected during prompt processing", extra={"session_id": session_id})
+                logger.info(
+                    "External cancellation completed first",
+                    extra={"session_id": session_id},
+                )
+                self._logger.info(
+                    "External cancellation detected during prompt processing",
+                    extra={"session_id": session_id},
+                )
                 raise PromptCancelled("External cancellation requested")
             else:
                 # Prompt completed normally
-                logger.info("Prompt completed normally", extra={"session_id": session_id})
+                logger.info(
+                    "Prompt completed normally", extra={"session_id": session_id}
+                )
                 result = prompt_task.result()
 
                 # Process any tool calls in the result
@@ -666,24 +781,37 @@ class ZedAgentConnection:
                     if "result" not in result:
                         result["result"] = {}
                     result["result"]["text"] = full_text
-                    self._logger.info("Added accumulated chunks to result", extra={
-                        "chunks": len(accumulated_chunks),
-                        "total_length": len(full_text),
-                        "result_keys": list(result.keys()),
-                        "text_preview": full_text[:100] + "..." if len(full_text) > 100 else full_text
-                    })
+                    self._logger.info(
+                        "Added accumulated chunks to result",
+                        extra={
+                            "chunks": len(accumulated_chunks),
+                            "total_length": len(full_text),
+                            "result_keys": list(result.keys()),
+                            "text_preview": (
+                                full_text[:100] + "..."
+                                if len(full_text) > 100
+                                else full_text
+                            ),
+                        },
+                    )
                 else:
-                    self._logger.info("No chunks accumulated, final result", extra={
-                        "result": result,
-                        "result_keys": list(result.keys()) if result else "empty"
-                    })
+                    self._logger.info(
+                        "No chunks accumulated, final result",
+                        extra={
+                            "result": result,
+                            "result_keys": list(result.keys()) if result else "empty",
+                        },
+                    )
 
-                self._logger.info("Prompt processing completed successfully", extra={
-                    "session_id": session_id,
-                    "has_result": result is not None,
-                    "result_keys": list(result.keys()) if result else [],
-                    "chunks_accumulated": len(accumulated_chunks)
-                })
+                self._logger.info(
+                    "Prompt processing completed successfully",
+                    extra={
+                        "session_id": session_id,
+                        "has_result": result is not None,
+                        "result_keys": list(result.keys()) if result else [],
+                        "chunks_accumulated": len(accumulated_chunks),
+                    },
+                )
                 return result or {}
         else:
             result = await self.request(
@@ -705,17 +833,27 @@ class ZedAgentConnection:
                 if "result" not in result:
                     result["result"] = {}
                 result["result"]["text"] = full_text
-                self._logger.info("Added accumulated chunks to result", extra={
-                    "chunks": len(accumulated_chunks),
-                    "total_length": len(full_text),
-                    "result_keys": list(result.keys()),
-                    "text_preview": full_text[:100] + "..." if len(full_text) > 100 else full_text
-                })
+                self._logger.info(
+                    "Added accumulated chunks to result",
+                    extra={
+                        "chunks": len(accumulated_chunks),
+                        "total_length": len(full_text),
+                        "result_keys": list(result.keys()),
+                        "text_preview": (
+                            full_text[:100] + "..."
+                            if len(full_text) > 100
+                            else full_text
+                        ),
+                    },
+                )
             else:
-                self._logger.info("No chunks accumulated, final result", extra={
-                    "result": result,
-                    "result_keys": list(result.keys()) if result else "empty"
-                })
+                self._logger.info(
+                    "No chunks accumulated, final result",
+                    extra={
+                        "result": result,
+                        "result_keys": list(result.keys()) if result else "empty",
+                    },
+                )
 
             return result or {}
 
@@ -730,7 +868,9 @@ class ZedAgentConnection:
         """Return aggregated stderr output."""
         return "\n".join(self._stderr_buffer)
 
-    async def _handle_agent_request(self, payload: dict[str, Any], session_id: str) -> bool:
+    async def _handle_agent_request(
+        self, payload: dict[str, Any], session_id: str
+    ) -> bool:
         """Handle JSON-RPC requests initiated by the agent."""
         method = payload.get("method")
 
@@ -748,46 +888,60 @@ class ZedAgentConnection:
 
         return False
 
-    async def _handle_fs_read_text_file(self, payload: dict[str, Any], session_id: str) -> None:
+    async def _handle_fs_read_text_file(
+        self, payload: dict[str, Any], session_id: str
+    ) -> None:
         """Execute the filesystem read request via the bash tool."""
         request_id = payload.get("id")
         params = payload.get("params") or {}
 
         if request_id is None:
-            self._logger.warning("fs/read_text_file request missing id", extra={"payload": payload})
+            self._logger.warning(
+                "fs/read_text_file request missing id", extra={"payload": payload}
+            )
             return
 
-        self._logger.info("Handling fs/read_text_file request", extra={
-            "request_id": request_id,
-            "path": params.get("path"),
-            "line": params.get("line"),
-            "limit": params.get("limit")
-        })
+        self._logger.info(
+            "Handling fs/read_text_file request",
+            extra={
+                "request_id": request_id,
+                "path": params.get("path"),
+                "line": params.get("line"),
+                "limit": params.get("limit"),
+            },
+        )
 
         path = params.get("path")
         if not path:
-            await self._write_json({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {
-                    "code": -32602,
-                    "message": "Missing required parameter: path"
+            await self._write_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32602,
+                        "message": "Missing required parameter: path",
+                    },
                 }
-            })
+            )
             return
 
         # Resolve tool configuration
         tool = await get_tool("functions.acp_fs__read_text_file")
         if not tool:
-            await self._write_json({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {
-                    "code": -32001,
-                    "message": "Tool functions.acp_fs__read_text_file is not available"
+            await self._write_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32001,
+                        "message": "Tool functions.acp_fs__read_text_file is not available",
+                    },
                 }
-            })
-            self._logger.warning("fs/read_text_file tool not available, check configuration", extra={"request_id": request_id})
+            )
+            self._logger.warning(
+                "fs/read_text_file tool not available, check configuration",
+                extra={"request_id": request_id},
+            )
             return
 
         tool_params: dict[str, Any] = {}
@@ -798,37 +952,47 @@ class ZedAgentConnection:
             try:
                 tool_params["line"] = int(params["line"])
             except (TypeError, ValueError):
-                await self._write_json({
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "error": {
-                        "code": -32602,
-                        "message": "Invalid line parameter; must be an integer"
+                await self._write_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {
+                            "code": -32602,
+                            "message": "Invalid line parameter; must be an integer",
+                        },
                     }
-                })
-                self._logger.warning("fs/read_text_file invalid line parameter", extra={"request_id": request_id, "line": params["line"]})
+                )
+                self._logger.warning(
+                    "fs/read_text_file invalid line parameter",
+                    extra={"request_id": request_id, "line": params["line"]},
+                )
                 return
 
         if "limit" in params and params["limit"] is not None:
             try:
                 tool_params["limit"] = int(params["limit"])
             except (TypeError, ValueError):
-                await self._write_json({
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "error": {
-                        "code": -32602,
-                        "message": "Invalid limit parameter; must be an integer"
+                await self._write_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {
+                            "code": -32602,
+                            "message": "Invalid limit parameter; must be an integer",
+                        },
                     }
-                })
-                self._logger.warning("fs/read_text_file invalid limit parameter", extra={"request_id": request_id, "limit": params["limit"]})
+                )
+                self._logger.warning(
+                    "fs/read_text_file invalid limit parameter",
+                    extra={"request_id": request_id, "limit": params["limit"]},
+                )
                 return
 
         tool_call = {
             "id": f"fs_read_text_file_{uuid4().hex}",
             "toolId": tool.id,
             "parameters": tool_params,
-            "metadata": {"origin": "fs/read_text_file"}
+            "metadata": {"origin": "fs/read_text_file"},
         }
 
         permission_options = [
@@ -844,19 +1008,20 @@ class ZedAgentConnection:
         )
 
         if not self._is_option_allowed(option_id, permission_options):
-            await self._write_json({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {
-                    "code": -32003,
-                    "message": "fs/read_text_file denied by governance policy"
+            await self._write_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32003,
+                        "message": "fs/read_text_file denied by governance policy",
+                    },
                 }
-            })
-            self._logger.warning("fs/read_text_file permission denied", extra={
-                "request_id": request_id,
-                "path": path,
-                "option_id": option_id
-            })
+            )
+            self._logger.warning(
+                "fs/read_text_file permission denied",
+                extra={"request_id": request_id, "path": path, "option_id": option_id},
+            )
             return
 
         executor = get_bash_executor()
@@ -865,80 +1030,100 @@ class ZedAgentConnection:
             tool_id=tool.id,
             session_id=exec_session_id,
             task_id=f"fs_read_text_file_{uuid4().hex}",
-            user_id="zedacp_user"
+            user_id="zedacp_user",
         )
 
         result = await executor.execute_tool(tool, tool_params, context)
 
         if result.success:
-            await self._write_json({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {
-                    "content": result.output
+            await self._write_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"content": result.output},
                 }
-            })
-            self._logger.info("fs/read_text_file completed", extra={
-                "request_id": request_id,
-                "path": path,
-                "line": tool_params.get("line"),
-                "limit": tool_params.get("limit"),
-                "output_length": len(result.output) if result.output else 0
-            })
+            )
+            self._logger.info(
+                "fs/read_text_file completed",
+                extra={
+                    "request_id": request_id,
+                    "path": path,
+                    "line": tool_params.get("line"),
+                    "limit": tool_params.get("limit"),
+                    "output_length": len(result.output) if result.output else 0,
+                },
+            )
         else:
             error_payload = self._jsonrpc_error_from_tool_result(result)
-            await self._write_json({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": error_payload
-            })
-            self._logger.error("fs/read_text_file failed", extra={
-                "request_id": request_id,
-                "path": path,
-                "error": result.error,
-                "return_code": result.return_code,
-                "mcp_error": error_payload
-            })
+            await self._write_json(
+                {"jsonrpc": "2.0", "id": request_id, "error": error_payload}
+            )
+            self._logger.error(
+                "fs/read_text_file failed",
+                extra={
+                    "request_id": request_id,
+                    "path": path,
+                    "error": result.error,
+                    "return_code": result.return_code,
+                    "mcp_error": error_payload,
+                },
+            )
 
-    async def _handle_fs_write_text_file(self, payload: dict[str, Any], session_id: str) -> None:
+    async def _handle_fs_write_text_file(
+        self, payload: dict[str, Any], session_id: str
+    ) -> None:
         """Execute the Codex filesystem write request via the bash tool."""
         request_id = payload.get("id")
         params = payload.get("params") or {}
 
         if request_id is None:
-            self._logger.warning("fs/write_text_file request missing id", extra={"payload": payload})
+            self._logger.warning(
+                "fs/write_text_file request missing id", extra={"payload": payload}
+            )
             return
 
-        self._logger.info("Handling fs/write_text_file request", extra={
-            "request_id": request_id,
-            "path": params.get("path"),
-            "content_length": len(params.get("content", "")) if params.get("content") else 0
-        })
+        self._logger.info(
+            "Handling fs/write_text_file request",
+            extra={
+                "request_id": request_id,
+                "path": params.get("path"),
+                "content_length": (
+                    len(params.get("content", "")) if params.get("content") else 0
+                ),
+            },
+        )
 
         tool = await get_tool("functions.acp_fs__write_text_file")
         if not tool:
-            await self._write_json({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {
-                    "code": -32001,
-                    "message": "Tool functions.acp_fs__write_text_file is not available"
+            await self._write_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32001,
+                        "message": "Tool functions.acp_fs__write_text_file is not available",
+                    },
                 }
-            })
-            self._logger.warning("fs/write_text_file tool not available, check configuration", extra={"request_id": request_id})
+            )
+            self._logger.warning(
+                "fs/write_text_file tool not available, check configuration",
+                extra={"request_id": request_id},
+            )
             return
 
         path = params.get("path")
         content = params.get("content")
         if not path or content is None:
-            await self._write_json({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {
-                    "code": -32602,
-                    "message": "Missing required parameters: path and content"
+            await self._write_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32602,
+                        "message": "Missing required parameters: path and content",
+                    },
                 }
-            })
+            )
             return
 
         tool_params: dict[str, Any] = {"path": path, "content": content}
@@ -947,7 +1132,7 @@ class ZedAgentConnection:
             "id": f"fs_write_text_file_{uuid4().hex}",
             "toolId": tool.id,
             "parameters": tool_params,
-            "metadata": {"origin": "fs/write_text_file"}
+            "metadata": {"origin": "fs/write_text_file"},
         }
 
         permission_options = [
@@ -963,19 +1148,20 @@ class ZedAgentConnection:
         )
 
         if not self._is_option_allowed(option_id, permission_options):
-            await self._write_json({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {
-                    "code": -32003,
-                    "message": "fs/write_text_file denied by governance policy"
+            await self._write_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32003,
+                        "message": "fs/write_text_file denied by governance policy",
+                    },
                 }
-            })
-            self._logger.warning("fs/write_text_file permission denied", extra={
-                "request_id": request_id,
-                "path": path,
-                "option_id": option_id
-            })
+            )
+            self._logger.warning(
+                "fs/write_text_file permission denied",
+                extra={"request_id": request_id, "path": path, "option_id": option_id},
+            )
             return
 
         executor = get_bash_executor()
@@ -984,40 +1170,46 @@ class ZedAgentConnection:
             tool_id=tool.id,
             session_id=exec_session_id,
             task_id=f"fs_write_text_file_{uuid4().hex}",
-            user_id="zedacp_user"
+            user_id="zedacp_user",
         )
 
         result = await executor.execute_tool(tool, tool_params, context)
 
         if result.success:
-            await self._write_json({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {
-                    "content": result.output
+            await self._write_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"content": result.output},
                 }
-            })
-            self._logger.info("fs/write_text_file completed", extra={
-                "request_id": request_id,
-                "path": path,
-                "output_length": len(result.output) if result.output else 0
-            })
+            )
+            self._logger.info(
+                "fs/write_text_file completed",
+                extra={
+                    "request_id": request_id,
+                    "path": path,
+                    "output_length": len(result.output) if result.output else 0,
+                },
+            )
         else:
             error_payload = self._jsonrpc_error_from_tool_result(result)
-            await self._write_json({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": error_payload
-            })
-            self._logger.error("fs/write_text_file failed", extra={
-                "request_id": request_id,
-                "path": path,
-                "error": result.error,
-                "return_code": result.return_code,
-                "mcp_error": error_payload
-            })
+            await self._write_json(
+                {"jsonrpc": "2.0", "id": request_id, "error": error_payload}
+            )
+            self._logger.error(
+                "fs/write_text_file failed",
+                extra={
+                    "request_id": request_id,
+                    "path": path,
+                    "error": result.error,
+                    "return_code": result.return_code,
+                    "mcp_error": error_payload,
+                },
+            )
 
-    async def _handle_session_request_permission(self, payload: dict[str, Any], session_id: str) -> None:
+    async def _handle_session_request_permission(
+        self, payload: dict[str, Any], session_id: str
+    ) -> None:
         """Handle a permission request initiated by the agent."""
         request_id = payload.get("id")
         params = payload.get("params") or {}
@@ -1026,7 +1218,10 @@ class ZedAgentConnection:
         session_ref = params.get("sessionId") or session_id
 
         if request_id is None:
-            self._logger.warning("session/request_permission request missing id", extra={"payload": payload})
+            self._logger.warning(
+                "session/request_permission request missing id",
+                extra={"payload": payload},
+            )
             return
 
         self._logger.info(
@@ -1058,11 +1253,13 @@ class ZedAgentConnection:
 
         outcome = {"optionId": option_id}
 
-        await self._write_json({
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": {"outcome": outcome},
-        })
+        await self._write_json(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {"outcome": outcome},
+            }
+        )
 
         self._logger.info(
             "Responded to session/request_permission",
@@ -1134,10 +1331,14 @@ class ZedAgentConnection:
         return option_id
 
     @staticmethod
-    def _is_option_allowed(option_id: Optional[str], options: Sequence[Dict[str, Any]]) -> bool:
+    def _is_option_allowed(
+        option_id: Optional[str], options: Sequence[Dict[str, Any]]
+    ) -> bool:
         if not option_id:
             return False
-        selected_option = next((opt for opt in options if opt.get("optionId") == option_id), None)
+        selected_option = next(
+            (opt for opt in options if opt.get("optionId") == option_id), None
+        )
         if not selected_option:
             return False
         kind = selected_option.get("kind", "") or ""
@@ -1161,7 +1362,7 @@ class ZedAgentConnection:
         result: ToolExecutionResult,
         *,
         default_code: int = -32603,
-        default_message: str = "Tool execution failed"
+        default_message: str = "Tool execution failed",
     ) -> Dict[str, Any]:
         """Convert a failed tool execution into a JSON-RPC error payload."""
         mcp_error = ZedAgentConnection._extract_mcp_error(result)
@@ -1178,7 +1379,11 @@ class ZedAgentConnection:
 
             if profile is ErrorProfile.ACP_BASIC:
                 if detail_value is not None:
-                    error_payload["data"] = detail_value if isinstance(detail_value, str) else str(detail_value)
+                    error_payload["data"] = (
+                        detail_value
+                        if isinstance(detail_value, str)
+                        else str(detail_value)
+                    )
             else:
                 data_block: Dict[str, Any] = {"return_code": result.return_code}
                 if detail_value is not None:
@@ -1199,10 +1404,12 @@ class ZedAgentConnection:
         return {
             "code": default_code,
             "message": base_message,
-            "data": {"return_code": result.return_code}
+            "data": {"return_code": result.return_code},
         }
 
-    async def _process_zedacp_tool_calls(self, response: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+    async def _process_zedacp_tool_calls(
+        self, response: Dict[str, Any], session_id: str
+    ) -> Dict[str, Any]:
         """Process ZedACP tool calls in agent response.
 
         ZedACP tool calls come from agent responses in session/prompt.
@@ -1227,10 +1434,13 @@ class ZedAgentConnection:
         if not tool_calls or not isinstance(tool_calls, list):
             return response
 
-        logger.info(f"Processing {len(tool_calls)} ZedACP tool calls", extra={
-            "session_id": session_id,
-            "tool_call_ids": [call.get("id") for call in tool_calls]
-        })
+        logger.info(
+            f"Processing {len(tool_calls)} ZedACP tool calls",
+            extra={
+                "session_id": session_id,
+                "tool_call_ids": [call.get("id") for call in tool_calls],
+            },
+        )
 
         # Execute each tool call
         executed_calls = []
@@ -1239,30 +1449,41 @@ class ZedAgentConnection:
                 result = await self._execute_zedacp_tool_call(tool_call, session_id)
                 executed_calls.append(result)
             except Exception as e:
-                logger.error(f"Failed to execute tool call: {tool_call.get('id')}", extra={
-                    "error": str(e),
-                    "tool_call": tool_call
-                })
+                logger.error(
+                    f"Failed to execute tool call: {tool_call.get('id')}",
+                    extra={"error": str(e), "tool_call": tool_call},
+                )
 
                 # Return error result in ZedACP format
-                executed_calls.append({
-                    "toolCallId": tool_call.get("id"),
-                    "status": "failed",
-                    "content": [{"type": "text", "text": f"Tool execution failed: {str(e)}"}],
-                    "rawOutput": str(e)
-                })
+                executed_calls.append(
+                    {
+                        "toolCallId": tool_call.get("id"),
+                        "status": "failed",
+                        "content": [
+                            {"type": "text", "text": f"Tool execution failed: {str(e)}"}
+                        ],
+                        "rawOutput": str(e),
+                    }
+                )
 
         # Replace toolCalls with executed results
         response["toolCalls"] = executed_calls
 
-        logger.info(f"Processed {len(executed_calls)} tool call results", extra={
-            "session_id": session_id,
-            "successful": len([r for r in executed_calls if r.get("status") == "completed"])
-        })
+        logger.info(
+            f"Processed {len(executed_calls)} tool call results",
+            extra={
+                "session_id": session_id,
+                "successful": len(
+                    [r for r in executed_calls if r.get("status") == "completed"]
+                ),
+            },
+        )
 
         return response
 
-    async def _execute_zedacp_tool_call(self, tool_call: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+    async def _execute_zedacp_tool_call(
+        self, tool_call: Dict[str, Any], session_id: str
+    ) -> Dict[str, Any]:
         """Execute a single ZedACP tool call.
 
         Args:
@@ -1278,11 +1499,14 @@ class ZedAgentConnection:
         if not tool_id:
             raise ValueError("Tool call missing toolId")
 
-        logger.debug(f"Executing ZedACP tool call: {tool_call_id}", extra={
-            "tool_call_id": tool_call_id,
-            "tool_id": tool_id,
-            "session_id": session_id
-        })
+        logger.debug(
+            f"Executing ZedACP tool call: {tool_call_id}",
+            extra={
+                "tool_call_id": tool_call_id,
+                "tool_id": tool_id,
+                "session_id": session_id,
+            },
+        )
 
         # Get tool configuration
         tool = await get_tool(tool_id)
@@ -1299,8 +1523,10 @@ class ZedAgentConnection:
                 return {
                     "toolCallId": tool_call_id,
                     "status": "cancelled",
-                    "content": [{"type": "text", "text": "Tool execution cancelled by user"}],
-                    "rawOutput": "Tool execution cancelled by user"
+                    "content": [
+                        {"type": "text", "text": "Tool execution cancelled by user"}
+                    ],
+                    "rawOutput": "Tool execution cancelled by user",
                 }
 
         # Create execution context
@@ -1308,7 +1534,7 @@ class ZedAgentConnection:
             tool_id=tool_id,
             session_id=session_id,
             task_id=f"zedacp_{tool_call_id}",
-            user_id="zedacp_user"
+            user_id="zedacp_user",
         )
 
         # Execute the tool
@@ -1318,7 +1544,9 @@ class ZedAgentConnection:
         # Convert result to ZedACP format
         status = "completed" if result.success else "failed"
         mcp_error = self._extract_mcp_error(result)
-        failure_text = result.error or (mcp_error.get("message") if mcp_error else "Tool execution failed")
+        failure_text = result.error or (
+            mcp_error.get("message") if mcp_error else "Tool execution failed"
+        )
         content_text = result.output if result.success else failure_text
         raw_output = result.output if result.output else (result.error or failure_text)
 
@@ -1326,7 +1554,7 @@ class ZedAgentConnection:
             "toolCallId": tool_call_id,
             "status": status,
             "content": [{"type": "text", "text": content_text}],
-            "rawOutput": raw_output
+            "rawOutput": raw_output,
         }
 
         if mcp_error:
@@ -1351,7 +1579,9 @@ class ZedAgentConnection:
                     continue
                 if key in metadata_payload:
                     continue
-                if self._error_profile is ErrorProfile.ACP_BASIC and isinstance(value, (dict, list)):
+                if self._error_profile is ErrorProfile.ACP_BASIC and isinstance(
+                    value, (dict, list)
+                ):
                     continue
                 metadata_payload[key] = value
 
@@ -1359,21 +1589,30 @@ class ZedAgentConnection:
             meta_payload = zedacp_result.setdefault("meta", {})
             meta_payload["a2a_diagnostics"] = diagnostics
             if self._error_profile is ErrorProfile.ACP_BASIC:
-                diagnostics_text = json.dumps(diagnostics, separators=(",", ":"), default=str)
-                zedacp_result["content"].append({"type": "text", "text": f"Diagnostics: {diagnostics_text}"})
+                diagnostics_text = json.dumps(
+                    diagnostics, separators=(",", ":"), default=str
+                )
+                zedacp_result["content"].append(
+                    {"type": "text", "text": f"Diagnostics: {diagnostics_text}"}
+                )
 
         if metadata_payload:
             zedacp_result["metadata"] = metadata_payload
 
-        logger.debug(f"ZedACP tool call completed: {tool_call_id}", extra={
-            "tool_call_id": tool_call_id,
-            "status": status,
-            "execution_time": result.execution_time
-        })
+        logger.debug(
+            f"ZedACP tool call completed: {tool_call_id}",
+            extra={
+                "tool_call_id": tool_call_id,
+                "status": status,
+                "execution_time": result.execution_time,
+            },
+        )
 
         return zedacp_result
 
-    async def _request_tool_permission(self, tool_call: Dict[str, Any], session_id: str) -> bool:
+    async def _request_tool_permission(
+        self, tool_call: Dict[str, Any], session_id: str
+    ) -> bool:
         """Request tool execution permission from ZedACP agent.
 
         Args:
@@ -1386,15 +1625,22 @@ class ZedAgentConnection:
         tool_id = tool_call.get("toolId")
         tool_call_id = tool_call.get("id")
 
-        logger.info(f"Requesting tool permission: {tool_id}", extra={
-            "tool_id": tool_id,
-            "tool_call_id": tool_call_id,
-            "session_id": session_id
-        })
+        logger.info(
+            f"Requesting tool permission: {tool_id}",
+            extra={
+                "tool_id": tool_id,
+                "tool_call_id": tool_call_id,
+                "session_id": session_id,
+            },
+        )
 
         try:
             options: list[dict[str, Any]] = [
-                {"optionId": "proceed_always", "name": "Allow All Edits", "kind": "allow_always"},
+                {
+                    "optionId": "proceed_always",
+                    "name": "Allow All Edits",
+                    "kind": "allow_always",
+                },
                 {"optionId": "proceed_once", "name": "Allow", "kind": "allow_once"},
                 {"optionId": "cancel", "name": "Reject", "kind": "reject_once"},
             ]
@@ -1422,19 +1668,20 @@ class ZedAgentConnection:
             return permitted
 
         except Exception as e:
-            logger.error(f"Permission request failed for tool: {tool_id}", extra={
-                "tool_id": tool_id,
-                "tool_call_id": tool_call_id,
-                "error": str(e),
-                "session_id": session_id
-            })
+            logger.error(
+                f"Permission request failed for tool: {tool_id}",
+                extra={
+                    "tool_id": tool_id,
+                    "tool_call_id": tool_call_id,
+                    "error": str(e),
+                    "session_id": session_id,
+                },
+            )
             # Default to deny on error
             return False
 
     async def execute_bash_tool(
-        self,
-        tool_call: Dict[str, Any],
-        session_id: str
+        self, tool_call: Dict[str, Any], session_id: str
     ) -> ToolExecutionResult:
         """Legacy method for executing bash tools (for backward compatibility).
 
@@ -1462,7 +1709,7 @@ class ZedAgentConnection:
             tool_id=tool_id,
             session_id=session_id,
             task_id=f"legacy_{tool_call.get('id', 'unknown')}",
-            user_id="legacy_user"
+            user_id="legacy_user",
         )
 
         # Execute using bash executor

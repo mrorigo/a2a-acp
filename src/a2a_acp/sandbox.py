@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ExecutionResult:
     """Result of a tool execution."""
+
     success: bool = True
     return_code: int = 0
     stdout: str = ""
@@ -50,6 +51,7 @@ class ExecutionResult:
 @dataclass
 class ExecutionContext:
     """Context information for tool execution."""
+
     tool_id: str
     session_id: str
     task_id: str
@@ -70,11 +72,13 @@ class ExecutionContext:
 
 class SandboxError(Exception):
     """Raised when sandbox operations fail."""
+
     pass
 
 
 class SandboxSecurityError(SandboxError):
     """Raised when security violations are detected."""
+
     pass
 
 
@@ -97,68 +101,82 @@ class ToolSandbox:
         self.max_memory_mb = 512  # 512MB per tool
         self.allowed_paths: List[str] = []  # Paths tools are allowed to access
 
-    async def prepare_environment(self, tool: BashTool, context: ExecutionContext) -> Dict[str, str]:
+    async def prepare_environment(
+        self, tool: BashTool, context: ExecutionContext
+    ) -> Dict[str, str]:
         """Prepare the execution environment for a tool.
-    
+
         Args:
             tool: The tool to prepare environment for
             context: Execution context information
-    
+
         Returns:
             Dictionary of environment variables for the tool
         """
         # Start with current environment
         env = os.environ.copy()
-    
+
         # Apply tool-specific configuration
         config = tool.config
-    
+
         working_dir = None
         if config.working_directory:
             if config.use_temp_isolation:
                 # Create isolated temp directory
-                working_dir = await self._prepare_working_directory(config.working_directory, context)
+                working_dir = await self._prepare_working_directory(
+                    config.working_directory, context
+                )
             else:
                 # Use configured working directory directly
                 working_dir_path = Path(config.working_directory).resolve()
                 if not working_dir_path.exists():
-                    raise SandboxError(f"Working directory does not exist: {working_dir_path}")
+                    raise SandboxError(
+                        f"Working directory does not exist: {working_dir_path}"
+                    )
                 working_dir = str(working_dir_path)
                 # Set allowed paths for validation when not isolated
                 self.allowed_paths = config.allowed_paths
-    
+
             env["TOOL_WORKING_DIR"] = working_dir
             env["PWD"] = working_dir
-    
+
         # Inject tool-specific environment variables
         if config.environment_variables:
             env.update(config.environment_variables)
-    
+
         # Add execution context metadata
-        env.update({
-            "TOOL_ID": tool.id,
-            "TOOL_NAME": tool.name,
-            "SESSION_ID": context.session_id,
-            "TASK_ID": context.task_id,
-            "USER_ID": context.user_id,
-            "EXECUTION_TIMESTAMP": context.timestamp.isoformat() if context.timestamp else datetime.now().isoformat(),
-            "TEMP": env.get("TOOL_WORKING_DIR", tempfile.gettempdir()),
-            "TMPDIR": env.get("TOOL_WORKING_DIR", tempfile.gettempdir()),
-            "ISOLATION_ENABLED": str(config.use_temp_isolation).lower(),
-        })
-    
+        env.update(
+            {
+                "TOOL_ID": tool.id,
+                "TOOL_NAME": tool.name,
+                "SESSION_ID": context.session_id,
+                "TASK_ID": context.task_id,
+                "USER_ID": context.user_id,
+                "EXECUTION_TIMESTAMP": (
+                    context.timestamp.isoformat()
+                    if context.timestamp
+                    else datetime.now().isoformat()
+                ),
+                "TEMP": env.get("TOOL_WORKING_DIR", tempfile.gettempdir()),
+                "TMPDIR": env.get("TOOL_WORKING_DIR", tempfile.gettempdir()),
+                "ISOLATION_ENABLED": str(config.use_temp_isolation).lower(),
+            }
+        )
+
         # Security: Restrict dangerous environment variables
         await self._sanitize_environment(env)
-    
+
         # Apply filesystem access controls
         await self._apply_filesystem_controls(env, config)
-    
+
         # Apply network access controls
         await self._apply_network_controls(env, config)
-    
+
         return env
 
-    async def _prepare_working_directory(self, base_dir: str, context: ExecutionContext) -> str:
+    async def _prepare_working_directory(
+        self, base_dir: str, context: ExecutionContext
+    ) -> str:
         """Prepare and return the working directory for tool execution."""
         # Create a unique subdirectory for this execution
         execution_id = str(uuid.uuid4())[:8]
@@ -176,24 +194,31 @@ class ToolSandbox:
                 self._active_sandboxes[str(working_dir)] = {
                     "created": datetime.now(),
                     "tool_id": context.tool_id,
-                    "context": context
+                    "context": context,
                 }
 
             logger.debug(f"Prepared working directory: {working_dir}")
             return str(working_dir)
 
         except Exception as e:
-            logger.error(f"Failed to prepare working directory {working_dir}", extra={"error": str(e)})
+            logger.error(
+                f"Failed to prepare working directory {working_dir}",
+                extra={"error": str(e)},
+            )
             raise SandboxError(f"Failed to prepare working directory: {e}")
 
     async def _sanitize_environment(self, env: Dict[str, Any]) -> None:
         """Sanitize environment variables for security."""
         # Remove or restrict dangerous variables
         dangerous_vars = [
-            "LD_PRELOAD", "LD_LIBRARY_PATH",  # Library injection
+            "LD_PRELOAD",
+            "LD_LIBRARY_PATH",  # Library injection
             "PATH",  # We'll set our own controlled PATH
-            "HOME", "USER", "SHELL",  # User identity
-            "SSH_AUTH_SOCK", "SSH_AGENT_PID",  # SSH access
+            "HOME",
+            "USER",
+            "SHELL",  # User identity
+            "SSH_AUTH_SOCK",
+            "SSH_AGENT_PID",  # SSH access
             "GPG_AGENT_INFO",  # GPG access
             "DBUS_SESSION_BUS_ADDRESS",  # D-Bus access
         ]
@@ -202,7 +227,9 @@ class ToolSandbox:
             if var in env:
                 if var == "PATH":
                     # Set a controlled PATH
-                    env[var] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    env[var] = (
+                        "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    )
                 else:
                     # Remove dangerous variables
                     del env[var]
@@ -211,7 +238,9 @@ class ToolSandbox:
         if "PATH" not in env:
             env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-    async def _apply_filesystem_controls(self, env: Dict[str, str], config: ToolConfig) -> None:
+    async def _apply_filesystem_controls(
+        self, env: Dict[str, str], config: ToolConfig
+    ) -> None:
         """Apply filesystem access controls for the tool.
 
         Args:
@@ -223,7 +252,7 @@ class ToolSandbox:
 
         # Set restrictive file permissions for new files
         env["FORCE_FILE_PERMISSIONS"] = "600"  # -rw-------
-        env["FORCE_DIR_PERMISSIONS"] = "700"   # drwx------
+        env["FORCE_DIR_PERMISSIONS"] = "700"  # drwx------
 
         # If tool has allowed_commands, validate file operations against allowlist
         if config.allowed_commands:
@@ -243,10 +272,16 @@ class ToolSandbox:
             # Validate that requested file operations are in allowed commands
             # This is a basic check - more sophisticated validation would be needed for production
             for operation, required_commands in file_operation_mapping.items():
-                operation_allowed = any(cmd in allowed_patterns for cmd in required_commands)
-                env[f"FILE_OP_{operation.upper()}_ALLOWED"] = str(operation_allowed).lower()
+                operation_allowed = any(
+                    cmd in allowed_patterns for cmd in required_commands
+                )
+                env[f"FILE_OP_{operation.upper()}_ALLOWED"] = str(
+                    operation_allowed
+                ).lower()
 
-    async def _apply_network_controls(self, env: Dict[str, str], config: ToolConfig) -> None:
+    async def _apply_network_controls(
+        self, env: Dict[str, str], config: ToolConfig
+    ) -> None:
         """Apply network access controls for the tool.
 
         Args:
@@ -254,14 +289,26 @@ class ToolSandbox:
             config: Tool configuration with security settings
         """
         # Default network restrictions
-        env["NETWORK_ACCESS_ALLOWED"] = "true"  # Basic network access is generally allowed
+        env["NETWORK_ACCESS_ALLOWED"] = (
+            "true"  # Basic network access is generally allowed
+        )
 
         # If tool has specific allowed commands, check for network operations
         if config.allowed_commands:
             allowed_patterns = [cmd.strip() for cmd in config.allowed_commands]
 
             # Check for allowed network commands
-            network_commands = ["curl", "wget", "ping", "nslookup", "dig", "nc", "netcat", "ssh", "scp"]
+            network_commands = [
+                "curl",
+                "wget",
+                "ping",
+                "nslookup",
+                "dig",
+                "nc",
+                "netcat",
+                "ssh",
+                "scp",
+            ]
             network_allowed = any(cmd in allowed_patterns for cmd in network_commands)
 
             if not network_allowed:
@@ -277,7 +324,9 @@ class ToolSandbox:
         # Set DNS restrictions (basic)
         env["DNS_RESTRICTED"] = "true"
 
-    async def validate_script_security(self, script: str, allowed_commands: Optional[List[str]] = None) -> tuple[bool, List[str]]:
+    async def validate_script_security(
+        self, script: str, allowed_commands: Optional[List[str]] = None
+    ) -> tuple[bool, List[str]]:
         """Validate script for security violations.
 
         Args:
@@ -290,9 +339,27 @@ class ToolSandbox:
         if not allowed_commands:
             # If no allowlist, only allow basic safe commands
             allowed_commands = [
-                "curl", "wget", "grep", "awk", "sed", "cut", "sort", "uniq",
-                "head", "tail", "cat", "echo", "printf", "date", "basename",
-                "dirname", "wc", "tr", "tee", "jq", "base64"
+                "curl",
+                "wget",
+                "grep",
+                "awk",
+                "sed",
+                "cut",
+                "sort",
+                "uniq",
+                "head",
+                "tail",
+                "cat",
+                "echo",
+                "printf",
+                "date",
+                "basename",
+                "dirname",
+                "wc",
+                "tr",
+                "tee",
+                "jq",
+                "base64",
             ]
 
         warnings = []
@@ -329,17 +396,17 @@ class ToolSandbox:
 
         # Command injection patterns
         injection_patterns = [
-            (r';\s*rm\s+', "Command chaining with rm (potential injection)"),
-            (r'\|\s*rm\s+', "Pipe to rm (potential injection)"),
-            (r'&&\s*rm\s+', "Conditional execution with rm (potential injection)"),
-            (r';\s*wget\s+', "Command chaining with wget (potential injection)"),
-            (r';\s*curl\s+', "Command chaining with curl (potential injection)"),
-            (r'>\s*/dev/null', "Output redirection hiding (potential injection)"),
-            (r'2>\s*/dev/null', "Error redirection hiding (potential injection)"),
-            (r'\$\((?!\()', "Command substitution (potential injection)"),
-            (r'`.*`', "Backtick command execution (potential injection)"),
-            (r';\s*cat\s+', "Command chaining with cat (potential injection)"),
-            (r'\|\s*cat\s+', "Pipe to cat (potential injection)"),
+            (r";\s*rm\s+", "Command chaining with rm (potential injection)"),
+            (r"\|\s*rm\s+", "Pipe to rm (potential injection)"),
+            (r"&&\s*rm\s+", "Conditional execution with rm (potential injection)"),
+            (r";\s*wget\s+", "Command chaining with wget (potential injection)"),
+            (r";\s*curl\s+", "Command chaining with curl (potential injection)"),
+            (r">\s*/dev/null", "Output redirection hiding (potential injection)"),
+            (r"2>\s*/dev/null", "Error redirection hiding (potential injection)"),
+            (r"\$\((?!\()", "Command substitution (potential injection)"),
+            (r"`.*`", "Backtick command execution (potential injection)"),
+            (r";\s*cat\s+", "Command chaining with cat (potential injection)"),
+            (r"\|\s*cat\s+", "Pipe to cat (potential injection)"),
         ]
 
         script_lower = script.lower()
@@ -347,29 +414,39 @@ class ToolSandbox:
         # Check for dangerous commands
         for pattern, description in dangerous_patterns:
             if re.search(pattern, script_lower):
-                command_name = pattern.split(r"\b")[1] if r"\b" in pattern else pattern.replace('\\b', '').replace('\\s+', ' ')
-                if not any(cmd in script for cmd in allowed_commands if cmd.lower() in command_name.lower()):
+                command_name = (
+                    pattern.split(r"\b")[1]
+                    if r"\b" in pattern
+                    else pattern.replace("\\b", "").replace("\\s+", " ")
+                )
+                if not any(
+                    cmd in script
+                    for cmd in allowed_commands
+                    if cmd.lower() in command_name.lower()
+                ):
                     violations.append(f"Blocked dangerous command: {description}")
                 else:
-                    warnings.append(f"Warning: {description} (allowed by configuration)")
+                    warnings.append(
+                        f"Warning: {description} (allowed by configuration)"
+                    )
 
         # Check for command injection patterns
         safe_substitutions = ("$(dirname", "$(basename", "$(wc")
         for pattern, description in injection_patterns:
             for match in re.finditer(pattern, script, re.IGNORECASE):
-                if pattern == r'\$\((?!\()':
-                    fragment = script[match.start(): match.start() + 40].lower()
+                if pattern == r"\$\((?!\()":
+                    fragment = script[match.start() : match.start() + 40].lower()
                     if fragment.startswith(safe_substitutions):
                         continue
-                script[match.start(): match.end() + 40]
+                script[match.start() : match.end() + 40]
                 violations.append(f"Blocked command injection attempt: {description}")
 
         # Check for filesystem path traversal
-        if re.search(r'\.\.\s*/', script) or re.search(r'/\.\.', script):
+        if re.search(r"\.\.\s*/", script) or re.search(r"/\.\.", script):
             violations.append("Blocked path traversal attempt")
 
         # Check for suspicious file operations
-        if re.search(r'[<>]\s*/', script):
+        if re.search(r"[<>]\s*/", script):
             violations.append("Blocked suspicious file redirection")
 
         # Validate file paths in common commands
@@ -384,14 +461,16 @@ class ToolSandbox:
 
         return is_valid, warnings + violations
 
-    def _validate_file_paths(self, script: str, allowed_commands: List[str]) -> List[str]:
+    def _validate_file_paths(
+        self, script: str, allowed_commands: List[str]
+    ) -> List[str]:
         """Validate file paths in script for security."""
         violations = []
         variables = {}
         var_pattern = re.compile(r'^([a-zA-Z_][a-zA-Z0-9_]*)=([\'"`]?)(.*)\2$')
 
-        lines = script.split('\n')
-        
+        lines = script.split("\n")
+
         # First pass: collect variable definitions
         for line in lines:
             match = var_pattern.match(line.strip())
@@ -402,7 +481,7 @@ class ToolSandbox:
 
         def resolve_path(path_str: str) -> str:
             # Simple, non-recursive substitution
-            return variables.get(path_str.strip('\'"'), path_str.strip('\'"'))
+            return variables.get(path_str.strip("'\""), path_str.strip("'\""))
 
         # Regex to find file paths after redirection operators > or >>
         write_pattern = re.compile(r'(?:>>|(?<!&)>)\s*([\'"`]?)([$\w./-]+)\1')
@@ -413,11 +492,11 @@ class ToolSandbox:
             parts = line.split()
             if not parts:
                 continue
-            
+
             command = parts[0]
 
             # Check file reading operations
-            if command in ['cat', 'head', 'tail', 'less', 'more', 'sed']:
+            if command in ["cat", "head", "tail", "less", "more", "sed"]:
                 if len(parts) >= 2:
                     file_path = parts[-1]
                     resolved_path = resolve_path(file_path)
@@ -426,7 +505,7 @@ class ToolSandbox:
                         violations.append(f"Blocked file access: {stripped_path}")
 
             # Check file writing operations
-            elif command in ['echo', 'printf', 'tee'] and '>' in line:
+            elif command in ["echo", "printf", "tee"] and ">" in line:
                 matches = write_pattern.finditer(line)
                 for match in matches:
                     file_path = match.group(2)
@@ -435,7 +514,7 @@ class ToolSandbox:
                         violations.append(f"Blocked file write: {file_path}")
 
             # Check directory operations
-            elif command == 'cd':
+            elif command == "cd":
                 if len(parts) > 1:
                     dir_path = parts[1]
                     resolved_path = resolve_path(dir_path)
@@ -448,10 +527,15 @@ class ToolSandbox:
     def _is_path_allowed(self, path: str, allowed_commands: List[str]) -> bool:
         """Check if a file path is allowed based on security configuration."""
         # Basic path validation
-        if not path or path.startswith('/dev/') or path.startswith('/proc/') or path.startswith('$'):
+        if (
+            not path
+            or path.startswith("/dev/")
+            or path.startswith("/proc/")
+            or path.startswith("$")
+        ):
             return False
 
-        if '..' in path:
+        if ".." in path:
             return False
 
         if not self.allowed_paths:
@@ -466,20 +550,27 @@ class ToolSandbox:
 
         return False
 
-    def _log_security_events(self, script: str, violations: List[str], warnings: List[str]) -> None:
+    def _log_security_events(
+        self, script: str, violations: List[str], warnings: List[str]
+    ) -> None:
         """Log security events for monitoring and audit."""
         if violations:
-            logger.warning("Security violations detected in script", extra={
-                "violations": violations,
-                "script_length": len(script),
-                "script_preview": script[:200] + "..." if len(script) > 200 else script
-            })
+            logger.warning(
+                "Security violations detected in script",
+                extra={
+                    "violations": violations,
+                    "script_length": len(script),
+                    "script_preview": (
+                        script[:200] + "..." if len(script) > 200 else script
+                    ),
+                },
+            )
 
         if warnings:
-            logger.info("Security warnings in script", extra={
-                "warnings": warnings,
-                "script_length": len(script)
-            })
+            logger.info(
+                "Security warnings in script",
+                extra={"warnings": warnings, "script_length": len(script)},
+            )
 
     def _set_process_limits(self, tool_config: Optional[ToolConfig] = None):
         """Set process resource limits for security.
@@ -502,7 +593,9 @@ class ToolSandbox:
 
             # Apply CPU time limit (default: 30 seconds)
             cpu_limit_seconds = max_cpu_seconds or 30
-            resource.setrlimit(resource.RLIMIT_CPU, (cpu_limit_seconds, cpu_limit_seconds))
+            resource.setrlimit(
+                resource.RLIMIT_CPU, (cpu_limit_seconds, cpu_limit_seconds)
+            )
 
             # Apply file size limit (default: 10MB)
             file_limit_mb = max_file_mb or 10
@@ -517,13 +610,16 @@ class ToolSandbox:
             process_limit = max_processes or 10
             resource.setrlimit(resource.RLIMIT_NPROC, (process_limit, process_limit))
 
-            logger.debug("Set process limits for tool", extra={
-                "memory_mb": memory_limit_mb,
-                "cpu_seconds": cpu_limit_seconds,
-                "file_mb": file_limit_mb,
-                "files": files_limit,
-                "processes": process_limit
-            })
+            logger.debug(
+                "Set process limits for tool",
+                extra={
+                    "memory_mb": memory_limit_mb,
+                    "cpu_seconds": cpu_limit_seconds,
+                    "file_mb": file_limit_mb,
+                    "files": files_limit,
+                    "processes": process_limit,
+                },
+            )
 
         except (ImportError, AttributeError):
             # Resource module not available on all platforms
@@ -537,7 +633,7 @@ class ToolSandbox:
         env: Dict[str, str],
         context: ExecutionContext,
         timeout: Optional[int] = None,
-        tool_config: Optional[ToolConfig] = None
+        tool_config: Optional[ToolConfig] = None,
     ) -> ExecutionResult:
         """Execute a script in the sandboxed environment.
 
@@ -555,18 +651,24 @@ class ToolSandbox:
 
         try:
             # Enhanced script security validation
-            allowed_commands = context.metadata.get("allowed_commands") if context.metadata else None
-            is_valid, security_issues = await self.validate_script_security(script, allowed_commands)
+            allowed_commands = (
+                context.metadata.get("allowed_commands") if context.metadata else None
+            )
+            is_valid, security_issues = await self.validate_script_security(
+                script, allowed_commands
+            )
 
             if not is_valid:
-                raise SandboxSecurityError(f"Script failed security validation: {'; '.join(security_issues)}")
+                raise SandboxSecurityError(
+                    f"Script failed security validation: {'; '.join(security_issues)}"
+                )
 
             # Log security warnings if any
             if security_issues:
-                logger.warning("Script security warnings", extra={
-                    "tool_id": context.tool_id,
-                    "warnings": security_issues
-                })
+                logger.warning(
+                    "Script security warnings",
+                    extra={"tool_id": context.tool_id, "warnings": security_issues},
+                )
 
             # Set up execution environment
             execution_timeout = timeout or 30
@@ -574,8 +676,10 @@ class ToolSandbox:
             # Execute the script with enhanced security
             preexec_fn = None
             if sys.platform != "darwin":
+
                 def preexec_fn():
                     return self._set_process_limits(tool_config)
+
             else:
                 if tool_config and any(
                     limit is not None
@@ -602,45 +706,57 @@ class ToolSandbox:
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
                 cwd=working_dir,
-                preexec_fn=preexec_fn  # Set resource limits when supported
+                preexec_fn=preexec_fn,  # Set resource limits when supported
             )
 
             try:
                 # Wait for completion with timeout
                 stdout_data, stderr_data = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=execution_timeout
+                    process.communicate(), timeout=execution_timeout
                 )
 
                 execution_time = (datetime.now() - start_time).total_seconds()
 
                 # Decode output
-                stdout = stdout_data.decode('utf-8', errors='replace') if stdout_data else ""
-                stderr = stderr_data.decode('utf-8', errors='replace') if stderr_data else ""
+                stdout = (
+                    stdout_data.decode("utf-8", errors="replace") if stdout_data else ""
+                )
+                stderr = (
+                    stderr_data.decode("utf-8", errors="replace") if stderr_data else ""
+                )
 
                 # Check output size limits
-                if len(stdout.encode('utf-8')) > self.max_output_size:
-                    raise SandboxError(f"Output size exceeds limit of {self.max_output_size} bytes")
+                if len(stdout.encode("utf-8")) > self.max_output_size:
+                    raise SandboxError(
+                        f"Output size exceeds limit of {self.max_output_size} bytes"
+                    )
 
-                if len(stderr.encode('utf-8')) > self.max_output_size:
-                    raise SandboxError(f"Error output size exceeds limit of {self.max_output_size} bytes")
+                if len(stderr.encode("utf-8")) > self.max_output_size:
+                    raise SandboxError(
+                        f"Error output size exceeds limit of {self.max_output_size} bytes"
+                    )
 
                 # Collect any output files created (skip for non-isolated executions to avoid scanning project dir)
                 output_files = []
                 if tool_config and tool_config.use_temp_isolation:
                     output_files = await self._collect_output_files(working_dir)
 
-                logger.info("Script executed", extra={
-                    "success": process.returncode == 0,
-                    "stdout": stdout,
-                    "stderr": stderr,
-                    "tool_id": context.tool_id,
-                    "return_code": process.returncode,
-                    "execution_time": execution_time,
-                    "output_files": output_files
-                })
+                logger.info(
+                    "Script executed",
+                    extra={
+                        "success": process.returncode == 0,
+                        "stdout": stdout,
+                        "stderr": stderr,
+                        "tool_id": context.tool_id,
+                        "return_code": process.returncode,
+                        "execution_time": execution_time,
+                        "output_files": output_files,
+                    },
+                )
 
-                resolved_return = process.returncode if process.returncode is not None else -1
+                resolved_return = (
+                    process.returncode if process.returncode is not None else -1
+                )
 
                 return ExecutionResult(
                     success=process.returncode == 0,
@@ -654,26 +770,31 @@ class ToolSandbox:
                         "timeout": execution_timeout,
                         "process_id": process.pid,
                         "tool_id": context.tool_id,
-                    }
+                    },
                 )
 
             except asyncio.TimeoutError:
                 # Kill the process group if it exists
-                if hasattr(os, 'killpg'):
+                if hasattr(os, "killpg"):
                     try:
                         os.killpg(os.getpgid(process.pid), 9)  # SIGKILL
                     except (ProcessLookupError, OSError):
                         pass
 
-                raise SandboxError(f"Script execution timed out after {execution_timeout} seconds")
+                raise SandboxError(
+                    f"Script execution timed out after {execution_timeout} seconds"
+                )
 
         except Exception as e:
             execution_time = (datetime.now() - start_time).total_seconds()
-            logger.error("Sandbox execution failed", extra={
-                "tool_id": context.tool_id,
-                "error": str(e),
-                "execution_time": execution_time
-            })
+            logger.error(
+                "Sandbox execution failed",
+                extra={
+                    "tool_id": context.tool_id,
+                    "error": str(e),
+                    "execution_time": execution_time,
+                },
+            )
 
             return ExecutionResult(
                 success=False,
@@ -685,7 +806,7 @@ class ToolSandbox:
                     "working_directory": working_dir,
                     "error_type": type(e).__name__,
                     "tool_id": context.tool_id,
-                }
+                },
             )
 
     async def _collect_output_files(self, working_dir: str) -> List[str]:
@@ -699,8 +820,16 @@ class ToolSandbox:
 
             # Look for common output file patterns
             output_patterns = [
-                "*.txt", "*.json", "*.csv", "*.xml", "*.yaml", "*.yml",
-                "output.*", "result.*", "*.out", "*.result"
+                "*.txt",
+                "*.json",
+                "*.csv",
+                "*.xml",
+                "*.yaml",
+                "*.yml",
+                "output.*",
+                "result.*",
+                "*.out",
+                "*.result",
             ]
 
             for pattern in output_patterns:
@@ -709,11 +838,16 @@ class ToolSandbox:
                         output_files.append(str(file_path.relative_to(working_path)))
 
         except Exception as e:
-            logger.warning(f"Failed to collect output files from {working_dir}", extra={"error": str(e)})
+            logger.warning(
+                f"Failed to collect output files from {working_dir}",
+                extra={"error": str(e)},
+            )
 
         return output_files
 
-    async def cleanup_sandbox(self, working_dir: str, context: ExecutionContext) -> None:
+    async def cleanup_sandbox(
+        self, working_dir: str, context: ExecutionContext
+    ) -> None:
         """Clean up a sandboxed execution environment.
 
         Args:
@@ -732,7 +866,7 @@ class ToolSandbox:
                     import shutil
 
                     # Set permissions to allow deletion
-                    for file_path in working_path.rglob('*'):
+                    for file_path in working_path.rglob("*"):
                         if file_path.is_file():
                             file_path.chmod(0o600)
                         elif file_path.is_dir():
@@ -745,7 +879,9 @@ class ToolSandbox:
                 self._active_sandboxes.pop(working_dir, None)
 
             except Exception as e:
-                logger.error(f"Failed to cleanup sandbox {working_dir}", extra={"error": str(e)})
+                logger.error(
+                    f"Failed to cleanup sandbox {working_dir}", extra={"error": str(e)}
+                )
 
     async def cleanup_expired_sandboxes(self, max_age_seconds: int = 3600) -> int:
         """Clean up sandboxes older than the specified age.
@@ -781,14 +917,16 @@ class ToolSandbox:
                 "active_sandboxes": len(self._active_sandboxes),
                 "sandboxes_by_tool": {},
                 "oldest_sandbox_age": 0,
-                "total_sandboxes_created": 0  # Would need persistent tracking for this
+                "total_sandboxes_created": 0,  # Would need persistent tracking for this
             }
 
             if self._active_sandboxes:
                 oldest_time = min(
                     info["created"] for info in self._active_sandboxes.values()
                 )
-                stats["oldest_sandbox_age"] = (current_time - oldest_time).total_seconds()
+                stats["oldest_sandbox_age"] = (
+                    current_time - oldest_time
+                ).total_seconds()
 
                 # Count by tool
                 tool_counts = {}
@@ -814,8 +952,7 @@ def get_sandbox_manager() -> ToolSandbox:
 
 @asynccontextmanager
 async def managed_sandbox(
-    tool: BashTool,
-    context: ExecutionContext
+    tool: BashTool, context: ExecutionContext
 ) -> AsyncGenerator[tuple[Dict[str, str], str], None]:
     """Context manager for managed sandbox execution.
 

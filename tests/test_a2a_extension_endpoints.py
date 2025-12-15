@@ -94,7 +94,10 @@ def test_client(mock_settings, mock_tool_manager, mock_task_manager) -> TestClie
     context_manager.add_task_to_context = AsyncMock()
     context_manager.add_message_to_context = AsyncMock()
     with (
-        patch("a2a_acp.main.get_tool_configuration_manager", return_value=mock_tool_manager),
+        patch(
+            "a2a_acp.main.get_tool_configuration_manager",
+            return_value=mock_tool_manager,
+        ),
         patch("a2a_acp.main.get_task_manager", return_value=mock_task_manager),
         patch("a2a_acp.main.get_context_manager", return_value=context_manager),
     ):
@@ -160,7 +163,9 @@ class TestCommandsGetEndpoint:
 class TestCommandExecuteEndpoint:
     """Tests for /a2a/command/execute endpoint."""
 
-    def test_execute_command_creates_task_and_returns_response(self, test_client, mock_task_manager):
+    def test_execute_command_creates_task_and_returns_response(
+        self, test_client, mock_task_manager
+    ):
         """Test endpoint creates task and returns ExecuteSlashCommandResponse."""
         request_data = {
             "command": "echo",
@@ -197,13 +202,18 @@ class TestCommandExecuteEndpoint:
         assert isinstance(detail, list)
         assert any("validation" in str(error).lower() for error in detail)
 
-    def test_execute_command_disabled_when_extension_off(self, test_client, mock_settings):
+    def test_execute_command_disabled_when_extension_off(
+        self, test_client, mock_settings
+    ):
         """Test endpoint returns 404 when extension disabled."""
         settings = mock_settings.return_value
         settings.development_tool_extension_enabled = False
         settings.auth_token = None
 
-        response = test_client.post("/a2a/command/execute", json={"command": "echo", "arguments": {"message": "test"}})
+        response = test_client.post(
+            "/a2a/command/execute",
+            json={"command": "echo", "arguments": {"message": "test"}},
+        )
         assert response.status_code == 404
         assert response.json()["detail"] == "Development tool extension not enabled"
 
@@ -213,7 +223,10 @@ class TestCommandExecuteEndpoint:
         settings = mock_settings.return_value
         settings.auth_token = "test-token"
 
-        response = test_client.post("/a2a/command/execute", json={"command": "echo", "arguments": {"message": "test"}})
+        response = test_client.post(
+            "/a2a/command/execute",
+            json={"command": "echo", "arguments": {"message": "test"}},
+        )
         assert response.status_code == 401
         assert "bearer token" in response.json()["detail"]
 
@@ -235,13 +248,18 @@ class TestAgentCardExtension:
 
         assert len(extensions) == 1
         ext = extensions[0]
-        assert ext["uri"] == "https://developers.google.com/gemini/a2a/extensions/development-tool/v1"
+        assert (
+            ext["uri"]
+            == "https://developers.google.com/gemini/a2a/extensions/development-tool/v1"
+        )
         params = ext.get("params", {})
         assert params.get("version") == "1.0.0"
         metadata = params.get("metadata", {})
         assert "description" in metadata
 
-    def test_agent_card_excludes_extension_when_disabled(self, test_client, mock_settings):
+    def test_agent_card_excludes_extension_when_disabled(
+        self, test_client, mock_settings
+    ):
         """Test agent card excludes extension when disabled."""
         settings = mock_settings.return_value
         settings.development_tool_extension_enabled = False
@@ -256,12 +274,15 @@ class TestAgentCardExtension:
     def test_authenticated_agent_card(self, test_client):
         """Test authenticated extended agent card includes extensions."""
         # Mock auth (assuming no token required in test)
-        response = test_client.post("/a2a/rpc", json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "agent/getAuthenticatedExtendedCard",
-            "params": {},
-        })
+        response = test_client.post(
+            "/a2a/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "agent/getAuthenticatedExtendedCard",
+                "params": {},
+            },
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -295,7 +316,9 @@ class TestErrorHandlingAndValidation:
         response = test_client.post("/a2a/command/execute", json=request_data)
         assert response.status_code == 422
         errors = response.json()["detail"]
-        assert any("required" in str(error).lower() for error in errors)  # Required field missing
+        assert any(
+            "required" in str(error).lower() for error in errors
+        )  # Required field missing
 
     def test_command_execute_invalid_command(self, test_client, mock_tool_manager):
         """Test execute non-existent command."""
@@ -306,7 +329,9 @@ class TestErrorHandlingAndValidation:
         response = test_client.post("/a2a/command/execute", json=request_data)
         assert response.status_code == 200
 
-    def test_endpoints_return_proper_errors_on_internal_failure(self, test_client, mock_task_manager):
+    def test_endpoints_return_proper_errors_on_internal_failure(
+        self, test_client, mock_task_manager
+    ):
         """Test internal errors return 500 with proper messages."""
         mock_task_manager.create_task.side_effect = Exception("Database error")
 
@@ -321,7 +346,9 @@ class TestConfigurationToggling:
     """Tests for configuration flag controlling endpoint availability."""
 
     @pytest.mark.parametrize("enabled", [True, False])
-    def test_endpoints_availability_based_on_config(self, test_client, enabled, mock_settings):
+    def test_endpoints_availability_based_on_config(
+        self, test_client, enabled, mock_settings
+    ):
         """Test endpoints available only when extension enabled."""
         settings = mock_settings.return_value
         settings.development_tool_extension_enabled = enabled
@@ -333,7 +360,9 @@ class TestConfigurationToggling:
         else:
             assert response.status_code == 404
 
-        response_exec = test_client.post("/a2a/command/execute", json={"command": "echo", "arguments": {}})
+        response_exec = test_client.post(
+            "/a2a/command/execute", json={"command": "echo", "arguments": {}}
+        )
         if enabled:
             assert response_exec.status_code in [200, 422]  # Valid or validation error
         else:
@@ -378,12 +407,15 @@ def test_integration_commands_to_task_execution(test_client, mock_task_manager):
     assert execution_id == created_task_id
 
     # 4. Get task to verify metadata
-    task_response = test_client.post("/a2a/rpc", json={
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "tasks/get",
-        "params": {"id": execution_id},
-    })
+    task_response = test_client.post(
+        "/a2a/rpc",
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tasks/get",
+            "params": {"id": execution_id},
+        },
+    )
     assert task_response.status_code == 200
     task_data = task_response.json()["result"]
     assert task_data["metadata"]["type"] == "slash_command"

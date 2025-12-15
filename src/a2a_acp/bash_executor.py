@@ -64,9 +64,11 @@ RETRYABLE_ERROR_CODES = {
     ACP_ERROR_CODES["INTERNAL_ERROR"],
 }
 
+
 @dataclass
 class ToolExecutionResult:
     """Structured result of tool execution."""
+
     tool_id: str
     success: bool
     output: str
@@ -79,9 +81,7 @@ class ToolExecutionResult:
 
     @classmethod
     def from_execution_result(
-        cls,
-        tool_id: str,
-        execution_result: ExecutionResult
+        cls, tool_id: str, execution_result: ExecutionResult
     ) -> ToolExecutionResult:
         """Create ToolExecutionResult from ExecutionResult."""
         return cls(
@@ -93,32 +93,39 @@ class ToolExecutionResult:
             return_code=execution_result.return_code,
             metadata=execution_result.metadata or {},
             output_files=execution_result.output_files or [],
-            mcp_error=execution_result.mcp_error if execution_result.mcp_error else None
+            mcp_error=(
+                execution_result.mcp_error if execution_result.mcp_error else None
+            ),
         )
 
 
 class ParameterError(Exception):
     """Raised when parameter processing fails."""
+
     pass
 
 
 class TemplateRenderError(Exception):
     """Raised when script template rendering fails."""
+
     pass
 
 
 class ToolError(Exception):
     """Base class for tool execution errors."""
+
     pass
 
 
 class ToolRetryableError(ToolError):
     """Errors that are retryable (network issues, temporary failures)."""
+
     pass
 
 
 class ToolPermanentError(ToolError):
     """Errors that are permanent (invalid parameters, tool not found)."""
+
     pass
 
 
@@ -144,8 +151,11 @@ class ToolCircuitBreaker:
             return True
         elif self.state == "open":
             # Check if recovery timeout has elapsed
-            if (self.last_failure_time and
-                (datetime.now() - self.last_failure_time).total_seconds() > self.recovery_timeout):
+            if (
+                self.last_failure_time
+                and (datetime.now() - self.last_failure_time).total_seconds()
+                > self.recovery_timeout
+            ):
                 self.state = "half-open"
                 return True
             return False
@@ -229,10 +239,7 @@ class BashToolExecutor:
         return str(code)
 
     async def execute_tool(
-        self,
-        tool: BashTool,
-        parameters: Dict[str, Any],
-        context: ExecutionContext
+        self, tool: BashTool, parameters: Dict[str, Any], context: ExecutionContext
     ) -> ToolExecutionResult:
         """Execute a bash tool with the provided parameters.
 
@@ -244,13 +251,16 @@ class BashToolExecutor:
         Returns:
             Structured execution result
         """
-        logger.info(f"Executing tool: {tool.id}", extra={
-            "tool_id": tool.id,
-            "tool_name": tool.name,
-            "session_id": context.session_id,
-            "task_id": context.task_id,
-            "param_count": len(parameters)
-        })
+        logger.info(
+            f"Executing tool: {tool.id}",
+            extra={
+                "tool_id": tool.id,
+                "tool_name": tool.name,
+                "session_id": context.session_id,
+                "task_id": context.task_id,
+                "param_count": len(parameters),
+            },
+        )
 
         start_time = datetime.now()
 
@@ -261,11 +271,15 @@ class BashToolExecutor:
             # Validate parameters
             is_valid, errors = tool.validate_parameters(parameters)
             if not is_valid:
-                raise ParameterError(f"Parameter validation failed: {'; '.join(errors)}")
+                raise ParameterError(
+                    f"Parameter validation failed: {'; '.join(errors)}"
+                )
 
             # Handle tool confirmation if required
             if tool.config.requires_confirmation:
-                confirmed, reason = await self._handle_tool_confirmation_a2a(tool, parameters, context)
+                confirmed, reason = await self._handle_tool_confirmation_a2a(
+                    tool, parameters, context
+                )
                 if not confirmed:
                     # Tool execution was cancelled or failed confirmation
                     await self._emit_tool_event("cancelled", context, reason=reason)
@@ -284,13 +298,15 @@ class BashToolExecutor:
                             "cached": False,
                             "error_profile": self._metadata_error_profile(),
                         },
-                        output_files=[]
+                        output_files=[],
                     )
 
             # Use managed sandbox for automatic cleanup
             async with managed_sandbox(tool, context) as (environment, working_dir):
                 # Render the bash script with parameters
-                rendered_script = await self.render_script(tool.script, parameters, context)
+                rendered_script = await self.render_script(
+                    tool.script, parameters, context
+                )
 
                 # Execute the script
                 execution_result = await self.sandbox.execute_in_sandbox(
@@ -298,22 +314,26 @@ class BashToolExecutor:
                     env=environment,
                     context=context,
                     timeout=tool.config.timeout,
-                    tool_config=tool.config
+                    tool_config=tool.config,
                 )
 
             # Convert to tool result
-            tool_result = ToolExecutionResult.from_execution_result(tool.id, execution_result)
+            tool_result = ToolExecutionResult.from_execution_result(
+                tool.id, execution_result
+            )
 
             # Add execution metadata
             metadata_profile = self._metadata_error_profile()
-            tool_result.metadata.update({
-                "execution_start": start_time.isoformat(),
-                "execution_end": datetime.now().isoformat(),
-                "parameters": parameters,
-                "tool_version": tool.version,
-                "cached": False,
-                "error_profile": metadata_profile,
-            })
+            tool_result.metadata.update(
+                {
+                    "execution_start": start_time.isoformat(),
+                    "execution_end": datetime.now().isoformat(),
+                    "parameters": parameters,
+                    "tool_version": tool.version,
+                    "cached": False,
+                    "error_profile": metadata_profile,
+                }
+            )
             tool_result.metadata.setdefault("error_profile", metadata_profile)
 
             # Map to extension schemas
@@ -324,7 +344,7 @@ class BashToolExecutor:
                     details = ExecuteDetails(
                         stdout=tool_result.output,
                         stderr=tool_result.error or None,
-                        exit_code=tool_result.return_code
+                        exit_code=tool_result.return_code,
                     )
                 tool_output = ToolOutput(content=tool_result.output, details=details)
                 tool_result.metadata["tool_output"] = tool_output.to_dict()
@@ -337,72 +357,96 @@ class BashToolExecutor:
                         file_diff = FileDiff(
                             path=file_path,
                             old_content=None,
-                            new_content="File created during tool execution"  # Placeholder
+                            new_content="File created during tool execution",  # Placeholder
                         )
                         file_diffs.append(file_diff.to_dict())
                     tool_result.metadata["file_diffs"] = file_diffs
 
-                await self._emit_tool_event("completed", context,
+                await self._emit_tool_event(
+                    "completed",
+                    context,
                     success=True,
                     execution_time=tool_result.execution_time,
                     return_code=tool_result.return_code,
                     output_length=len(tool_result.output),
-                    tool_output=tool_output.to_dict()
+                    tool_output=tool_output.to_dict(),
                 )
 
-                logger.info(f"Tool execution completed: {tool.id}", extra={
-                    "tool_id": tool.id,
-                    "success": tool_result.success,
-                    "execution_time": tool_result.execution_time,
-                    "return_code": tool_result.return_code,
-                    "output_length": len(tool_result.output)
-                })
+                logger.info(
+                    f"Tool execution completed: {tool.id}",
+                    extra={
+                        "tool_id": tool.id,
+                        "success": tool_result.success,
+                        "execution_time": tool_result.execution_time,
+                        "return_code": tool_result.return_code,
+                        "output_length": len(tool_result.output),
+                    },
+                )
             else:
                 sanitized_error = self._sanitize_error_output(tool_result.error)
-                error_message = sanitized_error or tool_result.error or "Tool execution failed"
-                if tool_result.metadata.get("timeout") or tool_result.return_code == 124:
+                error_message = (
+                    sanitized_error or tool_result.error or "Tool execution failed"
+                )
+                if (
+                    tool_result.metadata.get("timeout")
+                    or tool_result.return_code == 124
+                ):
                     error_message = "Tool execution timeout"
                 error_details = ErrorDetails(
                     message=error_message,
-                    code=str(tool_result.return_code) if tool_result.return_code else "INTERNAL_ERROR",
-                    details={"sanitized_stderr": sanitized_error or tool_result.error or ""}
+                    code=(
+                        str(tool_result.return_code)
+                        if tool_result.return_code
+                        else "INTERNAL_ERROR"
+                    ),
+                    details={
+                        "sanitized_stderr": sanitized_error or tool_result.error or ""
+                    },
                 )
                 tool_result.metadata["error_details"] = error_details.to_dict()
 
                 error_contract = self._resolve_mcp_error(tool, tool_result)
                 mcp_error = self._apply_error_contract(tool_result, error_contract)
 
-                await self._emit_tool_event("failed", context,
+                await self._emit_tool_event(
+                    "failed",
+                    context,
                     success=False,
                     error=error_message,
                     execution_time=tool_result.execution_time,
                     return_code=tool_result.return_code,
                     mcp_error=mcp_error,
                     diagnostics=error_contract.diagnostics,
-                    error_details=error_details.to_dict()
+                    error_details=error_details.to_dict(),
                 )
 
-                logger.error(f"Tool execution failed with non-zero exit: {tool.id}", extra={
-                    "tool_id": tool.id,
-                    "success": tool_result.success,
-                    "execution_time": tool_result.execution_time,
-                    "return_code": tool_result.return_code,
-                    "error": tool_result.error,
-                    "mcp_error": mcp_error,
-                    "diagnostics": error_contract.diagnostics,
-                })
+                logger.error(
+                    f"Tool execution failed with non-zero exit: {tool.id}",
+                    extra={
+                        "tool_id": tool.id,
+                        "success": tool_result.success,
+                        "execution_time": tool_result.execution_time,
+                        "return_code": tool_result.return_code,
+                        "error": tool_result.error,
+                        "mcp_error": mcp_error,
+                        "diagnostics": error_contract.diagnostics,
+                    },
+                )
 
             return tool_result
 
         except Exception as e:
             execution_time = (datetime.now() - start_time).total_seconds()
 
-            logger.error(f"Tool execution failed: {tool.id}", extra={
-                "tool_id": tool.id,
-                "error": str(e),
-                "error_type": type(e).__name__,
-                "execution_time": execution_time
-            })
+            logger.error(
+                f"Tool execution failed: {tool.id}",
+                extra={
+                    "tool_id": tool.id,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "execution_time": execution_time,
+                },
+            )
 
             error_contract = self._build_mcp_error_from_exception(e)
             mcp_error = error_contract.to_mcp_error()
@@ -414,11 +458,13 @@ class BashToolExecutor:
             error_details = ErrorDetails(
                 message=error_message,
                 code=code_value,
-                details={"sanitized_stderr": sanitized_error or str(e)}
+                details={"sanitized_stderr": sanitized_error or str(e)},
             )
 
             # Emit tool execution failed event
-            await self._emit_tool_event("failed", context,
+            await self._emit_tool_event(
+                "failed",
+                context,
                 success=False,
                 error=error_message,
                 error_type=type(e).__name__,
@@ -447,14 +493,16 @@ class BashToolExecutor:
                     "error_details": error_details.to_dict(),
                 },
                 output_files=[],
-                mcp_error=mcp_error
+                mcp_error=mcp_error,
             )
             self._apply_error_contract(result, error_contract)
             return result
 
-    async def _emit_tool_event(self, event_type: str, context: ExecutionContext, **event_data) -> None:
+    async def _emit_tool_event(
+        self, event_type: str, context: ExecutionContext, **event_data
+    ) -> None:
         """Emit a tool execution event via the push notification system.
- 
+
         Args:
             event_type: Type of event (started, completed, failed)
             context: Execution context
@@ -468,19 +516,24 @@ class BashToolExecutor:
         if "tool_output" in event_data:
             dev_tool_event = DevelopmentToolEvent(
                 kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
-                data={"status": "succeeded", "live_content": event_data.get("tool_output", {}).get("content", "")}
+                data={
+                    "status": "succeeded",
+                    "live_content": event_data.get("tool_output", {}).get(
+                        "content", ""
+                    ),
+                },
             )
             event_data["development-tool"] = dev_tool_event.to_dict()
         elif "error_details" in event_data:
             dev_tool_event = DevelopmentToolEvent(
                 kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
-                data={"status": "failed"}
+                data={"status": "failed"},
             )
             event_data["development-tool"] = dev_tool_event.to_dict()
         elif event_type == "started":
             dev_tool_event = DevelopmentToolEvent(
                 kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
-                data={"status": "executing"}
+                data={"status": "executing"},
             )
             event_data["development-tool"] = dev_tool_event.to_dict()
 
@@ -490,32 +543,40 @@ class BashToolExecutor:
             "tool_id": context.tool_id,
             "session_id": context.session_id,
             "timestamp": datetime.now().isoformat(),
-            **event_data
+            **event_data,
         }
- 
+
         try:
-            await self.push_notification_manager.send_notification(context.task_id, event)
- 
+            await self.push_notification_manager.send_notification(
+                context.task_id, event
+            )
+
             # Also log to audit system
             audit_logger = get_audit_logger()
             await audit_logger.log_tool_execution(
                 self._map_event_type_to_audit(event_type),
                 context,
                 tool_id=context.tool_id,
-                **event_data
+                **event_data,
             )
- 
-            logger.debug(f"Emitted tool {event_type} event", extra={
-                "tool_id": context.tool_id,
-                "task_id": context.task_id,
-                "event_type": event_type
-            })
+
+            logger.debug(
+                f"Emitted tool {event_type} event",
+                extra={
+                    "tool_id": context.tool_id,
+                    "task_id": context.task_id,
+                    "event_type": event_type,
+                },
+            )
         except Exception as e:
-            logger.error(f"Failed to emit tool {event_type} event", extra={
-                "tool_id": context.tool_id,
-                "task_id": context.task_id,
-                "error": str(e)
-            })
+            logger.error(
+                f"Failed to emit tool {event_type} event",
+                extra={
+                    "tool_id": context.tool_id,
+                    "task_id": context.task_id,
+                    "error": str(e),
+                },
+            )
 
     def _map_event_type_to_audit(self, event_type: str) -> AuditEventType:
         """Map internal event types to audit event types."""
@@ -532,10 +593,7 @@ class BashToolExecutor:
         return mapping.get(event_type, AuditEventType.TOOL_EXECUTION_STARTED)
 
     async def _handle_tool_confirmation_a2a(
-        self,
-        tool: BashTool,
-        parameters: Dict[str, Any],
-        context: ExecutionContext
+        self, tool: BashTool, parameters: Dict[str, Any], context: ExecutionContext
     ) -> tuple[bool, str]:
         """Handle tool confirmation using A2A INPUT_REQUIRED protocol.
 
@@ -549,7 +607,9 @@ class BashToolExecutor:
         """
         if not self.task_manager:
             # Fallback to simple confirmation if no task manager available
-            logger.warning("No task manager available for A2A INPUT_REQUIRED confirmation")
+            logger.warning(
+                "No task manager available for A2A INPUT_REQUIRED confirmation"
+            )
             return True, ""
 
         try:
@@ -563,29 +623,35 @@ class BashToolExecutor:
             input_notification = InputRequiredNotification(
                 taskId=context.task_id,
                 contextId=task.contextId,
-                message=tool.config.confirmation_message or f"Execute tool '{tool.name}'?",
+                message=tool.config.confirmation_message
+                or f"Execute tool '{tool.name}'?",
                 inputTypes=["text/plain"],  # Simple confirmation
                 timeout=300,  # 5 minute timeout
                 metadata={
                     "tool_id": tool.id,
                     "tool_name": tool.name,
                     "parameters": parameters,
-                    "confirmation_required": True
-                }
+                    "confirmation_required": True,
+                },
             )
 
             # Emit the INPUT_REQUIRED event via push notification system
-            await self._emit_tool_event("confirmation_required", context,
+            await self._emit_tool_event(
+                "confirmation_required",
+                context,
                 confirmation_message=tool.config.confirmation_message,
                 tool_name=tool.name,
-                input_notification=input_notification.model_dump()
+                input_notification=input_notification.model_dump(),
             )
 
-            logger.info(f"Tool confirmation required via A2A INPUT_REQUIRED: {tool.id}", extra={
-                "tool_id": tool.id,
-                "task_id": context.task_id,
-                "confirmation_message": tool.config.confirmation_message
-            })
+            logger.info(
+                f"Tool confirmation required via A2A INPUT_REQUIRED: {tool.id}",
+                extra={
+                    "tool_id": tool.id,
+                    "task_id": context.task_id,
+                    "confirmation_message": tool.config.confirmation_message,
+                },
+            )
 
             # For now, return True as the confirmation flow will be handled
             # by the existing A2A INPUT_REQUIRED detection in task manager
@@ -595,11 +661,10 @@ class BashToolExecutor:
             return True, ""
 
         except Exception as e:
-            logger.error(f"Failed to handle A2A tool confirmation: {tool.id}", extra={
-                "tool_id": tool.id,
-                "task_id": context.task_id,
-                "error": str(e)
-            })
+            logger.error(
+                f"Failed to handle A2A tool confirmation: {tool.id}",
+                extra={"tool_id": tool.id, "task_id": context.task_id, "error": str(e)},
+            )
             return False, f"Confirmation failed: {str(e)}"
 
     def _get_circuit_breaker(self, tool_id: str) -> ToolCircuitBreaker:
@@ -608,7 +673,9 @@ class BashToolExecutor:
             self._circuit_breakers[tool_id] = ToolCircuitBreaker()
         return self._circuit_breakers[tool_id]
 
-    def _classify_error(self, error: Exception, return_code: int, stderr: str) -> ToolError:
+    def _classify_error(
+        self, error: Exception, return_code: int, stderr: str
+    ) -> ToolError:
         """Classify an error as retryable or permanent.
 
         Args:
@@ -655,9 +722,13 @@ class BashToolExecutor:
 
         # Check return codes
         if return_code in [137, 143, 130]:  # SIGKILL, SIGTERM, SIGINT
-            return ToolRetryableError(f"Process interrupted (code {return_code}): {error}")
+            return ToolRetryableError(
+                f"Process interrupted (code {return_code}): {error}"
+            )
         elif return_code >= 1 and return_code <= 125:  # General errors
-                return ToolRetryableError(f"Retryable process error (code {return_code}): {error}")
+            return ToolRetryableError(
+                f"Retryable process error (code {return_code}): {error}"
+            )
         else:
             # Default to retryable for unknown errors
             return ToolRetryableError(f"Unknown error: {error}")
@@ -695,9 +766,13 @@ class BashToolExecutor:
         cleaned = "\n".join(filtered).strip()
         return cleaned or None
 
-    def _resolve_mcp_error(self, tool: BashTool, result: ToolExecutionResult) -> ErrorContract:
+    def _resolve_mcp_error(
+        self, tool: BashTool, result: ToolExecutionResult
+    ) -> ErrorContract:
         """Resolve the MCP error payload for a failed tool result."""
-        mapping_entry = tool.error_mapping.get(result.return_code) if tool.error_mapping else None
+        mapping_entry = (
+            tool.error_mapping.get(result.return_code) if tool.error_mapping else None
+        )
 
         if mapping_entry:
             return self._build_error_contract(
@@ -721,19 +796,54 @@ class BashToolExecutor:
         message = str(error)
 
         if isinstance(error, ParameterError):
-            return self._build_error_contract(ACP_ERROR_CODES["INVALID_PARAMS"], None, error_message=message, retryable_override=False)
+            return self._build_error_contract(
+                ACP_ERROR_CODES["INVALID_PARAMS"],
+                None,
+                error_message=message,
+                retryable_override=False,
+            )
         if isinstance(error, TemplateRenderError):
-            return self._build_error_contract(ACP_ERROR_CODES["INVALID_PARAMS"], None, error_message=message, retryable_override=False)
+            return self._build_error_contract(
+                ACP_ERROR_CODES["INVALID_PARAMS"],
+                None,
+                error_message=message,
+                retryable_override=False,
+            )
         if isinstance(error, ToolPermanentError):
-            return self._build_error_contract(ACP_ERROR_CODES["INVALID_PARAMS"], None, error_message=message, retryable_override=False)
+            return self._build_error_contract(
+                ACP_ERROR_CODES["INVALID_PARAMS"],
+                None,
+                error_message=message,
+                retryable_override=False,
+            )
         if isinstance(error, ToolRetryableError):
-            return self._build_error_contract(ACP_ERROR_CODES["INTERNAL_ERROR"], None, error_message=message, retryable_override=True)
+            return self._build_error_contract(
+                ACP_ERROR_CODES["INTERNAL_ERROR"],
+                None,
+                error_message=message,
+                retryable_override=True,
+            )
         if isinstance(error, SandboxSecurityError):
-            return self._build_error_contract(ACP_ERROR_CODES["INVALID_REQUEST"], None, error_message=message, retryable_override=False)
+            return self._build_error_contract(
+                ACP_ERROR_CODES["INVALID_REQUEST"],
+                None,
+                error_message=message,
+                retryable_override=False,
+            )
         if isinstance(error, SandboxError):
-            return self._build_error_contract(ACP_ERROR_CODES["INTERNAL_ERROR"], None, error_message=message, retryable_override=False)
+            return self._build_error_contract(
+                ACP_ERROR_CODES["INTERNAL_ERROR"],
+                None,
+                error_message=message,
+                retryable_override=False,
+            )
 
-        return self._build_error_contract(ACP_ERROR_CODES["INTERNAL_ERROR"], None, error_message=message, retryable_override=False)
+        return self._build_error_contract(
+            ACP_ERROR_CODES["INTERNAL_ERROR"],
+            None,
+            error_message=message,
+            retryable_override=False,
+        )
 
     def _build_error_contract(
         self,
@@ -770,7 +880,11 @@ class BashToolExecutor:
             detail_candidates.append(f"Process terminated by signal {signal_number}")
 
         detail_value = next((m for m in detail_candidates if m), None)
-        retryable = retryable_override if retryable_override is not None else self._is_retryable_error_code(code)
+        retryable = (
+            retryable_override
+            if retryable_override is not None
+            else self._is_retryable_error_code(code)
+        )
 
         diagnostics: Dict[str, Any] = {"error_profile": self._metadata_error_profile()}
         if result:
@@ -806,10 +920,7 @@ class BashToolExecutor:
         return code in RETRYABLE_ERROR_CODES
 
     async def render_script(
-        self,
-        template: str,
-        parameters: Dict[str, Any],
-        context: ExecutionContext
+        self, template: str, parameters: Dict[str, Any], context: ExecutionContext
     ) -> str:
         """Render a script template with parameter values.
 
@@ -883,7 +994,11 @@ class BashToolExecutor:
                         iter_params[f"{var_name}_index"] = len(result_parts)
 
                         # Render content with item available
-                        item_content = re.sub(var_pattern, lambda m: replace_variable_with_params(m, iter_params), content)
+                        item_content = re.sub(
+                            var_pattern,
+                            lambda m: replace_variable_with_params(m, iter_params),
+                            content,
+                        )
                         result_parts.append(item_content)
 
                     return "".join(result_parts)
@@ -898,7 +1013,11 @@ class BashToolExecutor:
                         iter_params[f"{var_name}_value"] = val
 
                         # Render content with property available
-                        prop_content = re.sub(var_pattern, lambda m: replace_variable_with_params(m, iter_params), content)
+                        prop_content = re.sub(
+                            var_pattern,
+                            lambda m: replace_variable_with_params(m, iter_params),
+                            content,
+                        )
                         result_parts.append(prop_content)
 
                     return "".join(result_parts)
@@ -924,16 +1043,19 @@ class BashToolExecutor:
             script = re.sub(iter_pattern, replace_iteration, script)
 
             # Final cleanup - remove any remaining template syntax
-            script = re.sub(r'\{\{[^}]+\}\}', '', script)
+            script = re.sub(r"\{\{[^}]+\}\}", "", script)
 
             return script.strip()
 
         except Exception as e:
-            logger.error("Script template rendering failed", extra={
-                "error": str(e),
-                "template_length": len(template),
-                "parameters": list(parameters.keys())
-            })
+            logger.error(
+                "Script template rendering failed",
+                extra={
+                    "error": str(e),
+                    "template_length": len(template),
+                    "parameters": list(parameters.keys()),
+                },
+            )
             raise TemplateRenderError(f"Failed to render script template: {e}")
 
     async def execute_tool_with_caching(
@@ -941,7 +1063,7 @@ class BashToolExecutor:
         tool: BashTool,
         parameters: Dict[str, Any],
         context: ExecutionContext,
-        use_cache: bool = True
+        use_cache: bool = True,
     ) -> ToolExecutionResult:
         """Execute tool with optional response caching.
 
@@ -962,23 +1084,31 @@ class BashToolExecutor:
             async with self._get_cache_lock():
                 if cache_key in self._execution_cache:
                     cached_entry = self._execution_cache[cache_key]
-                    cache_age = (datetime.now() - cached_entry["timestamp"]).total_seconds()
+                    cache_age = (
+                        datetime.now() - cached_entry["timestamp"]
+                    ).total_seconds()
 
                     # Check if cache entry has expired
                     if cache_age < tool.config.cache_ttl_seconds:
                         cached_result = cached_entry["result"]
                         cached_result.metadata["cached"] = True
-                        logger.debug(f"Using cached result for tool: {tool.id}", extra={
-                            "cache_age_seconds": cache_age,
-                            "ttl_seconds": tool.config.cache_ttl_seconds
-                        })
+                        logger.debug(
+                            f"Using cached result for tool: {tool.id}",
+                            extra={
+                                "cache_age_seconds": cache_age,
+                                "ttl_seconds": tool.config.cache_ttl_seconds,
+                            },
+                        )
                         return cached_result
                     else:
                         # Cache entry expired, remove it
-                        logger.debug(f"Cache entry expired for tool: {tool.id}", extra={
-                            "cache_age_seconds": cache_age,
-                            "ttl_seconds": tool.config.cache_ttl_seconds
-                        })
+                        logger.debug(
+                            f"Cache entry expired for tool: {tool.id}",
+                            extra={
+                                "cache_age_seconds": cache_age,
+                                "ttl_seconds": tool.config.cache_ttl_seconds,
+                            },
+                        )
                         del self._execution_cache[cache_key]
 
         # Execute the tool
@@ -994,21 +1124,29 @@ class BashToolExecutor:
                         "result": result,
                         "timestamp": datetime.now(),
                         "tool_id": tool.id,
-                        "tool_version": tool.version
+                        "tool_version": tool.version,
                     }
-                    logger.debug(f"Cached result for tool: {tool.id}", extra={
-                        "cache_size_mb": cache_size_mb,
-                        "max_size_mb": tool.config.cache_max_size_mb
-                    })
+                    logger.debug(
+                        f"Cached result for tool: {tool.id}",
+                        extra={
+                            "cache_size_mb": cache_size_mb,
+                            "max_size_mb": tool.config.cache_max_size_mb,
+                        },
+                    )
                 else:
-                    logger.warning(f"Cache size limit exceeded for tool: {tool.id}", extra={
-                        "cache_size_mb": cache_size_mb,
-                        "max_size_mb": tool.config.cache_max_size_mb
-                    })
+                    logger.warning(
+                        f"Cache size limit exceeded for tool: {tool.id}",
+                        extra={
+                            "cache_size_mb": cache_size_mb,
+                            "max_size_mb": tool.config.cache_max_size_mb,
+                        },
+                    )
 
         return result
 
-    def _create_cache_key(self, tool_id: str, tool_version: str, parameters: Dict[str, Any]) -> str:
+    def _create_cache_key(
+        self, tool_id: str, tool_version: str, parameters: Dict[str, Any]
+    ) -> str:
         """Create a cache key from tool ID, version, and parameters."""
         # Sort parameters for consistent hashing
         sorted_params = sorted(parameters.items())
@@ -1019,6 +1157,7 @@ class BashToolExecutor:
 
         # Create hash for cache key
         import hashlib
+
         content_hash = hashlib.md5(cache_content.encode()).hexdigest()[:8]
 
         return f"{tool_id}:{tool_version}:{content_hash}"
@@ -1038,7 +1177,11 @@ class BashToolExecutor:
                 self._execution_cache.clear()
                 logger.debug(f"Cleared all cache entries: {count}")
             else:
-                keys_to_remove = [key for key in self._execution_cache.keys() if key.startswith(f"{tool_id}:")]
+                keys_to_remove = [
+                    key
+                    for key in self._execution_cache.keys()
+                    if key.startswith(f"{tool_id}:")
+                ]
                 count = len(keys_to_remove)
                 for key in keys_to_remove:
                     self._execution_cache.pop(key, None)
@@ -1066,7 +1209,9 @@ class BashToolExecutor:
                     # Get tool to check its TTL setting
                     tool = await get_tool(tool_id)
                     if tool and tool.config.caching_enabled:
-                        cache_age = (current_time - cache_entry["timestamp"]).total_seconds()
+                        cache_age = (
+                            current_time - cache_entry["timestamp"]
+                        ).total_seconds()
                         if cache_age > tool.config.cache_ttl_seconds:
                             expired_keys.append(cache_key)
                     else:
@@ -1074,7 +1219,10 @@ class BashToolExecutor:
                         expired_keys.append(cache_key)
 
                 except Exception as e:
-                    logger.warning(f"Error checking cache expiry for key {cache_key}", extra={"error": str(e)})
+                    logger.warning(
+                        f"Error checking cache expiry for key {cache_key}",
+                        extra={"error": str(e)},
+                    )
                     # Remove problematic entries
                     expired_keys.append(cache_key)
 
@@ -1095,7 +1243,9 @@ class BashToolExecutor:
             # Basic stats
             total_entries = len(self._execution_cache)
             tools_cached = set()
-            cache_size_mb = len(str(self._execution_cache)) / (1024 * 1024)  # Rough estimate
+            cache_size_mb = len(str(self._execution_cache)) / (
+                1024 * 1024
+            )  # Rough estimate
 
             # Tool-specific stats
             tool_stats = {}
@@ -1110,7 +1260,7 @@ class BashToolExecutor:
                         "entries": 0,
                         "oldest_entry": None,
                         "newest_entry": None,
-                        "total_size_mb": 0.0
+                        "total_size_mb": 0.0,
                     }
 
                 # Update tool stats
@@ -1118,12 +1268,16 @@ class BashToolExecutor:
 
                 entry_timestamp = cache_entry.get("timestamp")
                 if entry_timestamp:
-                    if (tool_stats[tool_id]["oldest_entry"] is None or
-                        entry_timestamp < tool_stats[tool_id]["oldest_entry"]):
+                    if (
+                        tool_stats[tool_id]["oldest_entry"] is None
+                        or entry_timestamp < tool_stats[tool_id]["oldest_entry"]
+                    ):
                         tool_stats[tool_id]["oldest_entry"] = entry_timestamp
 
-                    if (tool_stats[tool_id]["newest_entry"] is None or
-                        entry_timestamp > tool_stats[tool_id]["newest_entry"]):
+                    if (
+                        tool_stats[tool_id]["newest_entry"] is None
+                        or entry_timestamp > tool_stats[tool_id]["newest_entry"]
+                    ):
                         tool_stats[tool_id]["newest_entry"] = entry_timestamp
 
                 # Estimate entry size
@@ -1138,14 +1292,17 @@ class BashToolExecutor:
                 "tool_stats": tool_stats,
                 "cache_efficiency": {
                     "hit_ratio_estimate": "N/A",  # Would need hit/miss tracking
-                    "average_entries_per_tool": total_entries / len(tools_cached) if tools_cached else 0,
-                    "cache_utilization_percent": min(100.0, (cache_size_mb / 100.0) * 100)  # Assuming 100MB max
-                }
+                    "average_entries_per_tool": (
+                        total_entries / len(tools_cached) if tools_cached else 0
+                    ),
+                    "cache_utilization_percent": min(
+                        100.0, (cache_size_mb / 100.0) * 100
+                    ),  # Assuming 100MB max
+                },
             }
 
     async def execute_batch(
-        self,
-        executions: List[tuple[BashTool, Dict[str, Any], ExecutionContext]]
+        self, executions: List[tuple[BashTool, Dict[str, Any], ExecutionContext]]
     ) -> List[ToolExecutionResult]:
         """Execute multiple tools in parallel.
 
@@ -1163,9 +1320,7 @@ class BashToolExecutor:
         # Create tasks for parallel execution
         tasks = []
         for tool, parameters, context in executions:
-            task = asyncio.create_task(
-                self.execute_tool(tool, parameters, context)
-            )
+            task = asyncio.create_task(self.execute_tool(tool, parameters, context))
             tasks.append((task, tool.id))
 
         # Wait for all executions to complete
@@ -1175,7 +1330,10 @@ class BashToolExecutor:
                 result = await task
                 results.append(result)
             except Exception as e:
-                logger.error(f"Batch execution failed for tool: {tool_id}", extra={"error": str(e)})
+                logger.error(
+                    f"Batch execution failed for tool: {tool_id}",
+                    extra={"error": str(e)},
+                )
                 # Create error result
                 error_contract = self._build_mcp_error_from_exception(e)
                 error_result = ToolExecutionResult(
@@ -1190,7 +1348,7 @@ class BashToolExecutor:
                         "error_profile": self._metadata_error_profile(),
                     },
                     output_files=[],
-                    mcp_error=None
+                    mcp_error=None,
                 )
                 self._apply_error_contract(error_result, error_contract)
                 results.append(error_result)
@@ -1216,9 +1374,9 @@ class BashToolExecutor:
         # Check for dangerous patterns
         dangerous_patterns = [
             r"\brm\s+-rf\s+/",  # rm -rf /
-            r"sudo\s+rm",       # sudo rm
+            r"sudo\s+rm",  # sudo rm
             r"dd\s+if=/dev/zero",  # Disk wiping
-            r">\s*/dev/sda",    # Overwriting disk
+            r">\s*/dev/sda",  # Overwriting disk
         ]
 
         script_lower = tool.script.lower()
@@ -1231,7 +1389,9 @@ class BashToolExecutor:
         close_braces = tool.script.count("}}")
 
         if open_braces != close_braces:
-            warnings.append(f"Mismatched template braces: {open_braces} open, {close_braces} close")
+            warnings.append(
+                f"Mismatched template braces: {open_braces} open, {close_braces} close"
+            )
 
         # Check for common bash issues
         if "#!/bin/bash" not in tool.script and "#!/bin/sh" not in tool.script:
@@ -1274,7 +1434,7 @@ async def execute_tool(
     parameters: Dict[str, Any],
     session_id: str,
     task_id: str,
-    user_id: str = "anonymous"
+    user_id: str = "anonymous",
 ) -> ToolExecutionResult:
     """Convenience function to execute a tool by ID."""
     from .tool_config import get_tool
@@ -1284,10 +1444,7 @@ async def execute_tool(
         raise ValueError(f"Tool not found: {tool_id}")
 
     context = ExecutionContext(
-        tool_id=tool_id,
-        session_id=session_id,
-        task_id=task_id,
-        user_id=user_id
+        tool_id=tool_id, session_id=session_id, task_id=task_id, user_id=user_id
     )
 
     executor = get_bash_executor()
@@ -1295,7 +1452,7 @@ async def execute_tool(
 
 
 async def execute_tool_batch(
-    executions: List[tuple[str, Dict[str, Any], str, str, str]]
+    executions: List[tuple[str, Dict[str, Any], str, str, str]],
 ) -> List[ToolExecutionResult]:
     """Convenience function to execute multiple tools by ID.
 
@@ -1315,10 +1472,7 @@ async def execute_tool_batch(
             raise ValueError(f"Tool not found: {tool_id}")
 
         context = ExecutionContext(
-            tool_id=tool_id,
-            session_id=session_id,
-            task_id=task_id,
-            user_id=user_id
+            tool_id=tool_id, session_id=session_id, task_id=task_id, user_id=user_id
         )
 
         tools_and_contexts.append((tool, parameters, context))

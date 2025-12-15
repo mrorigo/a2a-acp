@@ -66,7 +66,9 @@ def test_file_diff_roundtrip():
 
 def test_mcp_details_roundtrip():
     """Test roundtrip serialization for McpDetails."""
-    original = McpDetails(tool_name="list_tools", server_id="server1", description="List MCP tools")
+    original = McpDetails(
+        tool_name="list_tools", server_id="server1", description="List MCP tools"
+    )
     serialized = original.to_dict()
     reconstructed = McpDetails.from_dict(serialized)
     assert reconstructed == original
@@ -113,7 +115,7 @@ def test_error_details_roundtrip():
     original = ErrorDetails(
         message="Tool failed",
         code="INVALID_INPUT",
-        details={"retry_count": 3, "context": "user error"}
+        details={"retry_count": 3, "context": "user error"},
     )
     serialized = original.to_dict()
     reconstructed = ErrorDetails.from_dict(serialized)
@@ -123,11 +125,16 @@ def test_error_details_roundtrip():
 
 def test_confirmation_request_roundtrip():
     """Test roundtrip serialization for ConfirmationRequest with different details types."""
-    options = [ConfirmationOption(id="yes", name="Yes"), ConfirmationOption(id="no", name="No")]
+    options = [
+        ConfirmationOption(id="yes", name="Yes"),
+        ConfirmationOption(id="no", name="No"),
+    ]
 
     # With GenericDetails
     details = GenericDetails(description="Confirm?")
-    original = ConfirmationRequest(options=options, details=details, title="Confirmation")
+    original = ConfirmationRequest(
+        options=options, details=details, title="Confirmation"
+    )
     serialized = original.to_dict()
     reconstructed = ConfirmationRequest.from_dict(serialized)
     assert reconstructed.title == "Confirmation"
@@ -146,7 +153,9 @@ def test_confirmation_request_roundtrip():
 def test_tool_call_roundtrip():
     """Test roundtrip serialization for ToolCall with nested objects."""
     options = [ConfirmationOption(id="approve", name="Approve")]
-    conf_req = ConfirmationRequest(options=options, details=GenericDetails(description="Proceed?"))
+    conf_req = ConfirmationRequest(
+        options=options, details=GenericDetails(description="Proceed?")
+    )
     output = ToolOutput(content="Success", details=ExecuteDetails(stdout="ok"))
     error = ErrorDetails(message="Failure", code="ERR")
 
@@ -156,7 +165,7 @@ def test_tool_call_roundtrip():
         status=ToolCallStatus.PENDING,
         tool_name="read_file",
         input_parameters={"path": "/file.txt"},
-        confirmation_request=conf_req
+        confirmation_request=conf_req,
     )
     serialized = original.to_dict()
     reconstructed = ToolCall.from_dict(serialized)
@@ -172,11 +181,11 @@ def test_tool_call_roundtrip():
         tool_name="write_file",
         input_parameters={"path": "/file.txt"},
         result=output,
-        confirmation_request=None
+        confirmation_request=None,
     )
     serialized = original2.to_dict()
-    if 'confirmation_request' in serialized:
-        del serialized['confirmation_request']
+    if "confirmation_request" in serialized:
+        del serialized["confirmation_request"]
     reconstructed = ToolCall.from_dict(serialized)
     reconstructed.confirmation_request = None
     assert reconstructed.status == ToolCallStatus.SUCCEEDED
@@ -191,11 +200,11 @@ def test_tool_call_roundtrip():
         tool_name="invalid_tool",
         input_parameters={},
         result=error,
-        confirmation_request=None
+        confirmation_request=None,
     )
     serialized = original3.to_dict()
-    if 'confirmation_request' in serialized:
-        del serialized['confirmation_request']
+    if "confirmation_request" in serialized:
+        del serialized["confirmation_request"]
     reconstructed = ToolCall.from_dict(serialized)
     reconstructed.confirmation_request = None
     assert reconstructed.status == ToolCallStatus.FAILED
@@ -220,7 +229,7 @@ def test_development_tool_event_roundtrip():
         model="gpt-4",
         user_tier="premium",
         error=None,
-        data={"progress": 50}
+        data={"progress": 50},
     )
     serialized = original.to_dict()
     reconstructed = DevelopmentToolEvent.from_dict(serialized)
@@ -258,11 +267,7 @@ def test_slash_command_argument_roundtrip():
 def test_slash_command_roundtrip():
     """Test roundtrip serialization for SlashCommand."""
     arg = SlashCommandArgument(name="query", type="string", description="Search query")
-    original = SlashCommand(
-        name="/search",
-        description="Search files",
-        arguments=[arg]
-    )
+    original = SlashCommand(name="/search", description="Search files", arguments=[arg])
     serialized = original.to_dict()
     reconstructed = SlashCommand.from_dict(serialized)
     assert reconstructed.name == "/search"
@@ -273,8 +278,7 @@ def test_slash_command_roundtrip():
 def test_execute_slash_command_request_roundtrip():
     """Test roundtrip serialization for ExecuteSlashCommandRequest."""
     original = ExecuteSlashCommandRequest(
-        command="/search",
-        arguments={"query": "test"}
+        command="/search", arguments={"query": "test"}
     )
     serialized = original.to_dict()
     reconstructed = ExecuteSlashCommandRequest.from_dict(serialized)
@@ -283,7 +287,9 @@ def test_execute_slash_command_request_roundtrip():
 
 def test_execute_slash_command_response_roundtrip():
     """Test roundtrip serialization for ExecuteSlashCommandResponse."""
-    original = ExecuteSlashCommandResponse(execution_id="exec1", status=CommandExecutionStatus.COMPLETED)
+    original = ExecuteSlashCommandResponse(
+        execution_id="exec1", status=CommandExecutionStatus.COMPLETED
+    )
     serialized = original.to_dict()
     reconstructed = ExecuteSlashCommandResponse.from_dict(serialized)
     assert reconstructed.execution_id == "exec1"
@@ -297,7 +303,7 @@ def test_existing_models_backward_compatibility():
         id="config1",
         task_id="task1",
         url="http://example.com/webhook",
-        enabled_events=["task_status_change"]
+        enabled_events=["task_status_change"],
     )
     serialized = original.to_dict()
     reconstructed = TaskPushNotificationConfig.from_dict(serialized)
@@ -310,7 +316,7 @@ def test_error_details_json_handling():
     data = {
         "message": "Error",
         "code": "JSON_ERR",
-        "details": json.dumps({"key": "value"})
+        "details": json.dumps({"key": "value"}),
     }
     reconstructed = ErrorDetails.from_dict(data)
     assert isinstance(reconstructed.details, dict)

@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 class AuditEventType(Enum):
     """Types of auditable events."""
+
     TOOL_EXECUTION_STARTED = "tool_execution_started"
     TOOL_EXECUTION_COMPLETED = "tool_execution_completed"
     TOOL_EXECUTION_FAILED = "tool_execution_failed"
@@ -49,6 +50,7 @@ class AuditEventType(Enum):
 @dataclass
 class AuditEvent:
     """Represents an auditable event."""
+
     id: str
     timestamp: datetime
     event_type: AuditEventType
@@ -64,16 +66,16 @@ class AuditEvent:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
-        data['event_type'] = self.event_type.value
-        data['timestamp'] = self.timestamp.isoformat()
+        data["event_type"] = self.event_type.value
+        data["timestamp"] = self.timestamp.isoformat()
         return data
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> AuditEvent:
         """Create from dictionary."""
         data = dict(data)
-        data['event_type'] = AuditEventType(data['event_type'])
-        data['timestamp'] = datetime.fromisoformat(data['timestamp'])
+        data["event_type"] = AuditEventType(data["event_type"])
+        data["timestamp"] = datetime.fromisoformat(data["timestamp"])
         data.pop("created_at", None)
         return cls(**data)
 
@@ -89,8 +91,10 @@ class AuditDatabase:
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get thread-local database connection."""
-        if not hasattr(self._local, 'connection'):
-            self._local.connection = sqlite3.connect(self.db_path, check_same_thread=False)
+        if not hasattr(self._local, "connection"):
+            self._local.connection = sqlite3.connect(
+                self.db_path, check_same_thread=False
+            )
             # Enable WAL mode for better concurrency
             self._local.connection.execute("PRAGMA journal_mode=WAL")
         return self._local.connection
@@ -98,7 +102,8 @@ class AuditDatabase:
     def _init_database(self) -> None:
         """Initialize audit database schema."""
         with self._get_connection() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS audit_events (
                     id TEXT PRIMARY KEY,
                     timestamp TEXT NOT NULL,
@@ -113,28 +118,37 @@ class AuditDatabase:
                     user_agent TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
-            """)
+            """
+            )
 
             # Create indexes for efficient querying
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp
                 ON audit_events(timestamp)
-            """)
+            """
+            )
 
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_audit_events_user
                 ON audit_events(user_id)
-            """)
+            """
+            )
 
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_audit_events_tool
                 ON audit_events(tool_id)
-            """)
+            """
+            )
 
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_audit_events_type
                 ON audit_events(event_type)
-            """)
+            """
+            )
 
             conn.commit()
 
@@ -142,27 +156,32 @@ class AuditDatabase:
         """Log an audit event to the database."""
         try:
             with self._get_connection() as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO audit_events
                     (id, timestamp, event_type, user_id, session_id, task_id, tool_id,
                      severity, details, ip_address, user_agent)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    event.id,
-                    event.timestamp.isoformat(),
-                    event.event_type.value,
-                    event.user_id,
-                    event.session_id,
-                    event.task_id,
-                    event.tool_id,
-                    event.severity,
-                    json.dumps(event.details) if event.details else None,
-                    event.ip_address,
-                    event.user_agent
-                ))
+                """,
+                    (
+                        event.id,
+                        event.timestamp.isoformat(),
+                        event.event_type.value,
+                        event.user_id,
+                        event.session_id,
+                        event.task_id,
+                        event.tool_id,
+                        event.severity,
+                        json.dumps(event.details) if event.details else None,
+                        event.ip_address,
+                        event.user_agent,
+                    ),
+                )
                 conn.commit()
         except Exception as e:
-            logger.error(f"Failed to log audit event: {e}", extra={"event_id": event.id})
+            logger.error(
+                f"Failed to log audit event: {e}", extra={"event_id": event.id}
+            )
 
     def get_events(
         self,
@@ -171,7 +190,7 @@ class AuditDatabase:
         event_type: Optional[AuditEventType] = None,
         user_id: Optional[str] = None,
         tool_id: Optional[str] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
     ) -> List[AuditEvent]:
         """Retrieve audit events with optional filtering."""
         try:
@@ -212,7 +231,11 @@ class AuditDatabase:
                 events = []
                 for row in rows:
                     event_dict = dict(row)
-                    event_dict['details'] = json.loads(event_dict['details']) if event_dict['details'] else None
+                    event_dict["details"] = (
+                        json.loads(event_dict["details"])
+                        if event_dict["details"]
+                        else None
+                    )
                     events.append(AuditEvent.from_dict(event_dict))
 
                 return events
@@ -226,13 +249,15 @@ class AuditDatabase:
         try:
             with self._get_connection() as conn:
                 # Get event counts by type
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT event_type, severity, COUNT(*) as count
                     FROM audit_events
                     WHERE timestamp >= datetime('now', '-24 hours')
                     GROUP BY event_type, severity
                     ORDER BY event_type, severity
-                """)
+                """
+                )
 
                 event_stats = {}
                 for row in cursor.fetchall():
@@ -242,7 +267,8 @@ class AuditDatabase:
                     event_stats[event_type][severity] = count
 
                 # Get tool usage stats
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT tool_id, COUNT(*) as executions,
                            COUNT(CASE WHEN event_type = 'tool_execution_failed' THEN 1 END) as failures
                     FROM audit_events
@@ -251,22 +277,31 @@ class AuditDatabase:
                     AND tool_id IS NOT NULL
                     GROUP BY tool_id
                     ORDER BY executions DESC
-                """)
+                """
+                )
 
                 tool_stats = []
                 for row in cursor.fetchall():
-                    tool_stats.append({
-                        "tool_id": row[0],
-                        "executions": row[1],
-                        "failures": row[2],
-                        "success_rate": (row[1] - row[2]) / row[1] * 100 if row[1] > 0 else 0
-                    })
+                    tool_stats.append(
+                        {
+                            "tool_id": row[0],
+                            "executions": row[1],
+                            "failures": row[2],
+                            "success_rate": (
+                                (row[1] - row[2]) / row[1] * 100 if row[1] > 0 else 0
+                            ),
+                        }
+                    )
 
                 return {
                     "event_stats": event_stats,
                     "tool_stats": tool_stats,
-                    "total_events_24h": sum(count for stats in event_stats.values() for count in stats.values()),
-                    "most_used_tools": tool_stats[:10]  # Top 10
+                    "total_events_24h": sum(
+                        count
+                        for stats in event_stats.values()
+                        for count in stats.values()
+                    ),
+                    "most_used_tools": tool_stats[:10],  # Top 10
                 }
 
         except Exception as e:
@@ -277,7 +312,9 @@ class AuditDatabase:
 class AuditLogger:
     """Main audit logging interface."""
 
-    def __init__(self, database: Optional[AuditDatabase] = None, db_path: str = "audit.db"):
+    def __init__(
+        self, database: Optional[AuditDatabase] = None, db_path: str = "audit.db"
+    ):
         """Initialize audit logger.
 
         Args:
@@ -292,7 +329,7 @@ class AuditLogger:
         event_type: AuditEventType,
         context: ExecutionContext,
         tool: Optional[BashTool] = None,
-        **additional_details
+        **additional_details,
     ) -> None:
         """Log a tool execution event.
 
@@ -312,7 +349,7 @@ class AuditLogger:
             task_id=context.task_id,
             tool_id=tool.id if tool else None,
             severity=self._determine_severity(event_type),
-            details=additional_details
+            details=additional_details,
         )
 
         log_extra = {
@@ -320,7 +357,7 @@ class AuditLogger:
             "session_id": context.session_id,
             "task_id": context.task_id,
             "tool_id": tool.id if tool else None,
-            **additional_details
+            **additional_details,
         }
         await self._persist_and_log(event, log_extra)
 
@@ -345,16 +382,22 @@ class AuditLogger:
         logger.info(f"Audit Event: {event.event_type.value}", extra=payload)
         return persisted_event
 
-    def _generate_event_id(self, task_id: Optional[str], timestamp: Optional[datetime] = None) -> str:
+    def _generate_event_id(
+        self, task_id: Optional[str], timestamp: Optional[datetime] = None
+    ) -> str:
         """Generate a globally unique audit event identifier."""
         reference_time = timestamp or datetime.now()
         timestamp_part = reference_time.strftime("%Y%m%d_%H%M%S_%f")
         task_fragment = (task_id or "task")[:8]
-        safe_task_fragment = "".join(ch if ch.isalnum() else "_" for ch in task_fragment)
+        safe_task_fragment = "".join(
+            ch if ch.isalnum() else "_" for ch in task_fragment
+        )
         random_fragment = uuid.uuid4().hex[:8]
         return f"audit_{timestamp_part}_{safe_task_fragment}_{random_fragment}"
 
-    def _persist_event_with_retry(self, event: AuditEvent, attempts: int = 3) -> AuditEvent:
+    def _persist_event_with_retry(
+        self, event: AuditEvent, attempts: int = 3
+    ) -> AuditEvent:
         """Persist an audit event, regenerating IDs if collisions are detected."""
         current_event = event
         for attempt in range(attempts):
@@ -428,10 +471,7 @@ class AuditLogger:
         return await self._persist_and_log(event, log_extra)
 
     async def log_security_event(
-        self,
-        context: ExecutionContext,
-        violation_type: str,
-        details: Dict[str, Any]
+        self, context: ExecutionContext, violation_type: str, details: Dict[str, Any]
     ) -> None:
         """Log a security-related event.
 
@@ -445,7 +485,7 @@ class AuditLogger:
             context,
             severity="error",
             violation_type=violation_type,
-            **details
+            **details,
         )
 
     async def get_audit_report(
@@ -453,7 +493,7 @@ class AuditLogger:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         user_id: Optional[str] = None,
-        tool_id: Optional[str] = None
+        tool_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate an audit report for the specified time period.
 
@@ -472,7 +512,7 @@ class AuditLogger:
             end_time=end_time,
             user_id=user_id,
             tool_id=tool_id,
-            limit=1000  # Reasonable limit for reports
+            limit=1000,  # Reasonable limit for reports
         )
 
         # Get statistics
@@ -489,17 +529,21 @@ class AuditLogger:
             "events_by_severity": {},
             "top_tools": [],
             "top_users": [],
-            "security_incidents": 0
+            "security_incidents": 0,
         }
 
         # Count by type and severity
         for event in events:
             # Count by type
             event_type = event.event_type.value
-            summary["events_by_type"][event_type] = summary["events_by_type"].get(event_type, 0) + 1
+            summary["events_by_type"][event_type] = (
+                summary["events_by_type"].get(event_type, 0) + 1
+            )
 
             # Count by severity
-            summary["events_by_severity"][event.severity] = summary["events_by_severity"].get(event.severity, 0) + 1
+            summary["events_by_severity"][event.severity] = (
+                summary["events_by_severity"].get(event.severity, 0) + 1
+            )
 
             # Count security incidents
             if event.severity in ["error", "critical"]:
@@ -515,13 +559,19 @@ class AuditLogger:
             if event.user_id:
                 user_activity[event.user_id] = user_activity.get(event.user_id, 0) + 1
 
-        summary["top_tools"] = sorted(tool_usage.items(), key=lambda x: x[1], reverse=True)[:10]
-        summary["top_users"] = sorted(user_activity.items(), key=lambda x: x[1], reverse=True)[:10]
+        summary["top_tools"] = sorted(
+            tool_usage.items(), key=lambda x: x[1], reverse=True
+        )[:10]
+        summary["top_users"] = sorted(
+            user_activity.items(), key=lambda x: x[1], reverse=True
+        )[:10]
 
         return {
             "summary": summary,
             "statistics": stats,
-            "recent_events": [event.to_dict() for event in events[:100]]  # Last 100 events
+            "recent_events": [
+                event.to_dict() for event in events[:100]
+            ],  # Last 100 events
         }
 
 
@@ -541,7 +591,7 @@ async def log_tool_execution(
     event_type: AuditEventType,
     context: ExecutionContext,
     tool: Optional[BashTool] = None,
-    **details
+    **details,
 ) -> None:
     """Convenience function to log tool execution events."""
     logger = get_audit_logger()
@@ -549,9 +599,7 @@ async def log_tool_execution(
 
 
 async def log_security_event(
-    context: ExecutionContext,
-    violation_type: str,
-    **details
+    context: ExecutionContext, violation_type: str, **details
 ) -> None:
     """Convenience function to log security events."""
     logger = get_audit_logger()
@@ -580,7 +628,7 @@ def generate_audit_report(
     start_time: Optional[datetime] = None,
     end_time: Optional[datetime] = None,
     user_id: Optional[str] = None,
-    tool_id: Optional[str] = None
+    tool_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Generate an audit report synchronously."""
     logger = get_audit_logger()
@@ -604,4 +652,6 @@ def generate_audit_report(
             )
     except RuntimeError:
         # No event loop, create one
-        return asyncio.run(logger.get_audit_report(start_time, end_time, user_id, tool_id))
+        return asyncio.run(
+            logger.get_audit_report(start_time, end_time, user_id, tool_id)
+        )

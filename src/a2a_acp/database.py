@@ -21,30 +21,31 @@ def serialize_dataclass_with_dates(obj: Any) -> Dict[str, Any]:
     """Convert dataclass to dictionary with proper datetime and metadata handling."""
     data = asdict(obj)
     # Handle datetime fields
-    for field_name in ['created_at', 'updated_at']:
+    for field_name in ["created_at", "updated_at"]:
         if field_name in data and isinstance(data[field_name], datetime):
             data[field_name] = data[field_name].isoformat()
     # Handle metadata field
-    if 'metadata' in data and data['metadata'] is not None:
-        data['metadata'] = json.dumps(data['metadata'])
+    if "metadata" in data and data["metadata"] is not None:
+        data["metadata"] = json.dumps(data["metadata"])
     return data
 
 
 def deserialize_dataclass_with_dates(cls: Any, data: Dict[str, Any]) -> Any:
     """Create dataclass from dictionary with proper datetime and metadata handling."""
     # Handle datetime fields
-    for field_name in ['created_at', 'updated_at']:
+    for field_name in ["created_at", "updated_at"]:
         if field_name in data and data[field_name]:
             data[field_name] = datetime.fromisoformat(data[field_name])
     # Handle metadata field
-    if 'metadata' in data and data['metadata']:
-        data['metadata'] = json.loads(data['metadata'])
+    if "metadata" in data and data["metadata"]:
+        data["metadata"] = json.loads(data["metadata"])
     return cls(**data)
 
 
 @dataclass
 class A2AContext:
     """Represents an A2A context with ZedACP mapping."""
+
     context_id: str
     agent_name: str
     zed_session_id: str
@@ -60,7 +61,7 @@ class A2AContext:
         return serialize_dataclass_with_dates(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'A2AContext':
+    def from_dict(cls, data: Dict[str, Any]) -> "A2AContext":
         """Create from dictionary."""
         return deserialize_dataclass_with_dates(cls, data)
 
@@ -68,6 +69,7 @@ class A2AContext:
 @dataclass
 class ACPSession:
     """Represents an ACP session with ZedACP mapping."""
+
     acp_session_id: str
     agent_name: str
     zed_session_id: str
@@ -83,7 +85,7 @@ class ACPSession:
         return serialize_dataclass_with_dates(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ACPSession':
+    def from_dict(cls, data: Dict[str, Any]) -> "ACPSession":
         """Create from dictionary."""
         return deserialize_dataclass_with_dates(cls, data)
 
@@ -91,6 +93,7 @@ class ACPSession:
 @dataclass
 class SessionHistory:
     """Represents a message in session history."""
+
     id: Optional[int]
     acp_session_id: str
     run_id: str
@@ -103,17 +106,21 @@ class SessionHistory:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
-        data['created_at'] = self.created_at.isoformat()
-        data['message_data'] = json.dumps(self.message_data)
-        data['zed_message_data'] = json.dumps(self.zed_message_data) if self.zed_message_data else None
+        data["created_at"] = self.created_at.isoformat()
+        data["message_data"] = json.dumps(self.message_data)
+        data["zed_message_data"] = (
+            json.dumps(self.zed_message_data) if self.zed_message_data else None
+        )
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SessionHistory':
+    def from_dict(cls, data: Dict[str, Any]) -> "SessionHistory":
         """Create from dictionary."""
-        data['created_at'] = datetime.fromisoformat(data['created_at'])
-        data['message_data'] = json.loads(data['message_data'])
-        data['zed_message_data'] = json.loads(data['zed_message_data']) if data['zed_message_data'] else None
+        data["created_at"] = datetime.fromisoformat(data["created_at"])
+        data["message_data"] = json.loads(data["message_data"])
+        data["zed_message_data"] = (
+            json.loads(data["zed_message_data"]) if data["zed_message_data"] else None
+        )
         return cls(**data)
 
 
@@ -133,10 +140,9 @@ class SessionDatabase:
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get thread-local database connection."""
-        if not hasattr(self._local, 'connection'):
+        if not hasattr(self._local, "connection"):
             self._local.connection = sqlite3.connect(
-                self.db_path,
-                check_same_thread=False
+                self.db_path, check_same_thread=False
             )
             # Enable WAL mode for better concurrency
             self._local.connection.execute("PRAGMA journal_mode=WAL")
@@ -149,7 +155,8 @@ class SessionDatabase:
     def _init_database(self) -> None:
         """Initialize database schema."""
         with self._get_connection() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS a2a_contexts (
                     context_id TEXT PRIMARY KEY,
                     agent_name TEXT NOT NULL,
@@ -161,9 +168,11 @@ class SessionDatabase:
                     last_task_id TEXT,
                     metadata TEXT
                 )
-            """)
+            """
+            )
 
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS a2a_messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     context_id TEXT NOT NULL REFERENCES a2a_contexts(context_id),
@@ -174,10 +183,12 @@ class SessionDatabase:
                     sequence_number INTEGER,
                     zed_message_data TEXT
                 )
-            """)
+            """
+            )
 
             # Push notification configuration table
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS push_notification_configs (
                     id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL,
@@ -192,10 +203,12 @@ class SessionDatabase:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
-            """)
+            """
+            )
 
             # Push notification delivery tracking table
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS notification_deliveries (
                     id TEXT PRIMARY KEY,
                     config_id TEXT NOT NULL REFERENCES push_notification_configs(id),
@@ -207,34 +220,45 @@ class SessionDatabase:
                     attempted_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     delivered_at TEXT
                 )
-            """)
+            """
+            )
 
             # Create indexes for performance
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_a2a_contexts_agent_active
                 ON a2a_contexts(agent_name, is_active)
-            """)
+            """
+            )
 
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_a2a_messages_context
                 ON a2a_messages(context_id, created_at)
-            """)
+            """
+            )
 
             # Push notification indexes
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_push_configs_task
                 ON push_notification_configs(task_id)
-            """)
+            """
+            )
 
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_config
                 ON notification_deliveries(config_id, attempted_at)
-            """)
+            """
+            )
 
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_task_event
                 ON notification_deliveries(task_id, event_type, delivery_status)
-            """)
+            """
+            )
 
             conn.commit()
 
@@ -244,7 +268,7 @@ class SessionDatabase:
         agent: str,
         cwd: str,
         zed_session_id: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> A2AContext:
         """Create a new A2A context record."""
         now = datetime.now(timezone.utc)
@@ -255,25 +279,28 @@ class SessionDatabase:
             working_directory=cwd,
             created_at=now,
             updated_at=now,
-            metadata=metadata
+            metadata=metadata,
         )
 
         with self._get_connection() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO a2a_contexts
                 (context_id, agent_name, zed_session_id, working_directory,
                  created_at, updated_at, is_active, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                context.context_id,
-                context.agent_name,
-                context.zed_session_id,
-                context.working_directory,
-                context.created_at.isoformat(),
-                context.updated_at.isoformat(),
-                context.is_active,
-                json.dumps(context.metadata) if context.metadata else None
-            ))
+            """,
+                (
+                    context.context_id,
+                    context.agent_name,
+                    context.zed_session_id,
+                    context.working_directory,
+                    context.created_at.isoformat(),
+                    context.updated_at.isoformat(),
+                    context.is_active,
+                    json.dumps(context.metadata) if context.metadata else None,
+                ),
+            )
             conn.commit()
 
         return context
@@ -282,9 +309,12 @@ class SessionDatabase:
         """Retrieve an A2A context by ID."""
         with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT * FROM a2a_contexts WHERE context_id = ?
-            """, (context_id,))
+            """,
+                (context_id,),
+            )
 
             row = cursor.fetchone()
             if row:
@@ -292,17 +322,22 @@ class SessionDatabase:
             return None
 
     async def update_zed_session_id(
-        self,
-        acp_session_id: str,
-        zed_session_id: str
+        self, acp_session_id: str, zed_session_id: str
     ) -> None:
         """Update the ZedACP session ID for an ACP session."""
         with self._get_connection() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE acp_sessions
                 SET zed_session_id = ?, updated_at = ?
                 WHERE acp_session_id = ?
-            """, (zed_session_id, datetime.now(timezone.utc).isoformat(), acp_session_id))
+            """,
+                (
+                    zed_session_id,
+                    datetime.now(timezone.utc).isoformat(),
+                    acp_session_id,
+                ),
+            )
             conn.commit()
 
     async def append_message_history(
@@ -311,7 +346,7 @@ class SessionDatabase:
         run_id: str,
         message: Message,
         sequence_number: int,
-        zed_message: Optional[Dict[str, Any]] = None
+        zed_message: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Append a message to session history."""
         # Determine role from message (this is a simplified approach)
@@ -326,34 +361,39 @@ class SessionDatabase:
             message_role=message_role,
             message_data={
                 "role": message.role,
-                "parts": [part.model_dump() for part in message.parts]
+                "parts": [part.model_dump() for part in message.parts],
             },
             created_at=datetime.now(timezone.utc),
             sequence_number=sequence_number,
-            zed_message_data=zed_message
+            zed_message_data=zed_message,
         )
 
         with self._get_connection() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO session_history
                 (acp_session_id, run_id, message_role, message_data, created_at,
                  sequence_number, zed_message_data)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                history_entry.acp_session_id,
-                history_entry.run_id,
-                history_entry.message_role,
-                json.dumps(history_entry.message_data),
-                history_entry.created_at.isoformat(),
-                history_entry.sequence_number,
-                json.dumps(history_entry.zed_message_data) if history_entry.zed_message_data else None
-            ))
+            """,
+                (
+                    history_entry.acp_session_id,
+                    history_entry.run_id,
+                    history_entry.message_role,
+                    json.dumps(history_entry.message_data),
+                    history_entry.created_at.isoformat(),
+                    history_entry.sequence_number,
+                    (
+                        json.dumps(history_entry.zed_message_data)
+                        if history_entry.zed_message_data
+                        else None
+                    ),
+                ),
+            )
             conn.commit()
 
     async def get_session_history(
-        self,
-        acp_session_id: str,
-        limit: Optional[int] = None
+        self, acp_session_id: str, limit: Optional[int] = None
     ) -> List[SessionHistory]:
         """Retrieve message history for a session."""
         with self._get_connection() as conn:
@@ -375,9 +415,7 @@ class SessionDatabase:
             return [SessionHistory.from_dict(dict(row)) for row in rows]
 
     async def list_a2a_contexts(
-        self,
-        agent_name: Optional[str] = None,
-        active_only: bool = True
+        self, agent_name: Optional[str] = None, active_only: bool = True
     ) -> List[A2AContext]:
         """List ACP sessions with optional filtering."""
         with self._get_connection() as conn:
@@ -406,7 +444,9 @@ class SessionDatabase:
             conn.execute("DELETE FROM a2a_messages WHERE context_id = ?", (context_id,))
 
             # Delete the context
-            cursor = conn.execute("DELETE FROM a2a_contexts WHERE context_id = ?", (context_id,))
+            cursor = conn.execute(
+                "DELETE FROM a2a_contexts WHERE context_id = ?", (context_id,)
+            )
             conn.commit()
 
             return cursor.rowcount > 0
@@ -415,10 +455,13 @@ class SessionDatabase:
         """Clean up old inactive sessions. Returns number of sessions deleted."""
         cutoff_date = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 DELETE FROM acp_sessions
                 WHERE is_active = 0 AND updated_at < datetime(?, '-' || ? || ' days')
-            """, (cutoff_date, days_old))
+            """,
+                (cutoff_date, days_old),
+            )
             deleted_count = cursor.rowcount
             conn.commit()
             return deleted_count
@@ -434,75 +477,121 @@ class SessionDatabase:
         enabled_events: Optional[List[str]] = None,
         disabled_events: Optional[List[str]] = None,
         quiet_hours_start: Optional[str] = None,
-        quiet_hours_end: Optional[str] = None
+        quiet_hours_end: Optional[str] = None,
     ) -> None:
         """Store a push notification configuration."""
         with self._get_connection() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO push_notification_configs
                 (id, task_id, url, token, authentication_schemes, credentials,
                  enabled_events, disabled_events, quiet_hours_start, quiet_hours_end, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """, (
-                config_id,
-                task_id,
-                url,
-                token,
-                json.dumps(authentication_schemes) if authentication_schemes else None,
-                credentials,
-                json.dumps(enabled_events) if enabled_events else None,
-                json.dumps(disabled_events) if disabled_events else None,
-                quiet_hours_start,
-                quiet_hours_end
-            ))
+            """,
+                (
+                    config_id,
+                    task_id,
+                    url,
+                    token,
+                    (
+                        json.dumps(authentication_schemes)
+                        if authentication_schemes
+                        else None
+                    ),
+                    credentials,
+                    json.dumps(enabled_events) if enabled_events else None,
+                    json.dumps(disabled_events) if disabled_events else None,
+                    quiet_hours_start,
+                    quiet_hours_end,
+                ),
+            )
             conn.commit()
 
-    async def get_push_notification_config(self, task_id: str, config_id: str) -> Optional[Dict[str, Any]]:
+    async def get_push_notification_config(
+        self, task_id: str, config_id: str
+    ) -> Optional[Dict[str, Any]]:
         """Retrieve a push notification configuration."""
         with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT * FROM push_notification_configs
                 WHERE task_id = ? AND id = ?
-            """, (task_id, config_id))
+            """,
+                (task_id, config_id),
+            )
 
             row = cursor.fetchone()
             if row:
                 config = dict(row)
-                config['authentication_schemes'] = json.loads(config['authentication_schemes']) if config['authentication_schemes'] else None
-                config['enabled_events'] = json.loads(config['enabled_events']) if config['enabled_events'] else None
-                config['disabled_events'] = json.loads(config['disabled_events']) if config['disabled_events'] else None
+                config["authentication_schemes"] = (
+                    json.loads(config["authentication_schemes"])
+                    if config["authentication_schemes"]
+                    else None
+                )
+                config["enabled_events"] = (
+                    json.loads(config["enabled_events"])
+                    if config["enabled_events"]
+                    else None
+                )
+                config["disabled_events"] = (
+                    json.loads(config["disabled_events"])
+                    if config["disabled_events"]
+                    else None
+                )
                 return config
             return None
 
-    async def list_push_notification_configs(self, task_id: str) -> List[Dict[str, Any]]:
+    async def list_push_notification_configs(
+        self, task_id: str
+    ) -> List[Dict[str, Any]]:
         """List all push notification configurations for a task."""
         with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT * FROM push_notification_configs
                 WHERE task_id = ?
                 ORDER BY created_at DESC
-            """, (task_id,))
+            """,
+                (task_id,),
+            )
 
             rows = cursor.fetchall()
             configs = []
             for row in rows:
                 config = dict(row)
-                config['authentication_schemes'] = json.loads(config['authentication_schemes']) if config['authentication_schemes'] else None
-                config['enabled_events'] = json.loads(config['enabled_events']) if config['enabled_events'] else None
-                config['disabled_events'] = json.loads(config['disabled_events']) if config['disabled_events'] else None
+                config["authentication_schemes"] = (
+                    json.loads(config["authentication_schemes"])
+                    if config["authentication_schemes"]
+                    else None
+                )
+                config["enabled_events"] = (
+                    json.loads(config["enabled_events"])
+                    if config["enabled_events"]
+                    else None
+                )
+                config["disabled_events"] = (
+                    json.loads(config["disabled_events"])
+                    if config["disabled_events"]
+                    else None
+                )
                 configs.append(config)
 
             return configs
 
-    async def delete_push_notification_config(self, task_id: str, config_id: str) -> bool:
+    async def delete_push_notification_config(
+        self, task_id: str, config_id: str
+    ) -> bool:
         """Delete a push notification configuration."""
         with self._get_connection() as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 DELETE FROM push_notification_configs
                 WHERE task_id = ? AND id = ?
-            """, (task_id, config_id))
+            """,
+                (task_id, config_id),
+            )
             conn.commit()
             return cursor.rowcount > 0
 
@@ -515,31 +604,34 @@ class SessionDatabase:
         delivery_status: str,
         response_code: Optional[int] = None,
         response_body: Optional[str] = None,
-        delivered_at: Optional[str] = None
+        delivered_at: Optional[str] = None,
     ) -> None:
         """Track a notification delivery attempt."""
         with self._get_connection() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO notification_deliveries
                 (id, config_id, task_id, event_type, delivery_status, response_code, response_body, delivered_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                delivery_id,
-                config_id,
-                task_id,
-                event_type,
-                delivery_status,
-                response_code,
-                response_body,
-                delivered_at
-            ))
+            """,
+                (
+                    delivery_id,
+                    config_id,
+                    task_id,
+                    event_type,
+                    delivery_status,
+                    response_code,
+                    response_body,
+                    delivered_at,
+                ),
+            )
             conn.commit()
 
     async def get_notification_delivery_history(
         self,
         task_id: Optional[str] = None,
         config_id: Optional[str] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """Get notification delivery history with optional filtering."""
         with self._get_connection() as conn:
@@ -577,10 +669,13 @@ class SessionDatabase:
         # This could be extended with more sophisticated lifecycle management
         cutoff_date = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 DELETE FROM push_notification_configs
                 WHERE updated_at < datetime(?, '-24 hours')
-            """, (cutoff_date,))
+            """,
+                (cutoff_date,),
+            )
             deleted_count = cursor.rowcount
             conn.commit()
             return deleted_count
@@ -594,5 +689,5 @@ class SessionDatabase:
 
     def close(self) -> None:
         """Close all database connections."""
-        if hasattr(self._local, 'connection'):
+        if hasattr(self._local, "connection"):
             self._local.connection.close()

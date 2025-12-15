@@ -21,7 +21,9 @@ def test_build_acp_error_converts_detail_for_basic_profile():
     assert mcp_error["detail"] == '{"path":"/tmp/example.txt"}'
     assert contract.diagnostics is not None
     assert "suppressed_detail" in contract.diagnostics
-    assert contract.diagnostics["suppressed_detail"]["raw_detail"] == {"path": "/tmp/example.txt"}
+    assert contract.diagnostics["suppressed_detail"]["raw_detail"] == {
+        "path": "/tmp/example.txt"
+    }
 
 
 def test_build_acp_error_preserves_extended_detail():

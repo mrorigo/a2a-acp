@@ -27,9 +27,10 @@ from .models import (
     NotificationFilter,
     NotificationAnalytics,
     DevelopmentToolEvent,
-    DevelopmentToolEventKind
+    DevelopmentToolEventKind,
 )
 from .database import SessionDatabase
+
 # from .streaming_manager import StreamingManager  # Avoid circular import
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ class PushNotificationManager:
         database: SessionDatabase,
         base_url: Optional[str] = None,
         streaming_manager: Optional[Any] = None,
-        settings: Optional[Any] = None
+        settings: Optional[Any] = None,
     ):
         """Initialize the push notification manager."""
         from .settings import get_settings
@@ -69,15 +70,10 @@ class PushNotificationManager:
         """Initialize the HTTP client with proper configuration."""
         timeout = Timeout(self.settings.webhook_timeout, connect=10.0)
         self.http_client = AsyncClient(
-            timeout=timeout,
-            follow_redirects=True,
-            max_redirects=3
+            timeout=timeout, follow_redirects=True, max_redirects=3
         )
 
-    async def store_config(
-        self,
-        config: TaskPushNotificationConfig
-    ) -> None:
+    async def store_config(self, config: TaskPushNotificationConfig) -> None:
         """Store a push notification configuration."""
         try:
             await self.database.store_push_notification_config(
@@ -90,15 +86,15 @@ class PushNotificationManager:
                 enabled_events=config.enabled_events,
                 disabled_events=config.disabled_events,
                 quiet_hours_start=config.quiet_hours_start,
-                quiet_hours_end=config.quiet_hours_end
+                quiet_hours_end=config.quiet_hours_end,
             )
             logger.info(
                 "Stored push notification config",
                 extra={
                     "config_id": config.id,
                     "task_id": config.task_id,
-                    "url": config.url
-                }
+                    "url": config.url,
+                },
             )
         except Exception as e:
             logger.error(
@@ -106,40 +102,35 @@ class PushNotificationManager:
                 extra={
                     "config_id": config.id,
                     "task_id": config.task_id,
-                    "error": str(e)
-                }
+                    "error": str(e),
+                },
             )
             raise
 
     async def get_config(
-        self,
-        task_id: str,
-        config_id: str
+        self, task_id: str, config_id: str
     ) -> Optional[TaskPushNotificationConfig]:
         """Retrieve a push notification configuration."""
         try:
-            config_data = await self.database.get_push_notification_config(task_id, config_id)
+            config_data = await self.database.get_push_notification_config(
+                task_id, config_id
+            )
             if config_data:
                 return TaskPushNotificationConfig.from_dict(config_data)
             return None
         except Exception as e:
             logger.error(
                 "Failed to get push notification config",
-                extra={
-                    "config_id": config_id,
-                    "task_id": task_id,
-                    "error": str(e)
-                }
+                extra={"config_id": config_id, "task_id": task_id, "error": str(e)},
             )
             return None
 
-    async def list_configs(
-        self,
-        task_id: str
-    ) -> List[TaskPushNotificationConfig]:
+    async def list_configs(self, task_id: str) -> List[TaskPushNotificationConfig]:
         """List all push notification configurations for a task."""
         try:
-            config_data_list = await self.database.list_push_notification_configs(task_id)
+            config_data_list = await self.database.list_push_notification_configs(
+                task_id
+            )
             configs = []
             for config_data in config_data_list:
                 config = TaskPushNotificationConfig.from_dict(config_data)
@@ -148,40 +139,30 @@ class PushNotificationManager:
         except Exception as e:
             logger.error(
                 "Failed to list push notification configs",
-                extra={"task_id": task_id, "error": str(e)}
+                extra={"task_id": task_id, "error": str(e)},
             )
             return []
 
-    async def delete_config(
-        self,
-        task_id: str,
-        config_id: str
-    ) -> bool:
+    async def delete_config(self, task_id: str, config_id: str) -> bool:
         """Delete a push notification configuration."""
         try:
-            success = await self.database.delete_push_notification_config(task_id, config_id)
+            success = await self.database.delete_push_notification_config(
+                task_id, config_id
+            )
             if success:
                 logger.info(
                     "Deleted push notification config",
-                    extra={"config_id": config_id, "task_id": task_id}
+                    extra={"config_id": config_id, "task_id": task_id},
                 )
             return success
         except Exception as e:
             logger.error(
                 "Failed to delete push notification config",
-                extra={
-                    "config_id": config_id,
-                    "task_id": task_id,
-                    "error": str(e)
-                }
+                extra={"config_id": config_id, "task_id": task_id, "error": str(e)},
             )
             return False
 
-    async def send_notification(
-        self,
-        task_id: str,
-        event: Dict[str, Any]
-    ) -> bool:
+    async def send_notification(self, task_id: str, event: Dict[str, Any]) -> bool:
         """Send notifications for a task event to all configured endpoints."""
         try:
             # Get all notification configurations for this task
@@ -189,8 +170,7 @@ class PushNotificationManager:
 
             if not configs:
                 logger.debug(
-                    "No notification configs found for task",
-                    extra={"task_id": task_id}
+                    "No notification configs found for task", extra={"task_id": task_id}
                 )
                 return True
 
@@ -207,13 +187,15 @@ class PushNotificationManager:
                             extra={
                                 "config_id": config.id,
                                 "task_id": task_id,
-                                "event_type": event.get("event")
-                            }
+                                "event_type": event.get("event"),
+                            },
                         )
                         continue
 
                     # Send the notification
-                    delivery_success = await self._send_single_notification(config, event)
+                    delivery_success = await self._send_single_notification(
+                        config, event
+                    )
 
                     if delivery_success:
                         success_count += 1
@@ -224,8 +206,8 @@ class PushNotificationManager:
                         extra={
                             "config_id": config.id,
                             "task_id": task_id,
-                            "error": str(e)
-                        }
+                            "error": str(e),
+                        },
                     )
 
             # Broadcast to streaming connections for real-time updates
@@ -235,7 +217,7 @@ class PushNotificationManager:
                 except Exception as e:
                     logger.error(
                         "Failed to broadcast to streaming connections",
-                        extra={"task_id": task_id, "error": str(e)}
+                        extra={"task_id": task_id, "error": str(e)},
                     )
 
             # Track delivery analytics
@@ -247,14 +229,12 @@ class PushNotificationManager:
         except Exception as e:
             logger.error(
                 "Failed to send notifications",
-                extra={"task_id": task_id, "error": str(e)}
+                extra={"task_id": task_id, "error": str(e)},
             )
             return False
 
     def _should_send_notification(
-        self,
-        config: TaskPushNotificationConfig,
-        event: Dict[str, Any]
+        self, config: TaskPushNotificationConfig, event: Dict[str, Any]
     ) -> bool:
         """Check if notification should be sent based on configuration."""
         event_type_str = event.get("event", "")
@@ -277,9 +257,11 @@ class PushNotificationManager:
             "test_event": EventType.TASK_STATUS_CHANGE.value,
             "resilience_test": EventType.TASK_STATUS_CHANGE.value,
             "large_payload_test": EventType.TASK_STATUS_CHANGE.value,
-            "performance_test": EventType.TASK_STATUS_CHANGE.value
+            "performance_test": EventType.TASK_STATUS_CHANGE.value,
         }
-        normalized_event_type = event_type_mapping.get(event_type_str, EventType.TASK_STATUS_CHANGE.value)
+        normalized_event_type = event_type_mapping.get(
+            event_type_str, EventType.TASK_STATUS_CHANGE.value
+        )
 
         # Ensure we always have a valid string for filtering
         if not normalized_event_type:
@@ -288,17 +270,19 @@ class PushNotificationManager:
         # Use NotificationFilter for sophisticated filtering
         # Create filter from config (extend TaskPushNotificationConfig to include filter settings)
         filter_config = NotificationFilter(
-            enabled_events=getattr(config, 'enabled_events', []),
-            disabled_events=getattr(config, 'disabled_events', []),
-            quiet_hours_start=getattr(config, 'quiet_hours_start', None),
-            quiet_hours_end=getattr(config, 'quiet_hours_end', None)
+            enabled_events=getattr(config, "enabled_events", []),
+            disabled_events=getattr(config, "disabled_events", []),
+            quiet_hours_start=getattr(config, "quiet_hours_start", None),
+            quiet_hours_end=getattr(config, "quiet_hours_end", None),
         )
 
         # Get current hour for quiet hours filtering
         current_hour = datetime.now().hour
 
         # Apply filtering rules
-        return filter_config.should_send_notification(normalized_event_type, current_hour)
+        return filter_config.should_send_notification(
+            normalized_event_type, current_hour
+        )
 
     async def _handle_notification_error(
         self,
@@ -307,7 +291,7 @@ class PushNotificationManager:
         error: Exception,
         attempt: int,
         start_time: float,
-        response: Optional[Response] = None
+        response: Optional[Response] = None,
     ) -> bool:
         """Handle notification delivery errors with consistent logging and tracking."""
         should_retry = attempt < self.settings.retry_attempts
@@ -320,8 +304,8 @@ class PushNotificationManager:
                     "task_id": config.task_id,
                     "url": config.url,
                     "attempt": attempt + 1,
-                    "error": str(error)
-                }
+                    "error": str(error),
+                },
             )
         else:
             logger.error(
@@ -331,8 +315,8 @@ class PushNotificationManager:
                     "task_id": config.task_id,
                     "url": config.url,
                     "attempt": attempt + 1,
-                    "error": str(error)
-                }
+                    "error": str(error),
+                },
             )
 
         # If this is the last attempt, track the failure
@@ -344,7 +328,7 @@ class PushNotificationManager:
                     event,
                     response=response,
                     response_time=time.time() - start_time,
-                    error=str(error)
+                    error=str(error),
                 )
             except Exception as track_error:
                 logger.error(
@@ -352,16 +336,14 @@ class PushNotificationManager:
                     extra={
                         "config_id": config.id,
                         "task_id": config.task_id,
-                        "track_error": str(track_error)
-                    }
+                        "track_error": str(track_error),
+                    },
                 )
 
         return should_retry
 
     async def _send_single_notification(
-        self,
-        config: TaskPushNotificationConfig,
-        event: Dict[str, Any]
+        self, config: TaskPushNotificationConfig, event: Dict[str, Any]
     ) -> bool:
         """Send a notification to a single endpoint with retry logic."""
         if not self.http_client:
@@ -381,16 +363,13 @@ class PushNotificationManager:
                 EventType.TASK_INPUT_REQUIRED.value: DevelopmentToolEventKind.TOOL_CALL_CONFIRMATION,
             }
             kind = kind_map.get(event_type_str, DevelopmentToolEventKind.UNSPECIFIED)
-            dev_event = DevelopmentToolEvent(
-                kind=kind,
-                data=dev_tool_meta
-            )
+            dev_event = DevelopmentToolEvent(kind=kind, data=dev_tool_meta)
             payload_dict["development_tool_event"] = dev_event.to_dict()
 
         # Prepare headers
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "A2A-ACP-PushNotificationManager/1.0"
+            "User-Agent": "A2A-ACP-PushNotificationManager/1.0",
         }
 
         # Add authentication headers
@@ -402,19 +381,14 @@ class PushNotificationManager:
             start_time = time.time()
             try:
                 response: Response = await self.http_client.post(
-                    config.url,
-                    json=payload_dict,
-                    headers=headers
+                    config.url, json=payload_dict, headers=headers
                 )
 
                 response_time = time.time() - start_time
 
                 # Track delivery attempt
                 await self._track_delivery_attempt(
-                    config,
-                    event,
-                    response,
-                    response_time
+                    config, event, response, response_time
                 )
 
                 if response.is_success:
@@ -425,8 +399,8 @@ class PushNotificationManager:
                             "task_id": config.task_id,
                             "url": config.url,
                             "response_time": response_time,
-                            "status_code": response.status_code
-                        }
+                            "status_code": response.status_code,
+                        },
                     )
                     return True
                 else:
@@ -438,40 +412,49 @@ class PushNotificationManager:
                             "url": config.url,
                             "status_code": response.status_code,
                             "response_body": response.text[:500],  # Limit log size
-                            "attempt": attempt + 1
-                        }
+                            "attempt": attempt + 1,
+                        },
                     )
 
                     # If this is the last attempt, track the failure
                     if attempt == self.settings.retry_attempts:
-                        asyncio.create_task(self._track_delivery_attempt(
-                            config,
-                            event,
-                            response=response,
-                            response_time=response_time,
-                            error=f"HTTP {response.status_code}"
-                        ))
+                        asyncio.create_task(
+                            self._track_delivery_attempt(
+                                config,
+                                event,
+                                response=response,
+                                response_time=response_time,
+                                error=f"HTTP {response.status_code}",
+                            )
+                        )
                         return False
 
             except Exception as e:
                 # Use helper method to handle errors consistently
-                should_retry = await self._handle_notification_error(config, event, e, attempt, start_time)
+                should_retry = await self._handle_notification_error(
+                    config, event, e, attempt, start_time
+                )
                 if not should_retry:
                     return False
 
             # Wait before retry (exponential backoff)
             if attempt < self.settings.retry_attempts:
-                delay = min(self.settings.retry_delay * (2 ** attempt), self.settings.max_retry_delay)
+                delay = min(
+                    self.settings.retry_delay * (2**attempt),
+                    self.settings.max_retry_delay,
+                )
                 await asyncio.sleep(delay)
 
         return False
 
-    def _create_notification_payload(self, event: Dict[str, Any]) -> NotificationPayload:
+    def _create_notification_payload(
+        self, event: Dict[str, Any]
+    ) -> NotificationPayload:
         """Create a standardized notification payload from event data."""
         event_type_str = event.get("event", "unknown")
         task_id = event.get("task_id", "")
         timestamp = datetime.now(timezone.utc)
-    
+
         # Handle legacy event type strings by mapping them to enum values
         event_type_mapping = {
             "status_change": EventType.TASK_STATUS_CHANGE,
@@ -485,23 +468,29 @@ class PushNotificationManager:
             "test_event": EventType.TASK_STATUS_CHANGE,
             "resilience_test": EventType.TASK_STATUS_CHANGE,
             "large_payload_test": EventType.TASK_STATUS_CHANGE,
-            "performance_test": EventType.TASK_STATUS_CHANGE
+            "performance_test": EventType.TASK_STATUS_CHANGE,
         }
-        event_type = event_type_mapping.get(event_type_str, EventType.TASK_STATUS_CHANGE)
-    
+        event_type = event_type_mapping.get(
+            event_type_str, EventType.TASK_STATUS_CHANGE
+        )
+
         # Preserve original event string for payload (for backward compatibility)
         # but use enum for internal type determination
         payload_event = event_type_str  # Use original string from event
-    
+
         # Create base payload
-        if event_type in [EventType.TASK_STATUS_CHANGE, EventType.TASK_COMPLETED, EventType.TASK_FAILED]:
+        if event_type in [
+            EventType.TASK_STATUS_CHANGE,
+            EventType.TASK_COMPLETED,
+            EventType.TASK_FAILED,
+        ]:
             base_payload = TaskStatusChangePayload(
                 event=payload_event,
                 task_id=task_id,
                 timestamp=timestamp,
                 data=event,
                 old_state=event.get("old_state", ""),
-                new_state=event.get("new_state", "")
+                new_state=event.get("new_state", ""),
             )
         elif event_type == EventType.TASK_MESSAGE:
             base_payload = TaskMessagePayload(
@@ -510,7 +499,7 @@ class PushNotificationManager:
                 timestamp=timestamp,
                 data=event,
                 message_role=event.get("message_role", ""),
-                message_content=event.get("message_content", "")
+                message_content=event.get("message_content", ""),
             )
         elif event_type == EventType.TASK_ARTIFACT:
             base_payload = TaskArtifactPayload(
@@ -520,22 +509,18 @@ class PushNotificationManager:
                 data=event,
                 artifact_type=event.get("artifact_type", ""),
                 artifact_name=event.get("artifact_name", ""),
-                artifact_size=event.get("artifact_size")
+                artifact_size=event.get("artifact_size"),
             )
         else:
             # Generic payload for unknown event types
             base_payload = NotificationPayload(
-                event=payload_event,
-                task_id=task_id,
-                timestamp=timestamp,
-                data=event
+                event=payload_event, task_id=task_id, timestamp=timestamp, data=event
             )
 
         return base_payload
 
     def _get_authentication_headers(
-        self,
-        config: TaskPushNotificationConfig
+        self, config: TaskPushNotificationConfig
     ) -> Dict[str, str]:
         """Get authentication headers for the notification request."""
         headers = {}
@@ -555,7 +540,10 @@ class PushNotificationManager:
                     # Basic auth would need username:password in credentials
                     if config.credentials:
                         import base64
-                        headers["Authorization"] = f"Basic {base64.b64encode(config.credentials.encode()).decode()}"
+
+                        headers["Authorization"] = (
+                            f"Basic {base64.b64encode(config.credentials.encode()).decode()}"
+                        )
                 elif scheme_type == "custom":
                     header_name = scheme_config.get("header_name", "")
                     header_value = scheme_config.get("header_value", "")
@@ -570,7 +558,7 @@ class PushNotificationManager:
         event: Dict[str, Any],
         response: Optional[Response],
         response_time: float,
-        error: Optional[str] = None
+        error: Optional[str] = None,
     ) -> None:
         """Track a delivery attempt in the database."""
         delivery_id = str(uuid.uuid4())
@@ -600,7 +588,11 @@ class PushNotificationManager:
                 delivery_status=delivery_status,
                 response_code=response_code,
                 response_body=response_body,
-                delivered_at=datetime.now(timezone.utc).isoformat() if delivery_status == DeliveryStatus.DELIVERED.value else None
+                delivered_at=(
+                    datetime.now(timezone.utc).isoformat()
+                    if delivery_status == DeliveryStatus.DELIVERED.value
+                    else None
+                ),
             )
         except Exception as e:
             logger.error(
@@ -608,8 +600,8 @@ class PushNotificationManager:
                 extra={
                     "delivery_id": delivery_id,
                     "config_id": config.id,
-                    "error": str(e)
-                }
+                    "error": str(e),
+                },
             )
 
     def _track_deliveries(
@@ -617,7 +609,7 @@ class PushNotificationManager:
         configs: List[TaskPushNotificationConfig],
         event: Dict[str, Any],
         success_count: int,
-        total_count: int
+        total_count: int,
     ) -> None:
         """Update analytics with delivery results."""
         # Create mock delivery records for analytics
@@ -629,8 +621,12 @@ class PushNotificationManager:
                 config_id=config.id,
                 task_id=config.task_id,
                 event_type=event_type,
-                delivery_status=DeliveryStatus.DELIVERED.value if i < success_count else DeliveryStatus.FAILED.value,
-                attempted_at=datetime.now(timezone.utc)
+                delivery_status=(
+                    DeliveryStatus.DELIVERED.value
+                    if i < success_count
+                    else DeliveryStatus.FAILED.value
+                ),
+                attempted_at=datetime.now(timezone.utc),
             )
 
             self.analytics.update_from_delivery(delivery)
@@ -642,21 +638,21 @@ class PushNotificationManager:
             if cleaned_count > 0:
                 logger.info(
                     "Cleaned up expired notification configurations",
-                    extra={"count": cleaned_count}
+                    extra={"count": cleaned_count},
                 )
             return cleaned_count
         except Exception as e:
             logger.error(
                 "Failed to cleanup expired notification configs",
-                extra={"error": str(e)}
+                extra={"error": str(e)},
             )
             return 0
 
     async def cleanup_by_task_state(self, task_id: str, task_state: str) -> int:
         """Clean up notification configurations based on task state."""
         cleanup_strategy = {
-            "failed": 0,      # Delete immediately for failed tasks
-            "cancelled": 0,   # Delete immediately for cancelled tasks
+            "failed": 0,  # Delete immediately for failed tasks
+            "cancelled": 0,  # Delete immediately for cancelled tasks
             "completed": 24,  # Keep for 24 hours for completed tasks
             "input-required": 168,  # Keep for 7 days for auth-required tasks (may be resumed)
         }
@@ -680,8 +676,8 @@ class PushNotificationManager:
                     extra={
                         "task_id": task_id,
                         "task_state": task_state,
-                        "deleted_count": deleted_count
-                    }
+                        "deleted_count": deleted_count,
+                    },
                 )
                 return deleted_count
 
@@ -692,8 +688,8 @@ class PushNotificationManager:
                 extra={
                     "task_id": task_id,
                     "task_state": task_state,
-                    "retention_hours": retention_hours
-                }
+                    "retention_hours": retention_hours,
+                },
             )
 
             return 0  # No immediate cleanup for tasks with retention
@@ -701,7 +697,7 @@ class PushNotificationManager:
         except Exception as e:
             logger.error(
                 "Failed to cleanup configs by task state",
-                extra={"task_id": task_id, "task_state": task_state, "error": str(e)}
+                extra={"task_id": task_id, "task_state": task_state, "error": str(e)},
             )
             return 0
 
@@ -709,14 +705,12 @@ class PushNotificationManager:
         self,
         task_id: Optional[str] = None,
         config_id: Optional[str] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
     ) -> List[NotificationDelivery]:
         """Get notification delivery history."""
         try:
             delivery_data = await self.database.get_notification_delivery_history(
-                task_id=task_id,
-                config_id=config_id,
-                limit=limit
+                task_id=task_id, config_id=config_id, limit=limit
             )
 
             deliveries = []
@@ -726,10 +720,7 @@ class PushNotificationManager:
 
             return deliveries
         except Exception as e:
-            logger.error(
-                "Failed to get delivery history",
-                extra={"error": str(e)}
-            )
+            logger.error("Failed to get delivery history", extra={"error": str(e)})
             return []
 
     def get_analytics(self) -> NotificationAnalytics:

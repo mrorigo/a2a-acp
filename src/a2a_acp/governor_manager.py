@@ -17,7 +17,9 @@ import yaml
 logger = logging.getLogger(__name__)
 
 GovernorPhase = Literal["permission", "post_run"]
-GovernorStatus = Literal["approve", "input_required", "reject", "needs_attention", "error"]
+GovernorStatus = Literal[
+    "approve", "input_required", "reject", "needs_attention", "error"
+]
 GovernorType = Literal["script", "http", "python"]
 AutoDecisionType = Literal["approve", "reject", "manual"]
 
@@ -63,17 +65,21 @@ class AutoApprovalPolicy:
     def evaluate(self, tool_call: Dict[str, Any]) -> Optional[AutoApprovalDecision]:
         """Return a decision if the policy applies to the given tool call."""
         tool_id = tool_call.get("toolId")
-        
+
         # Infer tool ID for diff-based edits if not explicitly provided
         if not tool_id:
             kind = tool_call.get("kind", "")
             content = tool_call.get("content", [])
-            if kind == "edit" and any(item.get("type") == "diff" for item in content if isinstance(item, dict)):
-                tool_id = "functions.acp_fs__edit_text_file"  # Virtual tool ID for diff edits
+            if kind == "edit" and any(
+                item.get("type") == "diff" for item in content if isinstance(item, dict)
+            ):
+                tool_id = (
+                    "functions.acp_fs__edit_text_file"  # Virtual tool ID for diff edits
+                )
                 logger.debug("Inferred tool ID for diff edit: %s", tool_id)
             else:
                 return None
-        
+
         if self.applies_to and tool_id not in self.applies_to:
             return None
 
@@ -81,11 +87,17 @@ class AutoApprovalPolicy:
         if self.include_paths:
             if not touched_paths:
                 return None
-            if not any(any(fnmatch(path, pattern) for pattern in self.include_paths) for path in touched_paths):
+            if not any(
+                any(fnmatch(path, pattern) for pattern in self.include_paths)
+                for path in touched_paths
+            ):
                 return None
 
         if self.exclude_paths:
-            if any(any(fnmatch(path, pattern) for pattern in self.exclude_paths) for path in touched_paths):
+            if any(
+                any(fnmatch(path, pattern) for pattern in self.exclude_paths)
+                for path in touched_paths
+            ):
                 return None
 
         if self.parameters:
@@ -192,7 +204,9 @@ def _read_yaml_file(path: Path) -> Dict[str, Any]:
         with path.open("r", encoding="utf-8") as handle:
             data = yaml.safe_load(handle) or {}
             if not isinstance(data, dict):
-                raise ValueError(f"YAML root must be a mapping, got {type(data).__name__}")
+                raise ValueError(
+                    f"YAML root must be a mapping, got {type(data).__name__}"
+                )
             return data
     except Exception as exc:
         logger.error("Failed to read YAML file %s: %s", path, exc)
@@ -285,8 +299,12 @@ def load_governor_config(path: Optional[Path] = None) -> GovernorConfig:
 
     data = _read_yaml_file(config_path)
 
-    permission_settings = _parse_governor_settings(data.get("permission_settings") or data.get("settings", {}).get("permission"))
-    output_settings = _parse_governor_settings(data.get("output_settings") or data.get("settings", {}).get("output"))
+    permission_settings = _parse_governor_settings(
+        data.get("permission_settings") or data.get("settings", {}).get("permission")
+    )
+    output_settings = _parse_governor_settings(
+        data.get("output_settings") or data.get("settings", {}).get("output")
+    )
 
     permission_governors = []
     for entry in data.get("permission_governors", []):
@@ -310,7 +328,9 @@ def load_governor_config(path: Optional[Path] = None) -> GovernorConfig:
     )
 
 
-def load_auto_approval_policies(path: Optional[Path] = None) -> List[AutoApprovalPolicy]:
+def load_auto_approval_policies(
+    path: Optional[Path] = None,
+) -> List[AutoApprovalPolicy]:
     policies_path = path or _default_policy_path()
     if not policies_path or not policies_path.exists():
         return []
@@ -389,9 +409,19 @@ class GovernorManager:
         summary_lines: List[str] = []
 
         if policy_decision:
-            summary_lines.append(f"[policy:{policy_decision.policy_id}] {policy_decision.decision_type}")
+            summary_lines.append(
+                f"[policy:{policy_decision.policy_id}] {policy_decision.decision_type}"
+            )
             if policy_decision.decision_type in ("approve", "reject"):
-                selected_option_id = _resolve_option_id(policy_decision.option_id, options, fallback="approved" if policy_decision.decision_type == "approve" else "abort")
+                selected_option_id = _resolve_option_id(
+                    policy_decision.option_id,
+                    options,
+                    fallback=(
+                        "approved"
+                        if policy_decision.decision_type == "approve"
+                        else "abort"
+                    ),
+                )
                 decision_source = f"policy:{policy_decision.policy_id}"
                 requires_manual = False
                 run_governors = not policy_decision.skip_governors
@@ -475,7 +505,9 @@ class GovernorManager:
             summary_lines=summary_lines,
         )
 
-    def _evaluate_policies(self, tool_call: Dict[str, Any]) -> Optional[AutoApprovalDecision]:
+    def _evaluate_policies(
+        self, tool_call: Dict[str, Any]
+    ) -> Optional[AutoApprovalDecision]:
         for policy in self._policies:
             decision = policy.evaluate(tool_call)
             if decision:
@@ -536,7 +568,9 @@ class GovernorManager:
         payload: Dict[str, Any],
     ) -> GovernorResult:
         started = monotonic()
-        hashed_input = sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+        hashed_input = sha256(
+            json.dumps(payload, sort_keys=True).encode("utf-8")
+        ).hexdigest()
 
         if governor.type in ("script", "python"):
             result = await self._run_script_governor(governor, payload)
@@ -578,11 +612,15 @@ class GovernorManager:
         input_data = json.dumps(payload).encode("utf-8")
         communicate = process.communicate(input=input_data)
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(communicate, timeout=governor.timeout_ms / 1000)
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                communicate, timeout=governor.timeout_ms / 1000
+            )
         except asyncio.TimeoutError as exc:
             process.kill()
             await process.wait()
-            raise GovernorExecutionError(f"{governor.id} timed out after {governor.timeout_ms} ms") from exc
+            raise GovernorExecutionError(
+                f"{governor.id} timed out after {governor.timeout_ms} ms"
+            ) from exc
         stderr_text = (stderr_bytes or b"").decode("utf-8", errors="ignore").strip()
 
         if stderr_text:
@@ -593,7 +631,9 @@ class GovernorManager:
             )
 
         if process.returncode != 0:
-            raise GovernorExecutionError(f"{governor.id} exited with {process.returncode}: {stderr_text or 'no stderr'}")
+            raise GovernorExecutionError(
+                f"{governor.id} exited with {process.returncode}: {stderr_text or 'no stderr'}"
+            )
 
         response_text = (stdout_bytes or b"").decode("utf-8").strip()
         if not response_text:
@@ -602,7 +642,9 @@ class GovernorManager:
         try:
             response = json.loads(response_text)
         except json.JSONDecodeError as exc:
-            raise GovernorExecutionError(f"{governor.id} returned invalid JSON: {exc}") from exc
+            raise GovernorExecutionError(
+                f"{governor.id} returned invalid JSON: {exc}"
+            ) from exc
 
         return _governor_result_from_response(governor.id, response)
 
@@ -628,17 +670,23 @@ class GovernorManager:
             raise GovernorExecutionError(f"{governor.id} HTTP error: {exc}") from exc
 
         if response.status_code >= 400:
-            raise GovernorExecutionError(f"{governor.id} HTTP {response.status_code}: {response.text[:200]}")
+            raise GovernorExecutionError(
+                f"{governor.id} HTTP {response.status_code}: {response.text[:200]}"
+            )
 
         try:
             data = response.json()
         except Exception as exc:
-            raise GovernorExecutionError(f"{governor.id} returned invalid JSON: {exc}") from exc
+            raise GovernorExecutionError(
+                f"{governor.id} returned invalid JSON: {exc}"
+            ) from exc
 
         return _governor_result_from_response(governor.id, data)
 
 
-def _governor_result_from_response(governor_id: str, response: Dict[str, Any]) -> GovernorResult:
+def _governor_result_from_response(
+    governor_id: str, response: Dict[str, Any]
+) -> GovernorResult:
     status = response.get("status", "needs_attention")
     option_id = response.get("optionId")
     score = response.get("score")
@@ -732,7 +780,9 @@ def _aggregate_permission_results(
     option_ids = {opt.get("optionId") for opt in options}
     reject_result = next((r for r in results if r.status == "reject"), None)
     if reject_result:
-        option_id = _resolve_option_id(reject_result.option_id, options, fallback="abort")
+        option_id = _resolve_option_id(
+            reject_result.option_id, options, fallback="abort"
+        )
         return _GovernorDecisionAggregate(
             selected_option_id=option_id,
             decision_source=f"governor:{reject_result.governor_id}",

@@ -43,7 +43,9 @@ def parse_error_profile(raw_profile: Optional[str]) -> ErrorProfile:
         return ErrorProfile(raw_profile)
     except ValueError as exc:
         supported = ", ".join(profile.value for profile in ErrorProfile)
-        raise ValueError(f"Unsupported A2A error profile '{raw_profile}'. Supported profiles: {supported}") from exc
+        raise ValueError(
+            f"Unsupported A2A error profile '{raw_profile}'. Supported profiles: {supported}"
+        ) from exc
 
 
 def _normalize_detail_for_profile(
@@ -84,7 +86,9 @@ def build_acp_error(
     diagnostics: Optional[Dict[str, Any]] = None,
 ) -> ErrorContract:
     """Construct an ErrorContract honoring the selected profile."""
-    normalized_detail, suppressed_detail = _normalize_detail_for_profile(detail, profile)
+    normalized_detail, suppressed_detail = _normalize_detail_for_profile(
+        detail, profile
+    )
 
     merged_diagnostics: Dict[str, Any] = {}
     if diagnostics:
@@ -99,4 +103,3 @@ def build_acp_error(
         retryable=retryable,
         diagnostics=merged_diagnostics or None,
     )
-

@@ -6,7 +6,8 @@ from pathlib import Path
 
 # Bootstrap path for src/ imports (tests/ is sibling to src/)
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from a2a_acp.main import create_app
 from a2a_acp.database import SessionDatabase
@@ -86,11 +87,15 @@ def test_client_no_extension(mock_db, mock_push_manager):
         context_manager.add_task_to_context = AsyncMock()
         context_manager.add_message_to_context = AsyncMock()
 
-        with patch("a2a_acp.main.get_database", return_value=mock_db), \
-             patch("a2a_acp.main.get_context_manager", return_value=context_manager), \
-             patch("a2a_acp.main.PushNotificationManager", return_value=mock_push_manager), \
-             patch("a2a_acp.main.ZedAgentConnection", DummyZedAgentConnection), \
-             patch("a2a_acp.task_manager.ZedAgentConnection", DummyZedAgentConnection):
+        with (
+            patch("a2a_acp.main.get_database", return_value=mock_db),
+            patch("a2a_acp.main.get_context_manager", return_value=context_manager),
+            patch(
+                "a2a_acp.main.PushNotificationManager", return_value=mock_push_manager
+            ),
+            patch("a2a_acp.main.ZedAgentConnection", DummyZedAgentConnection),
+            patch("a2a_acp.task_manager.ZedAgentConnection", DummyZedAgentConnection),
+        ):
             from fastapi.testclient import TestClient
 
             with TestClient(app) as client:
@@ -116,12 +121,17 @@ def test_client_full(mock_db, mock_push_manager):
         context_manager.add_task_to_context = AsyncMock()
         context_manager.add_message_to_context = AsyncMock()
 
-        with patch("a2a_acp.main.get_database", return_value=mock_db), \
-             patch("a2a_acp.main.get_context_manager", return_value=context_manager), \
-             patch("a2a_acp.main.PushNotificationManager", return_value=mock_push_manager), \
-             patch("a2a_acp.main.ZedAgentConnection", DummyZedAgentConnection), \
-             patch("a2a_acp.task_manager.ZedAgentConnection", DummyZedAgentConnection):
+        with (
+            patch("a2a_acp.main.get_database", return_value=mock_db),
+            patch("a2a_acp.main.get_context_manager", return_value=context_manager),
+            patch(
+                "a2a_acp.main.PushNotificationManager", return_value=mock_push_manager
+            ),
+            patch("a2a_acp.main.ZedAgentConnection", DummyZedAgentConnection),
+            patch("a2a_acp.task_manager.ZedAgentConnection", DummyZedAgentConnection),
+        ):
             from fastapi.testclient import TestClient
+
             with TestClient(app) as client:
                 yield client
 
@@ -129,14 +139,19 @@ def test_client_full(mock_db, mock_push_manager):
 class TestExistingZedACPTestsStillPass:
     """Verify existing ZedACP tests pass with extension present but disabled."""
 
-    @pytest.mark.skip(reason="Legacy test functions not imported; mock-based verification below")
-    @pytest.mark.parametrize("test_func", [
-        # List existing test functions that should still pass
-        # These would be actual imports, but for simulation (no real legacy funcs imported):
-        "test_zedacp_basic_execution",  # Mocked below
-        "test_tool_permissions_legacy",  # Mocked below
-        "test_task_streaming_no_extension",  # Mocked below
-    ])
+    @pytest.mark.skip(
+        reason="Legacy test functions not imported; mock-based verification below"
+    )
+    @pytest.mark.parametrize(
+        "test_func",
+        [
+            # List existing test functions that should still pass
+            # These would be actual imports, but for simulation (no real legacy funcs imported):
+            "test_zedacp_basic_execution",  # Mocked below
+            "test_tool_permissions_legacy",  # Mocked below
+            "test_task_streaming_no_extension",  # Mocked below
+        ],
+    )
     def test_existing_zedacp_test(self, test_func, test_client_no_extension):
         """Parametrized test to verify existing ZedACP tests pass."""
         # Simulate running existing test
@@ -149,7 +164,9 @@ class TestExistingZedACPTestsStillPass:
             "parts": [{"kind": "text", "text": "ZedACP legacy test"}],
             "messageId": str(create_message_id()),
         }
-        response = test_client_no_extension.post("/a2a/message/send", json={"message": message_data})
+        response = test_client_no_extension.post(
+            "/a2a/message/send", json={"message": message_data}
+        )
 
         assert response.status_code == 200
         task_data = response.json()["task"]
@@ -169,7 +186,9 @@ class TestExistingZedACPTestsStillPass:
             "parts": [{"kind": "text", "text": "Legacy notification"}],
             "messageId": str(create_message_id()),
         }
-        response = test_client_no_extension.post("/a2a/message/send", json={"message": message_data})
+        response = test_client_no_extension.post(
+            "/a2a/message/send", json={"message": message_data}
+        )
 
         # Verify notification payload (mocked) doesn't require extension fields
         # In real, check push manager calls exclude dev-tool unless enabled
@@ -197,7 +216,9 @@ class TestExtensionDoesNotBreakExistingFunctionality:
             "parts": [{"kind": "text", "text": "Core flow with extension"}],
             "messageId": str(create_message_id()),
         }
-        response = test_client_full.post("/a2a/message/send", json={"message": message_data})
+        response = test_client_full.post(
+            "/a2a/message/send", json={"message": message_data}
+        )
 
         assert response.status_code == 200
         task_data = response.json()["task"]
@@ -216,7 +237,7 @@ class TestExtensionDoesNotBreakExistingFunctionality:
         """Test ZedACP bridging works without requiring extension schemas."""
         # Simulate ZedACP response without extension
         from unittest.mock import AsyncMock
-        
+
         with patch("a2a_acp.task_manager.ZedAgentConnection") as mock_zed:
             mock_conn = AsyncMock()
             mock_zed.return_value.__aenter__.return_value = mock_conn
@@ -225,13 +246,15 @@ class TestExtensionDoesNotBreakExistingFunctionality:
                 "result": {"text": "ZedACP response"},
                 "toolCalls": [],  # No tools
             }
-        
+
             message_data = {
                 "role": "user",
                 "parts": [{"kind": "text", "text": "Bridge test"}],
                 "messageId": str(create_message_id()),
             }
-            response = test_client_full.post("/a2a/message/send", json={"message": message_data})
+            response = test_client_full.post(
+                "/a2a/message/send", json={"message": message_data}
+            )
 
         assert response.status_code == 200
         task_data = response.json()["task"]
@@ -242,7 +265,9 @@ class TestExtensionDoesNotBreakExistingFunctionality:
         # Agent message from ZedACP, no dev-tool required
         assert "development-tool" not in agent_msg.get("metadata", {})
 
-    def test_database_persistence_works_with_extension_metadata(self, test_client_full, mock_db):
+    def test_database_persistence_works_with_extension_metadata(
+        self, test_client_full, mock_db
+    ):
         """Test database stores/retrieves tasks with extension metadata."""
         message_data = {
             "role": "user",
@@ -262,7 +287,9 @@ class TestExtensionDoesNotBreakExistingFunctionality:
                 }
             },
         }
-        response = test_client_full.post("/a2a/message/send", json={"message": message_data})
+        response = test_client_full.post(
+            "/a2a/message/send", json={"message": message_data}
+        )
         task_id = response.json()["task"]["id"]
 
         # Verify stored (mock)
@@ -272,17 +299,29 @@ class TestExtensionDoesNotBreakExistingFunctionality:
         metadata = stored_task.metadata
         assert "development-tool" in metadata
         from a2a_acp.models import ToolCall, ToolCallStatus
-        
-        tool_call = ToolCall.from_dict(metadata["development-tool"]["tool_calls"]["tc_persist"])
+
+        tool_call = ToolCall.from_dict(
+            metadata["development-tool"]["tool_calls"]["tc_persist"]
+        )
         assert tool_call.status == ToolCallStatus.SUCCEEDED
 
         # Retrieve
-        get_rpc = {"jsonrpc": "2.0", "id": 5, "method": "tasks/get", "params": {"id": task_id}}
+        get_rpc = {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tasks/get",
+            "params": {"id": task_id},
+        }
         retrieve_resp = test_client_full.post("/a2a/rpc", json=get_rpc)
         retrieved_task = retrieve_resp.json()["result"]
         retrieved_metadata = retrieved_task["metadata"]
         # Verify roundtrip
-        assert retrieved_metadata["development-tool"]["tool_calls"]["tc_persist"]["result"]["content"] == "Persisted output"
+        assert (
+            retrieved_metadata["development-tool"]["tool_calls"]["tc_persist"][
+                "result"
+            ]["content"]
+            == "Persisted output"
+        )
 
 
 class TestConfigurationTogglingWorksCorrectly:
@@ -314,7 +353,11 @@ class TestConfigurationTogglingWorksCorrectly:
             # Agent card always available, but extensions conditional
             # Note: Mock agent card response for toggle test
             with patch("a2a_acp.main.get_agent_card") as mock_card:
-                mock_card.return_value = {"capabilities": {"extensions": [{"type": "development-tool"}] if enabled else {}}}
+                mock_card.return_value = {
+                    "capabilities": {
+                        "extensions": [{"type": "development-tool"}] if enabled else {}
+                    }
+                }
                 card_resp = test_client_full.get("/.well-known/agent-card.json")
                 assert card_resp.status_code == 200
                 card_data = card_resp.json()
@@ -338,11 +381,18 @@ class TestConfigurationTogglingWorksCorrectly:
                 "parts": [{"kind": "text", "text": "Core test"}],
                 "messageId": str(create_message_id()),
             }
-            resp = test_client_full.post("/a2a/message/send", json={"message": message_data})
+            resp = test_client_full.post(
+                "/a2a/message/send", json={"message": message_data}
+            )
             assert resp.status_code == 200
 
             # Core tasks/get
-            get_rpc = {"jsonrpc": "2.0", "id": 6, "method": "tasks/get", "params": {"id": "any"}}
+            get_rpc = {
+                "jsonrpc": "2.0",
+                "id": 6,
+                "method": "tasks/get",
+                "params": {"id": "any"},
+            }
             get_resp = test_client_full.post("/a2a/rpc", json=get_rpc)
             # Should return error for invalid ID, but not crash
             assert get_resp.status_code == 200
@@ -362,7 +412,9 @@ class TestConfigurationTogglingWorksCorrectly:
                 "messageId": str(create_message_id()),
                 "metadata": {"development-tool": {"test": "data"}},
             }
-            resp = test_client_full.post("/a2a/message/send", json={"message": message_data})
+            resp = test_client_full.post(
+                "/a2a/message/send", json={"message": message_data}
+            )
             resp.json()["task"]["id"]
 
             # Verify persisted with metadata
@@ -372,8 +424,14 @@ class TestConfigurationTogglingWorksCorrectly:
 
             # Toggle off and create new
             settings.development_tool_extension_enabled = False
-            new_message = {"role": "user", "parts": [{"kind": "text", "text": "No ext"}], "messageId": str(create_message_id())}
-            new_resp = test_client_full.post("/a2a/message/send", json={"message": new_message})
+            new_message = {
+                "role": "user",
+                "parts": [{"kind": "text", "text": "No ext"}],
+                "messageId": str(create_message_id()),
+            }
+            new_resp = test_client_full.post(
+                "/a2a/message/send", json={"message": new_message}
+            )
             new_resp.json()["task"]
             new_stored = mock_db.store_task.call_args[0][0]
             # Extension metadata stripped or absent
@@ -392,7 +450,9 @@ class TestNoRegressionsInExistingWorkflows:
             "messageId": str(create_message_id()),
             "metadata": {},  # No extension
         }
-        response = test_client_full.post("/a2a/message/send", json={"message": tool_message})
+        response = test_client_full.post(
+            "/a2a/message/send", json={"message": tool_message}
+        )
 
         assert response.status_code == 200
         task_data = response.json()["task"]
@@ -413,8 +473,14 @@ class TestNoRegressionsInExistingWorkflows:
             settings_on.development_tool_extension_enabled = True
             mock_on.return_value = settings_on
 
-            message_on = {"role": "user", "parts": [{"kind": "text", "text": "State test"}], "messageId": str(create_message_id())}
-            resp_on = test_client_full.post("/a2a/message/send", json={"message": message_on})
+            message_on = {
+                "role": "user",
+                "parts": [{"kind": "text", "text": "State test"}],
+                "messageId": str(create_message_id()),
+            }
+            resp_on = test_client_full.post(
+                "/a2a/message/send", json={"message": message_on}
+            )
             task_id = resp_on.json()["task"]["id"]
             # Task has extension metadata
             assert "development-tool" in resp_on.json()["task"]["metadata"]
@@ -425,15 +491,26 @@ class TestNoRegressionsInExistingWorkflows:
             settings_off.development_tool_extension_enabled = False
             mock_off.return_value = settings_off
 
-            get_rpc = {"jsonrpc": "2.0", "id": 7, "method": "tasks/get", "params": {"id": task_id}}
+            get_rpc = {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tasks/get",
+                "params": {"id": task_id},
+            }
             get_resp = test_client_full.post("/a2a/rpc", json=get_rpc)
             assert get_resp.status_code == 200
             retrieved = get_resp.json()["result"]
             # Existing metadata preserved, even if extension off
             assert "development-tool" in retrieved["metadata"]
             # But new tasks won't have it
-            new_message = {"role": "user", "parts": [{"kind": "text", "text": "New no ext"}], "messageId": str(create_message_id())}
-            new_resp = test_client_full.post("/a2a/message/send", json={"message": new_message})
+            new_message = {
+                "role": "user",
+                "parts": [{"kind": "text", "text": "New no ext"}],
+                "messageId": str(create_message_id()),
+            }
+            new_resp = test_client_full.post(
+                "/a2a/message/send", json={"message": new_message}
+            )
             new_task = new_resp.json()["task"]
             assert "development-tool" not in new_task["metadata"]
 

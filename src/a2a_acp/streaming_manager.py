@@ -53,7 +53,7 @@ class StreamingManager:
         push_notification_manager: Optional[Any] = None,
         max_websocket_connections: int = 100,
         max_sse_connections: int = 200,
-        cleanup_interval: int = 300
+        cleanup_interval: int = 300,
     ):
         """Initialize the streaming manager."""
         self.push_mgr = push_notification_manager
@@ -74,9 +74,7 @@ class StreamingManager:
         return self._lock
 
     async def register_websocket_connection(
-        self,
-        websocket: WebSocket,
-        task_filter: Optional[List[str]] = None
+        self, websocket: WebSocket, task_filter: Optional[List[str]] = None
     ) -> str:
         """Register a new WebSocket connection for real-time notifications."""
         await websocket.accept()
@@ -84,7 +82,7 @@ class StreamingManager:
         connection_id = str(uuid.uuid4())
         connection = StreamingConnection(
             connection_id=connection_id,
-            task_filter=set(task_filter) if task_filter else set()
+            task_filter=set(task_filter) if task_filter else set(),
         )
 
         async with self.lock:
@@ -94,8 +92,10 @@ class StreamingManager:
             "WebSocket connection registered",
             extra={
                 "connection_id": connection_id,
-                "task_filter": list(connection.task_filter) if connection.task_filter else None
-            }
+                "task_filter": (
+                    list(connection.task_filter) if connection.task_filter else None
+                ),
+            },
         )
 
         # Send welcome message
@@ -103,7 +103,7 @@ class StreamingManager:
             "type": "connection_established",
             "connection_id": connection_id,
             "timestamp": connection.connected_at.isoformat(),
-            "message": "Connected to notification stream"
+            "message": "Connected to notification stream",
         }
 
         try:
@@ -111,7 +111,7 @@ class StreamingManager:
         except Exception as e:
             logger.error(
                 "Failed to send welcome message",
-                extra={"connection_id": connection_id, "error": str(e)}
+                extra={"connection_id": connection_id, "error": str(e)},
             )
 
         return connection_id
@@ -123,13 +123,11 @@ class StreamingManager:
                 del self.websocket_connections[connection_id]
                 logger.info(
                     "WebSocket connection unregistered",
-                    extra={"connection_id": connection_id}
+                    extra={"connection_id": connection_id},
                 )
 
     async def handle_websocket_messages(
-        self,
-        websocket: WebSocket,
-        connection_id: str
+        self, websocket: WebSocket, connection_id: str
     ) -> None:
         """Handle incoming messages from a WebSocket connection."""
         try:
@@ -145,63 +143,82 @@ class StreamingManager:
                         # Update activity and respond with pong
                         async with self.lock:
                             if connection_id in self.websocket_connections:
-                                self.websocket_connections[connection_id].update_activity()
+                                self.websocket_connections[
+                                    connection_id
+                                ].update_activity()
 
-                        await websocket.send_text(json.dumps({
-                            "type": "pong",
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }))
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "type": "pong",
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                }
+                            )
+                        )
 
                     elif message_type == "subscribe":
                         # Update task filter
                         task_ids = message.get("taskIds", [])
                         async with self.lock:
                             if connection_id in self.websocket_connections:
-                                self.websocket_connections[connection_id].task_filter = set(task_ids)
+                                self.websocket_connections[
+                                    connection_id
+                                ].task_filter = set(task_ids)
 
-                        await websocket.send_text(json.dumps({
-                            "type": "subscription_updated",
-                            "taskIds": task_ids,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }))
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "type": "subscription_updated",
+                                    "taskIds": task_ids,
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                }
+                            )
+                        )
 
                     elif message_type == "unsubscribe":
                         # Clear task filter (subscribe to all)
                         async with self.lock:
                             if connection_id in self.websocket_connections:
-                                self.websocket_connections[connection_id].task_filter = set()
+                                self.websocket_connections[
+                                    connection_id
+                                ].task_filter = set()
 
-                        await websocket.send_text(json.dumps({
-                            "type": "subscription_updated",
-                            "taskIds": [],
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }))
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "type": "subscription_updated",
+                                    "taskIds": [],
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                }
+                            )
+                        )
 
                 except json.JSONDecodeError:
                     logger.warning(
                         "Invalid JSON received from WebSocket",
-                        extra={"connection_id": connection_id, "data": data[:100]}
+                        extra={"connection_id": connection_id, "data": data[:100]},
                     )
 
         except WebSocketDisconnect:
-            logger.info("WebSocket disconnected", extra={"connection_id": connection_id})
+            logger.info(
+                "WebSocket disconnected", extra={"connection_id": connection_id}
+            )
             await self.unregister_websocket_connection(connection_id)
         except Exception as e:
             logger.error(
                 "WebSocket error",
-                extra={"connection_id": connection_id, "error": str(e)}
+                extra={"connection_id": connection_id, "error": str(e)},
             )
             await self.unregister_websocket_connection(connection_id)
 
     async def register_sse_connection(
-        self,
-        task_filter: Optional[List[str]] = None
+        self, task_filter: Optional[List[str]] = None
     ) -> tuple[str, StreamingConnection]:
         """Register a new SSE connection for real-time notifications."""
         connection_id = str(uuid.uuid4())
         connection = StreamingConnection(
             connection_id=connection_id,
-            task_filter=set(task_filter) if task_filter else set()
+            task_filter=set(task_filter) if task_filter else set(),
         )
 
         async with self.lock:
@@ -211,8 +228,10 @@ class StreamingManager:
             "SSE connection registered",
             extra={
                 "connection_id": connection_id,
-                "task_filter": list(connection.task_filter) if connection.task_filter else None
-            }
+                "task_filter": (
+                    list(connection.task_filter) if connection.task_filter else None
+                ),
+            },
         )
 
         return connection_id, connection
@@ -224,13 +243,11 @@ class StreamingManager:
                 del self.sse_connections[connection_id]
                 logger.info(
                     "SSE connection unregistered",
-                    extra={"connection_id": connection_id}
+                    extra={"connection_id": connection_id},
                 )
 
     async def create_sse_response(
-        self,
-        connection_id: str,
-        connection: StreamingConnection
+        self, connection_id: str, connection: StreamingConnection
     ) -> StreamingResponse:
         """Create an SSE streaming response."""
 
@@ -238,14 +255,17 @@ class StreamingManager:
             """Generate SSE events for the connection."""
             logger.debug(
                 "SSE event generator started",
-                extra={"connection_id": connection_id, "task_filter": list(connection.task_filter)},
+                extra={
+                    "connection_id": connection_id,
+                    "task_filter": list(connection.task_filter),
+                },
             )
             try:
                 # Send initial connection event
                 initial_event = {
                     "type": "connection_established",
                     "connection_id": connection_id,
-                    "timestamp": connection.connected_at.isoformat()
+                    "timestamp": connection.connected_at.isoformat(),
                 }
                 logger.debug(
                     "Sending SSE connection established event",
@@ -272,7 +292,7 @@ class StreamingManager:
                     if (current_time - connection.last_activity).seconds >= 30:
                         heartbeat_event = {
                             "type": "heartbeat",
-                            "timestamp": current_time.isoformat()
+                            "timestamp": current_time.isoformat(),
                         }
                         logger.debug(
                             "Sending SSE heartbeat",
@@ -283,7 +303,7 @@ class StreamingManager:
             except Exception as e:
                 logger.error(
                     "SSE stream error",
-                    extra={"connection_id": connection_id, "error": str(e)}
+                    extra={"connection_id": connection_id, "error": str(e)},
                 )
             finally:
                 await self.unregister_sse_connection(connection_id)
@@ -300,7 +320,7 @@ class StreamingManager:
                 "Connection": "keep-alive",
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Cache-Control",
-            }
+            },
         )
 
     async def broadcast_notification(self, task_id: str, event: Dict[str, Any]) -> None:
@@ -320,14 +340,16 @@ class StreamingManager:
         # since SSE is unidirectional. For SSE, clients would need to
         # reconnect or use a different pattern for real-time updates.
 
-    async def _broadcast_to_websockets(self, task_id: str, event: Dict[str, Any]) -> None:
+    async def _broadcast_to_websockets(
+        self, task_id: str, event: Dict[str, Any]
+    ) -> None:
         """Broadcast notification to WebSocket connections."""
         {
             "type": "notification",
             "task_id": task_id,
             "event": event.get("event", "unknown"),
             "data": event,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         async with self.lock:
@@ -343,8 +365,8 @@ class StreamingManager:
                             extra={
                                 "connection_id": connection_id,
                                 "task_id": task_id,
-                                "event": event.get("event")
-                            }
+                                "event": event.get("event"),
+                            },
                         )
 
                         # Update activity
@@ -356,8 +378,8 @@ class StreamingManager:
                             extra={
                                 "connection_id": connection_id,
                                 "task_id": task_id,
-                                "error": str(e)
-                            }
+                                "error": str(e),
+                            },
                         )
                         disconnected_connections.append(connection_id)
 
@@ -386,18 +408,28 @@ class StreamingManager:
             return {
                 "websocket_connections": {
                     "count": websocket_count,
-                    "average_age_seconds": sum(websocket_ages) / len(websocket_ages) if websocket_ages else 0,
-                    "oldest_connection_seconds": max(websocket_ages) if websocket_ages else 0
+                    "average_age_seconds": (
+                        sum(websocket_ages) / len(websocket_ages)
+                        if websocket_ages
+                        else 0
+                    ),
+                    "oldest_connection_seconds": (
+                        max(websocket_ages) if websocket_ages else 0
+                    ),
                 },
                 "sse_connections": {
                     "count": sse_count,
-                    "average_age_seconds": sum(sse_ages) / len(sse_ages) if sse_ages else 0,
-                    "oldest_connection_seconds": max(sse_ages) if sse_ages else 0
+                    "average_age_seconds": (
+                        sum(sse_ages) / len(sse_ages) if sse_ages else 0
+                    ),
+                    "oldest_connection_seconds": max(sse_ages) if sse_ages else 0,
                 },
-                "total_connections": websocket_count + sse_count
+                "total_connections": websocket_count + sse_count,
             }
 
-    async def cleanup_stale_connections(self, max_age_seconds: Optional[int] = None) -> int:
+    async def cleanup_stale_connections(
+        self, max_age_seconds: Optional[int] = None
+    ) -> int:
         """Clean up stale connections that haven't been active for too long."""
         if max_age_seconds is None:
             max_age_seconds = self.cleanup_interval
@@ -407,7 +439,8 @@ class StreamingManager:
         async with self.lock:
             # Clean WebSocket connections
             stale_websocket = [
-                conn_id for conn_id, conn in self.websocket_connections.items()
+                conn_id
+                for conn_id, conn in self.websocket_connections.items()
                 if conn.last_activity.timestamp() < cutoff_time
             ]
 
@@ -417,7 +450,8 @@ class StreamingManager:
 
             # Clean SSE connections
             stale_sse = [
-                conn_id for conn_id, conn in self.sse_connections.items()
+                conn_id
+                for conn_id, conn in self.sse_connections.items()
                 if conn.last_activity.timestamp() < cutoff_time
             ]
 
@@ -428,7 +462,7 @@ class StreamingManager:
         if cleaned_count > 0:
             logger.info(
                 "Cleaned up stale streaming connections",
-                extra={"count": cleaned_count, "max_age_seconds": max_age_seconds}
+                extra={"count": cleaned_count, "max_age_seconds": max_age_seconds},
             )
 
         return cleaned_count
@@ -446,5 +480,5 @@ class StreamingManager:
 
         logger.info(
             "Closed all streaming connections",
-            extra={"websocket_count": websocket_count, "sse_count": sse_count}
+            extra={"websocket_count": websocket_count, "sse_count": sse_count},
         )

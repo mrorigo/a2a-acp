@@ -25,6 +25,7 @@ from a2a_acp.a2a.models import (
 )
 from a2a_acp.main import create_app
 from a2a_acp.database import SessionDatabase, A2AContext, ACPSession
+
 # A2A-ACP bridge tests - using A2A protocol types exclusively
 from a2a_acp.task_manager import A2ATaskManager
 from a2a_acp.context_manager import A2AContextManager
@@ -93,9 +94,9 @@ class TestAgentConfiguration:
         from a2a_acp.settings import get_settings
 
         settings = get_settings()
-        assert hasattr(settings, 'agent_command')
-        assert hasattr(settings, 'agent_api_key')
-        assert hasattr(settings, 'agent_description')
+        assert hasattr(settings, "agent_command")
+        assert hasattr(settings, "agent_api_key")
+        assert hasattr(settings, "agent_description")
 
 
 class TestA2ACPBridgeDatabase:
@@ -103,7 +104,7 @@ class TestA2ACPBridgeDatabase:
 
     def test_database_creation(self):
         """Test database can be created with temporary file."""
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
             try:
                 db = SessionDatabase(tmp.name)
                 assert db is not None
@@ -121,7 +122,7 @@ class TestA2ACPBridgeDatabase:
             zed_session_id="test-session",
             working_directory="/tmp",
             created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
+            updated_at=datetime.now(timezone.utc),
         )
 
         assert context.context_id == "test-context"
@@ -153,7 +154,7 @@ class TestTaskManager:
         message = Message(
             role="user",
             parts=[TextPart(kind="text", text="test")],
-            messageId="test-msg"
+            messageId="test-msg",
         )
 
         assert message.role == "user"
@@ -177,7 +178,7 @@ class TestA2ATaskManager:
         task = await task_manager.create_task(
             context_id="test-context",
             agent_name="test-agent",
-            metadata={"test": "data"}
+            metadata={"test": "data"},
         )
 
         assert task.id is not None
@@ -262,8 +263,7 @@ class TestA2AContextManager:
         context_manager = A2AContextManager()
 
         context_id = await context_manager.create_context(
-            agent_name="test-agent",
-            metadata={"test": "data"}
+            agent_name="test-agent", metadata={"test": "data"}
         )
 
         assert context_id is not None
@@ -363,7 +363,7 @@ class TestContextManager:
             zed_session_id="test-zed-session",
             working_directory="/tmp",
             created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
+            updated_at=datetime.now(timezone.utc),
         )
 
         assert session.acp_session_id == "test-session"
@@ -373,11 +373,11 @@ class TestContextManager:
 class TestZedAgentIntegration:
     """Test ZedACP agent integration."""
 
-    @patch('subprocess.Popen')
+    @patch("subprocess.Popen")
     def test_zed_agent_connection_creation(self, mock_popen):
         """Test ZedACP connection can be created."""
         mock_process = MagicMock()
-        mock_process.communicate.return_value = (b'{"result": "ok"}', b'')
+        mock_process.communicate.return_value = (b'{"result": "ok"}', b"")
         mock_process.returncode = 0
         mock_popen.return_value = mock_process
 
@@ -396,7 +396,7 @@ class TestZedAgentIntegration:
             "name": "test-agent",
             "command": "echo",
             "description": "Test agent",
-            "api_key": "test-key"
+            "api_key": "test-key",
         }
 
         # Validate configuration structure
@@ -414,7 +414,12 @@ class TestZedAgentIntegration:
         async def mock_request(method, params=None, handler=None):
             if method == "session/load" and params:
                 # Simulate successful session load response
-                return {"sessionId": params.get("sessionId", "unknown") if params else "unknown", "loaded": True}
+                return {
+                    "sessionId": (
+                        params.get("sessionId", "unknown") if params else "unknown"
+                    ),
+                    "loaded": True,
+                }
 
             # For other methods, use original implementation
             return None  # Simplified for testing
@@ -426,7 +431,7 @@ class TestZedAgentIntegration:
         await connection.load_session(
             session_id=session_id,
             cwd="/test/dir",
-            mcp_servers=[{"name": "test", "command": "test"}]
+            mcp_servers=[{"name": "test", "command": "test"}],
         )
 
         # Verify the request was made with correct parameters
@@ -444,28 +449,40 @@ class TestZedAgentIntegration:
                 # Simulate session load with history notifications
                 if handler:
                     # Simulate conversation history being replayed
-                    await handler({
-                        "jsonrpc": "2.0",
-                        "method": "session/update",
-                        "params": {
-                            "update": {
-                                "sessionUpdate": "history_message",
-                                "message": {"role": "user", "content": "Hello"}
-                            }
+                    await handler(
+                        {
+                            "jsonrpc": "2.0",
+                            "method": "session/update",
+                            "params": {
+                                "update": {
+                                    "sessionUpdate": "history_message",
+                                    "message": {"role": "user", "content": "Hello"},
+                                }
+                            },
                         }
-                    })
-                    await handler({
-                        "jsonrpc": "2.0",
-                        "method": "session/update",
-                        "params": {
-                            "update": {
-                                "sessionUpdate": "history_message",
-                                "message": {"role": "assistant", "content": "Hi there!"}
-                            }
+                    )
+                    await handler(
+                        {
+                            "jsonrpc": "2.0",
+                            "method": "session/update",
+                            "params": {
+                                "update": {
+                                    "sessionUpdate": "history_message",
+                                    "message": {
+                                        "role": "assistant",
+                                        "content": "Hi there!",
+                                    },
+                                }
+                            },
                         }
-                    })
+                    )
 
-                return {"sessionId": params.get("sessionId", "unknown") if params else "unknown", "loaded": True}
+                return {
+                    "sessionId": (
+                        params.get("sessionId", "unknown") if params else "unknown"
+                    ),
+                    "loaded": True,
+                }
 
             return None
 
@@ -506,7 +523,12 @@ class TestZedAgentIntegration:
             if method == "session/new":
                 return {"sessionId": "new-session-123"}
             elif method == "session/load":
-                return {"sessionId": params.get("sessionId", "unknown") if params else "unknown", "loaded": True}
+                return {
+                    "sessionId": (
+                        params.get("sessionId", "unknown") if params else "unknown"
+                    ),
+                    "loaded": True,
+                }
             elif method == "session/prompt":
                 return {"response": "Test response"}
 
@@ -560,20 +582,24 @@ class TestA2ACPBridgeIntegration:
                     "role": "user",
                     "parts": [{"kind": "text", "text": "Hello"}],
                     "messageId": "msg-1",
-                    "contextId": "ctx-1"
+                    "contextId": "ctx-1",
                 },
-                "metadata": {"agent_name": "test-agent"}
-            }
+                "metadata": {"agent_name": "test-agent"},
+            },
         }
 
         response = client.post(
             "/a2a/rpc",
             json=jsonrpc_request,
-            headers={"Authorization": "Bearer test-token"}
+            headers={"Authorization": "Bearer test-token"},
         )
 
         # Should get some response (may be error due to no actual agent)
-        assert response.status_code in [200, 400, 500]  # Various possible outcomes in test env
+        assert response.status_code in [
+            200,
+            400,
+            500,
+        ]  # Various possible outcomes in test env
 
     def test_bridge_error_handling(self):
         """Test bridge error handling for various scenarios."""
@@ -598,7 +624,7 @@ class TestInputRequiredFunctionality:
             contextId="ctx-456",
             message="Please provide more details",
             inputTypes=["text/plain", "application/json"],
-            timeout=300
+            timeout=300,
         )
 
         assert notification.taskId == "task-123"
@@ -620,6 +646,7 @@ class TestInputRequiredFunctionality:
 
         # Manually set to input-required for testing
         from a2a_acp.a2a.models import TaskState
+
         task.status.state = TaskState.INPUT_REQUIRED
 
         # Test getting input-required tasks
@@ -642,10 +669,14 @@ class TestInputRequiredFunctionality:
         # Create user input message
         Message(
             role="user",
-            parts=[TextPart(kind="text", text="Here's the additional information you requested")],
+            parts=[
+                TextPart(
+                    kind="text", text="Here's the additional information you requested"
+                )
+            ],
             messageId="msg-input-1",
             taskId=task_id,
-            contextId="test-context"
+            contextId="test-context",
         )
 
         # Mock the execute_task method to avoid actual agent execution
@@ -664,8 +695,8 @@ class TestInputRequiredFunctionality:
             # This would normally continue an input-required task
             # In a real scenario, this would call provide_input_and_continue
             # For testing, we verify the workflow components exist
-            assert hasattr(task_manager, 'provide_input_and_continue')
-            assert hasattr(task_manager, 'get_input_required_tasks')
+            assert hasattr(task_manager, "provide_input_and_continue")
+            assert hasattr(task_manager, "get_input_required_tasks")
         finally:
             task_manager.execute_task = original_execute
 
@@ -706,16 +737,14 @@ class TestInputRequiredFunctionality:
             taskId="task-123",
             contextId="ctx-456",
             message="Please provide input",
-            timeout=300
+            timeout=300,
         )
 
         assert notification.timeout == 300
 
         # Test notification without timeout (should use default)
         notification_no_timeout = InputRequiredNotification(
-            taskId="task-124",
-            contextId="ctx-457",
-            message="Please provide input"
+            taskId="task-124", contextId="ctx-457", message="Please provide input"
         )
 
         assert notification_no_timeout.timeout is None
@@ -794,21 +823,27 @@ class SendStreamingMessageSuccessResponse(JSONRPCSuccessResponse):
     result: Union[Task, Message, TaskStatusUpdateEvent, TaskArtifactUpdateEvent]
 
 
-def validate_send_message_response(payload: dict) -> Union[SendMessageSuccessResponse, JSONRPCErrorResponse]:
+def validate_send_message_response(
+    payload: dict,
+) -> Union[SendMessageSuccessResponse, JSONRPCErrorResponse]:
     try:
         return SendMessageSuccessResponse.model_validate(payload)
     except ValidationError:
         return JSONRPCErrorResponse.model_validate(payload)
 
 
-def validate_get_task_response(payload: dict) -> Union[GetTaskSuccessResponse, JSONRPCErrorResponse]:
+def validate_get_task_response(
+    payload: dict,
+) -> Union[GetTaskSuccessResponse, JSONRPCErrorResponse]:
     try:
         return GetTaskSuccessResponse.model_validate(payload)
     except ValidationError:
         return JSONRPCErrorResponse.model_validate(payload)
 
 
-def validate_streaming_response(payload: dict) -> Union[SendStreamingMessageSuccessResponse, JSONRPCErrorResponse]:
+def validate_streaming_response(
+    payload: dict,
+) -> Union[SendStreamingMessageSuccessResponse, JSONRPCErrorResponse]:
     try:
         return SendStreamingMessageSuccessResponse.model_validate(payload)
     except ValidationError:
@@ -820,7 +855,12 @@ class TestStreamingCompliance:
 
     def test_jsonrpc_streaming_emits_spec_events(self, monkeypatch):
         """Ensure message/stream emits status-update events and final task without null fields."""
-        from a2a_acp.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
+        from a2a_acp.a2a.models import (
+            TextPart,
+            create_message_id,
+            TaskState,
+            current_timestamp,
+        )
 
         async def fake_execute_task(
             self,
@@ -886,7 +926,7 @@ class TestStreamingCompliance:
                         line = line.decode()
                     if not line or not line.startswith("data: "):
                         continue
-                    payload = json.loads(line[len("data: "):])
+                    payload = json.loads(line[len("data: ") :])
                     validate_streaming_response(payload)
                     events.append(payload)
 
@@ -922,7 +962,7 @@ class TestDummyAgentIntegration:
                     if not line or not line.startswith("data: "):
                         continue
 
-                    event = json.loads(line[len("data: "):])
+                    event = json.loads(line[len("data: ") :])
                     result = event.get("result")
                     if not isinstance(result, dict):
                         continue
@@ -938,7 +978,10 @@ class TestDummyAgentIntegration:
                             if "--END-OF-RESPONSE--" in text:
                                 marker_seen = True
 
-                    if kind == "task" and (result.get("status") or {}).get("state") == "completed":
+                    if (
+                        kind == "task"
+                        and (result.get("status") or {}).get("state") == "completed"
+                    ):
                         history = result.get("history") or []
                         for message in history:
                             for part in message.get("parts") or []:
@@ -957,7 +1000,12 @@ class TestDummyAgentIntegration:
 
     def test_http_streaming_endpoint_matches_spec(self, monkeypatch):
         """Ensure HTTP /a2a/message/stream SSE responses validate against the spec."""
-        from a2a_acp.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
+        from a2a_acp.a2a.models import (
+            TextPart,
+            create_message_id,
+            TaskState,
+            current_timestamp,
+        )
 
         async def fake_execute_task(
             self,
@@ -1015,7 +1063,7 @@ class TestDummyAgentIntegration:
                         line = line.decode()
                     if not line or not line.startswith("data: "):
                         continue
-                    payload = json.loads(line[len("data: "):])
+                    payload = json.loads(line[len("data: ") :])
                     validate_streaming_response(payload)
                     events.append(payload)
 
@@ -1026,7 +1074,12 @@ class TestJSONRPCContract:
     """Tests ensuring JSON-RPC responses match the SDK models."""
 
     def test_send_message_and_get_task_responses(self, monkeypatch):
-        from a2a_acp.a2a.models import TextPart, create_message_id, TaskState, current_timestamp
+        from a2a_acp.a2a.models import (
+            TextPart,
+            create_message_id,
+            TaskState,
+            current_timestamp,
+        )
 
         async def fake_execute_task(
             self,

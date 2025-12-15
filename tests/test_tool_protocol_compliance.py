@@ -11,7 +11,8 @@ from datetime import datetime
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from a2a_acp.a2a.models import AgentSkill, TaskState
 from a2a_acp.tool_config import BashTool, ToolConfig, ToolParameter
@@ -36,12 +37,12 @@ class TestToolProtocolCompliance:
                     name="name",
                     type="string",
                     required=True,
-                    description="Name to greet"
+                    description="Name to greet",
                 )
             ],
             config=ToolConfig(),
             tags=["test"],
-            examples=["Greet a user by name"]
+            examples=["Greet a user by name"],
         )
 
     @pytest.fixture
@@ -51,7 +52,7 @@ class TestToolProtocolCompliance:
             tool_id="test_tool",
             session_id="test_session",
             task_id="test_task",
-            user_id="test_user"
+            user_id="test_user",
         )
 
     @pytest.fixture
@@ -85,7 +86,7 @@ class TestToolProtocolCompliance:
                 tags=["bash", "tool"] + sample_tool.tags,
                 examples=sample_tool.examples[:3],
                 inputModes=["text/plain"],
-                outputModes=["text/plain"]
+                outputModes=["text/plain"],
             )
         ]
 
@@ -98,7 +99,9 @@ class TestToolProtocolCompliance:
         assert skill.inputModes == ["text/plain"]
         assert skill.outputModes == ["text/plain"]
 
-    def test_tool_execution_event_format(self, bash_executor, sample_tool, execution_context):
+    def test_tool_execution_event_format(
+        self, bash_executor, sample_tool, execution_context
+    ):
         """Test that tool execution events follow A2A event format."""
         # Mock successful execution
         mock_result = ToolExecutionResult(
@@ -109,7 +112,7 @@ class TestToolProtocolCompliance:
             execution_time=0.5,
             return_code=0,
             metadata={"test": "data"},
-            output_files=[]
+            output_files=[],
         )
 
         # Verify event structure that would be emitted
@@ -122,7 +125,7 @@ class TestToolProtocolCompliance:
             "success": True,
             "execution_time": 0.5,
             "return_code": 0,
-            "output_length": len("Hello, World!")
+            "output_length": len("Hello, World!"),
         }
 
         # Check that event has required A2A fields
@@ -137,9 +140,7 @@ class TestToolProtocolCompliance:
         zedacp_tool_call = {
             "id": "call_123",
             "toolId": sample_tool.id,
-            "parameters": {
-                "name": "World"
-            }
+            "parameters": {"name": "World"},
         }
 
         # Verify expected format
@@ -148,7 +149,9 @@ class TestToolProtocolCompliance:
         assert zedacp_tool_call["parameters"]["name"] == "World"
 
         # Test parameter validation
-        is_valid, errors = sample_tool.validate_parameters(zedacp_tool_call["parameters"])
+        is_valid, errors = sample_tool.validate_parameters(
+            zedacp_tool_call["parameters"]
+        )
         assert is_valid, f"Parameter validation failed: {errors}"
 
     def test_a2a_input_required_format(self, sample_tool, execution_context):
@@ -165,8 +168,8 @@ class TestToolProtocolCompliance:
             metadata={
                 "tool_id": sample_tool.id,
                 "tool_name": sample_tool.name,
-                "confirmation_required": True
-            }
+                "confirmation_required": True,
+            },
         )
 
         # Verify notification structure
@@ -207,7 +210,7 @@ class TestToolProtocolCompliance:
             "task_id": execution_context.task_id,
             "tool_id": sample_tool.id,
             "severity": "info",
-            "details": {"parameter_count": len(sample_tool.parameters)}
+            "details": {"parameter_count": len(sample_tool.parameters)},
         }
 
         # Verify required audit fields
@@ -230,7 +233,7 @@ class TestToolProtocolCompliance:
             execution_time=0.1,
             return_code=-1,
             metadata={"error_type": "ParameterError"},
-            output_files=[]
+            output_files=[],
         )
 
         # Verify error response structure
@@ -253,7 +256,7 @@ class TestToolProtocolCompliance:
                 tool_id="test_tool",
                 session_id=f"session_{i}",
                 task_id=f"task_{i}",
-                user_id=f"user_{i}"
+                user_id=f"user_{i}",
             )
             for i in range(3)
         ]
@@ -268,22 +271,26 @@ class TestToolProtocolCompliance:
         assert len(set(user_ids)) == 3, "User IDs should be unique"
 
     @pytest.mark.asyncio
-    async def test_tool_execution_with_mock_zedacp_response(self, bash_executor, sample_tool, execution_context):
+    async def test_tool_execution_with_mock_zedacp_response(
+        self, bash_executor, sample_tool, execution_context
+    ):
         """Test tool execution integration with ZedACP response format."""
         # Mock the sandbox execution
         mock_sandbox = bash_executor.sandbox
-        mock_sandbox.execute_in_sandbox = AsyncMock(return_value=MagicMock(
-            success=True,
-            return_code=0,
-            stdout="Hello, World!",
-            stderr="",
-            execution_time=0.5,
-            output_files=[],
-            metadata={}
-        ))
+        mock_sandbox.execute_in_sandbox = AsyncMock(
+            return_value=MagicMock(
+                success=True,
+                return_code=0,
+                stdout="Hello, World!",
+                stderr="",
+                execution_time=0.5,
+                output_files=[],
+                metadata={},
+            )
+        )
 
         # Mock parameter validation
-        with patch.object(sample_tool, 'validate_parameters', return_value=(True, [])):
+        with patch.object(sample_tool, "validate_parameters", return_value=(True, [])):
             # Setup mock result
             mock_result = ToolExecutionResult(
                 tool_id="test_tool",
@@ -293,12 +300,14 @@ class TestToolProtocolCompliance:
                 execution_time=0.5,
                 return_code=0,
                 metadata={},
-                output_files=[]
+                output_files=[],
             )
             bash_executor.execute_tool = AsyncMock(return_value=mock_result)
 
             # Execute tool
-            result = await bash_executor.execute_tool(sample_tool, {"name": "World"}, execution_context)
+            result = await bash_executor.execute_tool(
+                sample_tool, {"name": "World"}, execution_context
+            )
 
             # Verify result
             assert result.success
@@ -314,7 +323,7 @@ class TestToolProtocolCompliance:
         # from a2a_acp.bash_executor import BashToolExecutor
 
         # Mock the entire executor to avoid initialization issues
-        with patch('a2a_acp.bash_executor.BashToolExecutor') as mock_executor_class:
+        with patch("a2a_acp.bash_executor.BashToolExecutor") as mock_executor_class:
             mock_executor = AsyncMock()
             mock_executor_class.return_value = mock_executor
 
@@ -328,15 +337,16 @@ class TestToolProtocolCompliance:
             assert "2.0.0" in key_v2
 
             # Keys should be different for different parameters
-            key_diff_params = f"test_tool:1.0.0:{hash(frozenset({'name': 'Universe'}.items()))}"
+            key_diff_params = (
+                f"test_tool:1.0.0:{hash(frozenset({'name': 'Universe'}.items()))}"
+            )
             assert key_v1 != key_diff_params
 
     def test_security_controls_enforcement(self, sample_tool, execution_context):
         """Test that security controls are properly enforced."""
         # Test command allowlisting
         restrictive_config = ToolConfig(
-            allowed_commands=["echo", "cat"],
-            requires_confirmation=False
+            allowed_commands=["echo", "cat"], requires_confirmation=False
         )
 
         sample_tool.config = restrictive_config
@@ -358,7 +368,7 @@ class TestToolProtocolCompliance:
         quota = ResourceQuota(
             max_executions_per_hour=100,
             max_execution_time_per_hour=300.0,
-            max_concurrent_executions=5
+            max_concurrent_executions=5,
         )
 
         # Verify quota values
@@ -387,10 +397,10 @@ class TestProtocolEdgeCases:
                     name="name",
                     type="string",
                     required=True,
-                    description="Name to greet"
+                    description="Name to greet",
                 )
             ],
-            config=ToolConfig()
+            config=ToolConfig(),
         )
 
     @pytest.fixture
@@ -400,7 +410,7 @@ class TestProtocolEdgeCases:
             tool_id="test_tool",
             session_id="test_session",
             task_id="test_task",
-            user_id="test_user"
+            user_id="test_user",
         )
 
     def test_malformed_tool_calls(self):
@@ -409,7 +419,10 @@ class TestProtocolEdgeCases:
             {},  # Empty call
             {"id": "call_123"},  # Missing toolId
             {"toolId": "unknown_tool"},  # Unknown tool
-            {"toolId": "test_tool", "parameters": "invalid"},  # Invalid parameters format
+            {
+                "toolId": "test_tool",
+                "parameters": "invalid",
+            },  # Invalid parameters format
         ]
 
         for call in malformed_calls:
@@ -423,7 +436,7 @@ class TestProtocolEdgeCases:
     async def test_tool_script_validation(self, sample_tool):
         """Test tool script validation for security issues."""
         # Test script validation using mocked executor
-        with patch('a2a_acp.bash_executor.BashToolExecutor') as mock_executor_class:
+        with patch("a2a_acp.bash_executor.BashToolExecutor") as mock_executor_class:
             mock_executor = AsyncMock()
             mock_executor.validate_tool_script = AsyncMock(return_value=(True, []))
             mock_executor_class.return_value = mock_executor
@@ -451,7 +464,7 @@ class TestProtocolEdgeCases:
             task_id=execution_context.task_id,
             tool_id="test_tool",
             severity="info",
-            details={"test": "data"}
+            details={"test": "data"},
         )
 
         # Test serialization round-trip

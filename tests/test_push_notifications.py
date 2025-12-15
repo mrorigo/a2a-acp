@@ -17,7 +17,7 @@ from a2a_acp.models import (
     TaskStatusChangePayload,
     TaskMessagePayload,
     DeliveryStatus,
-    NotificationFilter
+    NotificationFilter,
 )
 from a2a_acp.push_notification_manager import PushNotificationManager
 from a2a_acp.streaming_manager import StreamingManager, StreamingConnection
@@ -35,7 +35,7 @@ class TestPushNotificationModels:
             url="https://example.com/webhook",
             token="test-token",
             authentication_schemes={"bearer": {"type": "bearer"}},
-            credentials="secret-key"
+            credentials="secret-key",
         )
 
         assert config.id == "test-config-1"
@@ -53,7 +53,7 @@ class TestPushNotificationModels:
             delivery_status=DeliveryStatus.DELIVERED.value,
             response_code=200,
             response_body='{"success": true}',
-            attempted_at=datetime.now(timezone.utc)
+            attempted_at=datetime.now(timezone.utc),
         )
 
         assert delivery.id == "delivery-1"
@@ -68,7 +68,7 @@ class TestPushNotificationModels:
             timestamp=datetime.now(timezone.utc),
             data={"old_state": "working", "new_state": "completed"},
             old_state="working",
-            new_state="completed"
+            new_state="completed",
         )
 
         payload_dict = payload.to_dict()
@@ -82,7 +82,7 @@ class TestPushNotificationModels:
             enabled_events=["status_change", "task_message"],
             disabled_events=["task_artifact"],
             quiet_hours_start="22:00",
-            quiet_hours_end="08:00"
+            quiet_hours_end="08:00",
         )
 
         # Should send status_change notifications
@@ -133,7 +133,7 @@ class TestPushNotificationManager:
             max_sse_connections=500,
             connection_cleanup_interval=300,
             enable_metrics=True,
-            metrics_retention_hours=72
+            metrics_retention_hours=72,
         )
 
         return PushNotificationManager(mock_database, settings=test_settings)
@@ -149,9 +149,7 @@ class TestPushNotificationManager:
     async def test_store_config(self, push_manager, mock_database):
         """Test storing a push notification configuration."""
         config = TaskPushNotificationConfig(
-            id="test-config",
-            task_id="test-task",
-            url="https://example.com/webhook"
+            id="test-config", task_id="test-task", url="https://example.com/webhook"
         )
 
         await push_manager.store_config(config)
@@ -168,7 +166,7 @@ class TestPushNotificationManager:
         expected_config = {
             "id": "test-config",
             "task_id": "test-task",
-            "url": "https://example.com/webhook"
+            "url": "https://example.com/webhook",
         }
         mock_database.get_push_notification_config.return_value = expected_config
 
@@ -176,14 +174,16 @@ class TestPushNotificationManager:
 
         assert config is not None
         assert config.id == "test-config"
-        mock_database.get_push_notification_config.assert_called_once_with("test-task", "test-config")
+        mock_database.get_push_notification_config.assert_called_once_with(
+            "test-task", "test-config"
+        )
 
     @pytest.mark.asyncio
     async def test_list_configs(self, push_manager, mock_database):
         """Test listing push notification configurations for a task."""
         expected_configs = [
             {"id": "config-1", "task_id": "test-task", "url": "https://example.com/1"},
-            {"id": "config-2", "task_id": "test-task", "url": "https://example.com/2"}
+            {"id": "config-2", "task_id": "test-task", "url": "https://example.com/2"},
         ]
         mock_database.list_push_notification_configs.return_value = expected_configs
 
@@ -201,7 +201,9 @@ class TestPushNotificationManager:
         success = await push_manager.delete_config("test-task", "test-config")
 
         assert success
-        mock_database.delete_push_notification_config.assert_called_once_with("test-task", "test-config")
+        mock_database.delete_push_notification_config.assert_called_once_with(
+            "test-task", "test-config"
+        )
 
     @pytest.mark.asyncio
     async def test_send_notification_with_no_configs(self, push_manager, mock_database):
@@ -216,9 +218,7 @@ class TestPushNotificationManager:
     async def test_send_notification_with_configs(self, push_manager, mock_database):
         """Test sending notification with configurations."""
         config = TaskPushNotificationConfig(
-            id="test-config",
-            task_id="test-task",
-            url="https://httpbin.org/post"
+            id="test-config", task_id="test-task", url="https://httpbin.org/post"
         )
         mock_database.list_push_notification_configs.return_value = [config.to_dict()]
 
@@ -228,12 +228,17 @@ class TestPushNotificationManager:
         mock_response.status_code = 200
         mock_response.text = '{"success": true}'
 
-        with patch.object(push_manager.http_client, 'post', return_value=mock_response) as mock_post:
-            success = await push_manager.send_notification("test-task", {
-                "event": "status_change",
-                "old_state": "working",
-                "new_state": "completed"
-            })
+        with patch.object(
+            push_manager.http_client, "post", return_value=mock_response
+        ) as mock_post:
+            success = await push_manager.send_notification(
+                "test-task",
+                {
+                    "event": "status_change",
+                    "old_state": "working",
+                    "new_state": "completed",
+                },
+            )
 
             assert success
             mock_post.assert_called_once()
@@ -249,7 +254,7 @@ class TestPushNotificationManager:
             "event": "status_change",
             "task_id": "test-task",
             "old_state": "working",
-            "new_state": "completed"
+            "new_state": "completed",
         }
 
         payload = push_manager._create_notification_payload(event)
@@ -265,7 +270,7 @@ class TestPushNotificationManager:
             "event": "message",
             "task_id": "test-task",
             "message_role": "agent",
-            "message_content": "Hello, world!"
+            "message_content": "Hello, world!",
         }
 
         payload = push_manager._create_notification_payload(event)
@@ -278,10 +283,7 @@ class TestPushNotificationManager:
     def test_authentication_headers_bearer_token(self, push_manager):
         """Test authentication header generation for bearer tokens."""
         config = TaskPushNotificationConfig(
-            id="test",
-            task_id="test",
-            url="https://example.com",
-            token="test-token-123"
+            id="test", task_id="test", url="https://example.com", token="test-token-123"
         )
 
         headers = push_manager._get_authentication_headers(config)
@@ -295,12 +297,9 @@ class TestPushNotificationManager:
             task_id="test",
             url="https://example.com",
             authentication_schemes={
-                "apikey": {
-                    "type": "apikey",
-                    "header_name": "X-API-Key"
-                }
+                "apikey": {"type": "apikey", "header_name": "X-API-Key"}
             },
-            credentials="secret-api-key"
+            credentials="secret-api-key",
         )
 
         headers = push_manager._get_authentication_headers(config)
@@ -316,7 +315,7 @@ class TestPushNotificationManager:
             task_id="task-1",
             event_type="status_change",
             delivery_status=DeliveryStatus.DELIVERED.value,
-            attempted_at=datetime.now(timezone.utc)
+            attempted_at=datetime.now(timezone.utc),
         )
 
         push_manager.analytics.update_from_delivery(delivery)
@@ -330,9 +329,16 @@ class TestPushNotificationManager:
     async def test_cleanup_by_task_state_failed(self, push_manager, mock_database):
         """Test cleanup for failed tasks (immediate deletion)."""
         # Mock having configs for the task
-        config1 = TaskPushNotificationConfig(id="config-1", task_id="test-task", url="https://example.com/1")
-        config2 = TaskPushNotificationConfig(id="config-2", task_id="test-task", url="https://example.com/2")
-        mock_database.list_push_notification_configs.return_value = [config1.to_dict(), config2.to_dict()]
+        config1 = TaskPushNotificationConfig(
+            id="config-1", task_id="test-task", url="https://example.com/1"
+        )
+        config2 = TaskPushNotificationConfig(
+            id="config-2", task_id="test-task", url="https://example.com/2"
+        )
+        mock_database.list_push_notification_configs.return_value = [
+            config1.to_dict(),
+            config2.to_dict(),
+        ]
 
         # Mock successful deletions
         mock_database.delete_push_notification_config.return_value = True
@@ -345,7 +351,9 @@ class TestPushNotificationManager:
     @pytest.mark.asyncio
     async def test_cleanup_by_task_state_completed(self, push_manager, mock_database):
         """Test cleanup for completed tasks (retention period)."""
-        deleted_count = await push_manager.cleanup_by_task_state("test-task", "completed")
+        deleted_count = await push_manager.cleanup_by_task_state(
+            "test-task", "completed"
+        )
 
         # Should not delete immediately for completed tasks
         assert deleted_count == 0
@@ -368,8 +376,7 @@ class TestStreamingManager:
     def test_streaming_connection_creation(self):
         """Test creating a streaming connection."""
         connection = StreamingConnection(
-            connection_id="test-connection",
-            task_filter={"task-1", "task-2"}
+            connection_id="test-connection", task_filter={"task-1", "task-2"}
         )
 
         assert connection.connection_id == "test-connection"
@@ -380,8 +387,7 @@ class TestStreamingManager:
     def test_should_receive_notification_with_filter(self):
         """Test notification filtering with task filter."""
         connection = StreamingConnection(
-            connection_id="test-connection",
-            task_filter={"task-1", "task-2"}
+            connection_id="test-connection", task_filter={"task-1", "task-2"}
         )
 
         assert connection.should_receive_notification("task-1")
@@ -399,7 +405,9 @@ class TestStreamingManager:
     @pytest.mark.asyncio
     async def test_register_sse_connection(self, streaming_manager):
         """Test registering an SSE connection."""
-        connection_id, connection = await streaming_manager.register_sse_connection(["task-1"])
+        connection_id, connection = await streaming_manager.register_sse_connection(
+            ["task-1"]
+        )
 
         assert connection_id is not None
         assert isinstance(connection, StreamingConnection)
@@ -436,10 +444,14 @@ class TestStreamingManager:
         """Test cleaning up stale connections."""
         # Create a connection and manually set old last_activity
         connection_id, connection = await streaming_manager.register_sse_connection()
-        connection.last_activity = datetime.now(timezone.utc) - timedelta(hours=2)  # 2 hours old
+        connection.last_activity = datetime.now(timezone.utc) - timedelta(
+            hours=2
+        )  # 2 hours old
 
         # Cleanup connections older than 1 hour
-        cleaned_count = await streaming_manager.cleanup_stale_connections(max_age_seconds=3600)
+        cleaned_count = await streaming_manager.cleanup_stale_connections(
+            max_age_seconds=3600
+        )
 
         assert cleaned_count == 1
         assert connection_id not in streaming_manager.sse_connections
@@ -462,7 +474,7 @@ class TestDatabaseOperations:
             config_id="test-config",
             task_id="test-task",
             url="https://example.com/webhook",
-            token="test-token"
+            token="test-token",
         )
 
         # Retrieve the configuration
@@ -479,14 +491,10 @@ class TestDatabaseOperations:
         """Test listing push notification configurations."""
         # Store multiple configurations
         await test_db.store_push_notification_config(
-            config_id="config-1",
-            task_id="test-task",
-            url="https://example.com/1"
+            config_id="config-1", task_id="test-task", url="https://example.com/1"
         )
         await test_db.store_push_notification_config(
-            config_id="config-2",
-            task_id="test-task",
-            url="https://example.com/2"
+            config_id="config-2", task_id="test-task", url="https://example.com/2"
         )
 
         configs = await test_db.list_push_notification_configs("test-task")
@@ -503,7 +511,7 @@ class TestDatabaseOperations:
         await test_db.store_push_notification_config(
             config_id="test-config",
             task_id="test-task",
-            url="https://example.com/webhook"
+            url="https://example.com/webhook",
         )
 
         # Verify it exists
@@ -511,7 +519,9 @@ class TestDatabaseOperations:
         assert config is not None
 
         # Delete the configuration
-        success = await test_db.delete_push_notification_config("test-task", "test-config")
+        success = await test_db.delete_push_notification_config(
+            "test-task", "test-config"
+        )
         assert success
 
         # Verify it's gone
@@ -533,7 +543,7 @@ class TestDatabaseOperations:
             delivery_status=DeliveryStatus.DELIVERED.value,
             response_code=200,
             response_body='{"success": true}',
-            delivered_at=datetime.now(timezone.utc).isoformat()
+            delivered_at=datetime.now(timezone.utc).isoformat(),
         )
 
         # Retrieve delivery history
@@ -553,7 +563,7 @@ class TestDatabaseOperations:
         await test_db.store_push_notification_config(
             config_id="old-config",
             task_id="test-task",
-            url="https://example.com/webhook"
+            url="https://example.com/webhook",
         )
 
         # Manually update the timestamp to be old (this would normally be done by cleanup logic)
@@ -596,15 +606,13 @@ class TestIntegrationScenarios:
             max_sse_connections=500,
             connection_cleanup_interval=300,
             enable_metrics=True,
-            metrics_retention_hours=72
+            metrics_retention_hours=72,
         )
         push_mgr = PushNotificationManager(mock_db, settings=test_settings)
 
         # Mock configurations for the task
         config = TaskPushNotificationConfig(
-            id="test-config",
-            task_id="test-task",
-            url="https://example.com/webhook"
+            id="test-config", task_id="test-task", url="https://example.com/webhook"
         )
         mock_db.list_push_notification_configs.return_value = [config.to_dict()]
 
@@ -614,14 +622,17 @@ class TestIntegrationScenarios:
         mock_response.status_code = 200
         mock_response.text = '{"success": true}'
 
-        with patch.object(push_mgr.http_client, 'post', return_value=mock_response):
+        with patch.object(push_mgr.http_client, "post", return_value=mock_response):
             # Test status change notification
-            success = await push_mgr.send_notification("test-task", {
-                "event": "status_change",
-                "task_id": "test-task",
-                "old_state": "working",
-                "new_state": "completed"
-            })
+            success = await push_mgr.send_notification(
+                "test-task",
+                {
+                    "event": "status_change",
+                    "task_id": "test-task",
+                    "old_state": "working",
+                    "new_state": "completed",
+                },
+            )
 
             assert success
 
@@ -651,15 +662,13 @@ class TestIntegrationScenarios:
             max_sse_connections=500,
             connection_cleanup_interval=300,
             enable_metrics=True,
-            metrics_retention_hours=72
+            metrics_retention_hours=72,
         )
         push_mgr = PushNotificationManager(mock_db, settings=test_settings)
 
         # Mock configuration
         config = TaskPushNotificationConfig(
-            id="test-config",
-            task_id="test-task",
-            url="https://example.com/webhook"
+            id="test-config", task_id="test-task", url="https://example.com/webhook"
         )
         mock_db.list_push_notification_configs.return_value = [config.to_dict()]
 
@@ -672,13 +681,12 @@ class TestIntegrationScenarios:
         success_response.is_success = True
         success_response.status_code = 200
 
-        with patch.object(push_mgr.http_client, 'post') as mock_post:
+        with patch.object(push_mgr.http_client, "post") as mock_post:
             mock_post.side_effect = [failed_response, failed_response, success_response]
 
-            success = await push_mgr.send_notification("test-task", {
-                "event": "status_change",
-                "task_id": "test-task"
-            })
+            success = await push_mgr.send_notification(
+                "test-task", {"event": "status_change", "task_id": "test-task"}
+            )
 
             # Should succeed after retries
             assert success
@@ -692,7 +700,7 @@ class TestIntegrationScenarios:
             timestamp=datetime.now(timezone.utc),
             data={"test": "data"},
             old_state="working",
-            new_state="completed"
+            new_state="completed",
         )
 
         payload_dict = payload.to_dict()

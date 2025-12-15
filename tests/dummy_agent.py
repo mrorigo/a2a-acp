@@ -89,21 +89,31 @@ def handle_session_prompt(message: Dict[str, Any]) -> None:
                                 "sessionId": SESSION_ID,
                                 "update": {
                                     "sessionUpdate": "agent_message_chunk",
-                                    "content": {"type": "text", "text": f"{word} "}
-                                }
+                                    "content": {"type": "text", "text": f"{word} "},
+                                },
                             },
                         }
                     )
                     # Also check for cancellation after sending each message
                     if cancel_event.is_set():
-                        print("dummy agent prompt cancelled after sending message", file=sys.stderr, flush=True)
+                        print(
+                            "dummy agent prompt cancelled after sending message",
+                            file=sys.stderr,
+                            flush=True,
+                        )
                         set_current_request(None)
                         return
                 check_count += 1
                 # Run for a shorter time to make cancellation more testable
                 if time.time() - start >= 2.0:  # Reduced from 5.0 to 2.0 seconds
                     break
-            send({"jsonrpc": "2.0", "id": message["id"], "result": {"stopReason": "stop"}})
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": message["id"],
+                    "result": {"stopReason": "stop"},
+                }
+            )
             set_current_request(None)
         except Exception as exc:  # pragma: no cover - debug aid
             send(
@@ -114,16 +124,14 @@ def handle_session_prompt(message: Dict[str, Any]) -> None:
                         "sessionId": SESSION_ID,
                         "update": {
                             "sessionUpdate": "agent_message_chunk",
-                            "content": {"type": "text", "text": f"error: {exc}"}
-                        }
+                            "content": {"type": "text", "text": f"error: {exc}"},
+                        },
                     },
                 }
             )
 
     t = threading.Thread(target=worker, name="dummy-agent-prompt", daemon=True)
     t.start()
-
-
 
 
 def handle_session_cancel(_: Dict[str, Any]) -> None:
@@ -137,12 +145,18 @@ def handle_session_cancel(_: Dict[str, Any]) -> None:
                 "sessionId": SESSION_ID,
                 "update": {
                     "sessionUpdate": "agent_message_chunk",
-                    "content": {"type": "text", "text": "cancel acknowledged"}
-                }
+                    "content": {"type": "text", "text": "cancel acknowledged"},
+                },
             },
         }
     )
-    send({"jsonrpc": "2.0", "method": "session/cancelled", "params": {"sessionId": SESSION_ID}})
+    send(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/cancelled",
+            "params": {"sessionId": SESSION_ID},
+        }
+    )
     request_id = get_current_request()
     if request_id is not None:
         send(
@@ -161,32 +175,32 @@ TOOL_SIMULATIONS = {
         "execution_time": 0.5,
         "success_rate": 0.9,
         "requires_confirmation": False,
-        "output": "HTTP 200: Success"
+        "output": "HTTP 200: Success",
     },
     "dangerous_operation": {
         "execution_time": 1.0,
         "success_rate": 0.8,
         "requires_confirmation": True,
         "confirmation_message": "This operation is dangerous. Proceed?",
-        "output": "Dangerous operation completed"
+        "output": "Dangerous operation completed",
     },
     "failing_tool": {
         "execution_time": 0.2,
         "success_rate": 0.1,  # High failure rate for testing
-        "error_message": "Simulated tool failure"
+        "error_message": "Simulated tool failure",
     },
     "database_query": {
         "execution_time": 0.8,
         "success_rate": 0.95,
         "requires_confirmation": False,
-        "output": "Query executed successfully: 42 rows returned"
+        "output": "Query executed successfully: 42 rows returned",
     },
     "file_operation": {
         "execution_time": 0.3,
         "success_rate": 0.9,
         "requires_confirmation": False,
-        "output": "File operation completed successfully"
-    }
+        "output": "File operation completed successfully",
+    },
 }
 
 # Global state for tool call simulation
@@ -200,12 +214,15 @@ def simulate_tool_call(tool_call: Dict[str, Any]) -> Dict[str, Any]:
     tool_call_counter += 1
 
     tool_id = tool_call.get("toolId", "unknown")
-    tool_config = TOOL_SIMULATIONS.get(tool_id, {
-        "execution_time": 0.5,
-        "success_rate": 0.8,
-        "requires_confirmation": False,
-        "output": f"Tool {tool_id} executed"
-    })
+    tool_config = TOOL_SIMULATIONS.get(
+        tool_id,
+        {
+            "execution_time": 0.5,
+            "success_rate": 0.8,
+            "requires_confirmation": False,
+            "output": f"Tool {tool_id} executed",
+        },
+    )
 
     call_id = f"call_{tool_call_counter}"
     active_tool_calls[call_id] = {
@@ -213,7 +230,7 @@ def simulate_tool_call(tool_call: Dict[str, Any]) -> Dict[str, Any]:
         "tool_id": tool_id,
         "status": "started",
         "parameters": tool_call.get("parameters", {}),
-        "start_time": time.time()
+        "start_time": time.time(),
     }
 
     # Check if tool requires confirmation
@@ -222,7 +239,7 @@ def simulate_tool_call(tool_call: Dict[str, Any]) -> Dict[str, Any]:
             "toolCallId": tool_call.get("id", call_id),
             "status": "pending_confirmation",
             "content": [{"type": "text", "text": tool_config["confirmation_message"]}],
-            "rawOutput": tool_config["confirmation_message"]
+            "rawOutput": tool_config["confirmation_message"],
         }
 
     # Simulate execution
@@ -236,7 +253,7 @@ def simulate_tool_call(tool_call: Dict[str, Any]) -> Dict[str, Any]:
             "toolCallId": tool_call.get("id", call_id),
             "status": "completed",
             "content": [{"type": "text", "text": tool_config["output"]}],
-            "rawOutput": tool_config["output"]
+            "rawOutput": tool_config["output"],
         }
     else:
         error_msg = tool_config.get("error_message", f"Tool {tool_id} failed")
@@ -244,7 +261,7 @@ def simulate_tool_call(tool_call: Dict[str, Any]) -> Dict[str, Any]:
             "toolCallId": tool_call.get("id", call_id),
             "status": "failed",
             "content": [{"type": "text", "text": f"Error: {error_msg}"}],
-            "rawOutput": f"Error: {error_msg}"
+            "rawOutput": f"Error: {error_msg}",
         }
 
 
@@ -287,14 +304,24 @@ def handle_session_prompt_with_tools(message: Dict[str, Any]) -> None:
 
 def simulate_tool_calls(request_id: int) -> None:
     """Simulate ZedACP tool calls in response to tool requests."""
+
     def worker() -> None:
         try:
             # Simulate various tool call scenarios
             tool_scenarios = [
-                {"toolId": "web_request", "parameters": {"method": "GET", "url": "https://api.example.com"}},
+                {
+                    "toolId": "web_request",
+                    "parameters": {"method": "GET", "url": "https://api.example.com"},
+                },
                 {"toolId": "dangerous_operation", "parameters": {"action": "delete"}},
-                {"toolId": "database_query", "parameters": {"query": "SELECT * FROM users"}},
-                {"toolId": "file_operation", "parameters": {"path": "/tmp/test.txt", "operation": "read"}}
+                {
+                    "toolId": "database_query",
+                    "parameters": {"query": "SELECT * FROM users"},
+                },
+                {
+                    "toolId": "file_operation",
+                    "parameters": {"path": "/tmp/test.txt", "operation": "read"},
+                },
             ]
 
             for scenario in tool_scenarios:
@@ -302,38 +329,44 @@ def simulate_tool_calls(request_id: int) -> None:
                     break
 
                 # Send tool call notification
-                send({
-                    "jsonrpc": "2.0",
-                    "method": "session/update",
-                    "params": {
-                        "sessionId": SESSION_ID,
-                        "update": {
-                            "sessionUpdate": "tool_call",
-                            "toolCalls": [{
-                                "id": f"call_{random.randint(1000, 9999)}",
-                                "toolId": scenario["toolId"],
-                                "parameters": scenario["parameters"]
-                            }]
-                        }
+                send(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "session/update",
+                        "params": {
+                            "sessionId": SESSION_ID,
+                            "update": {
+                                "sessionUpdate": "tool_call",
+                                "toolCalls": [
+                                    {
+                                        "id": f"call_{random.randint(1000, 9999)}",
+                                        "toolId": scenario["toolId"],
+                                        "parameters": scenario["parameters"],
+                                    }
+                                ],
+                            },
+                        },
                     }
-                })
+                )
 
                 # Wait a bit between tool calls
                 time.sleep(0.2)
 
                 # Send simulated tool result
                 result = simulate_tool_call(scenario)
-                send({
-                    "jsonrpc": "2.0",
-                    "method": "session/update",
-                    "params": {
-                        "sessionId": SESSION_ID,
-                        "update": {
-                            "sessionUpdate": "tool_call_update",
-                            "toolCallUpdates": [result]
-                        }
+                send(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "session/update",
+                        "params": {
+                            "sessionId": SESSION_ID,
+                            "update": {
+                                "sessionUpdate": "tool_call_update",
+                                "toolCallUpdates": [result],
+                            },
+                        },
                     }
-                })
+                )
 
                 time.sleep(0.1)
 
@@ -342,17 +375,19 @@ def simulate_tool_calls(request_id: int) -> None:
             set_current_request(None)
 
         except Exception as exc:
-            send({
-                "jsonrpc": "2.0",
-                "method": "session/update",
-                "params": {
-                    "sessionId": SESSION_ID,
-                    "update": {
-                        "sessionUpdate": "agent_message_chunk",
-                        "content": {"type": "text", "text": f"error: {exc}"}
-                    }
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": SESSION_ID,
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": f"error: {exc}"},
+                        },
+                    },
                 }
-            })
+            )
             set_current_request(None)
 
     t = threading.Thread(target=worker, name="dummy-agent-tool-simulation", daemon=True)
@@ -385,23 +420,41 @@ def main() -> None:
         try:
             message = json.loads(raw)
             method = message.get("method")
-            print(f"dummy agent: Received {method} request: {json.dumps(message)}", file=sys.stderr, flush=True)
+            print(
+                f"dummy agent: Received {method} request: {json.dumps(message)}",
+                file=sys.stderr,
+                flush=True,
+            )
 
             handler = HANDLERS.get(method)
             if handler is None:
-                print(f"dummy agent: No handler for method {method}", file=sys.stderr, flush=True)
+                print(
+                    f"dummy agent: No handler for method {method}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 continue
 
             handler(message)
 
             if method == "session/cancel":
-                print("dummy agent: Received cancel, exiting", file=sys.stderr, flush=True)
+                print(
+                    "dummy agent: Received cancel, exiting", file=sys.stderr, flush=True
+                )
                 break
 
         except json.JSONDecodeError as e:
-            print(f"dummy agent: Failed to parse JSON: {raw}, error: {e}", file=sys.stderr, flush=True)
+            print(
+                f"dummy agent: Failed to parse JSON: {raw}, error: {e}",
+                file=sys.stderr,
+                flush=True,
+            )
         except Exception as e:
-            print(f"dummy agent: Error processing message: {e}", file=sys.stderr, flush=True)
+            print(
+                f"dummy agent: Error processing message: {e}",
+                file=sys.stderr,
+                flush=True,
+            )
 
 
 if __name__ == "__main__":

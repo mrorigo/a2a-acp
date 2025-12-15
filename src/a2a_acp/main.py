@@ -11,13 +11,22 @@ import asyncio
 import json
 import logging
 import os
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, AsyncGenerator, AsyncIterator, Optional, List, Dict, Callable, Tuple
+from typing import (
+    Any,
+    AsyncGenerator,
+    AsyncIterator,
+    Optional,
+    List,
+    Dict,
+    Callable,
+    Tuple,
+)
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status, WebSocket
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -27,10 +36,10 @@ from .logging_config import configure_logging
 from .task_manager import A2ATaskManager
 from .context_manager import A2AContextManager
 from . import settings as settings_module
-from .zed_agent import AgentProcessError, PromptCancelled, ZedAgentConnection
+from .zed_agent import AgentProcessError, ZedAgentConnection
 from .push_notification_manager import PushNotificationManager
 from .streaming_manager import StreamingManager
-from .tool_config import get_tool_configuration_manager, BashTool
+from .tool_config import get_tool_configuration_manager
 from .bash_executor import BashToolExecutor, set_bash_executor
 from .api import auth_endpoints
 
@@ -41,7 +50,6 @@ from .models import (
     ExecuteSlashCommandResponse,
     SlashCommand,
     SlashCommandArgument,
-    AgentSettings,
     CommandExecutionStatus,
 )
 
@@ -72,7 +80,9 @@ def serialize_a2a(obj: Any) -> Any:
     if isinstance(obj, list):
         return [serialize_a2a(item) for item in obj]
     if isinstance(obj, dict):
-        return {key: serialize_a2a(value) for key, value in obj.items() if value is not None}
+        return {
+            key: serialize_a2a(value) for key, value in obj.items() if value is not None
+        }
     return obj
 
 
@@ -129,20 +139,12 @@ async def iter_streaming_payloads(
     def wrap_result(payload: Any) -> Dict[str, Any]:
         body = serialize_a2a(payload)
         if include_jsonrpc:
-            return {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": body
-            }
+            return {"jsonrpc": "2.0", "id": request_id, "result": body}
         return body
 
     def wrap_error(payload: Dict[str, Any]) -> Dict[str, Any]:
         if include_jsonrpc:
-            return {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": payload
-            }
+            return {"jsonrpc": "2.0", "id": request_id, "error": payload}
         return {"error": payload}
 
     async def stream_chunk_handler(chunk: str) -> None:
@@ -155,7 +157,7 @@ async def iter_streaming_payloads(
             messageId=create_message_id(),
             taskId=task.id,
             contextId=task.contextId,
-            metadata={"streaming": True, "chunk_index": chunk_index}
+            metadata={"streaming": True, "chunk_index": chunk_index},
         )
 
         chunk_message_payload = chunk_message.model_dump(exclude_none=True)
@@ -166,10 +168,10 @@ async def iter_streaming_payloads(
             status=TaskStatus(
                 state=TaskState.WORKING,
                 timestamp=current_timestamp(),
-                message=chunk_message_payload
+                message=chunk_message_payload,
             ),
             final=False,
-            metadata={"chunk_index": chunk_index}
+            metadata={"chunk_index": chunk_index},
         )
 
         await queue.put(("result", status_event))
@@ -191,7 +193,7 @@ async def iter_streaming_payloads(
                 api_key=agent_config["api_key"],
                 working_directory=os.getcwd(),
                 mcp_servers=[],
-                stream_handler=stream_chunk_handler
+                stream_handler=stream_chunk_handler,
             )
 
             final_message = result_task.history[-1] if result_task.history else None
@@ -205,13 +207,13 @@ async def iter_streaming_payloads(
                 status=TaskStatus(
                     state=result_task.status.state,
                     timestamp=result_task.status.timestamp or current_timestamp(),
-                    message=final_message_payload
+                    message=final_message_payload,
                 ),
                 final=True,
                 metadata={
                     "total_chunks": len(accumulated_chunks),
-                    "stream_completed": True
-                }
+                    "stream_completed": True,
+                },
             )
 
             await queue.put(("result", final_status_event))
@@ -221,7 +223,9 @@ async def iter_streaming_payloads(
                     "stream_id": stream_id,
                     "task_id": result_task.id,
                     "total_chunks": len(accumulated_chunks),
-                    "final_state": result_task.status.state.value if result_task.status else None,
+                    "final_state": (
+                        result_task.status.state.value if result_task.status else None
+                    ),
                 },
             )
             await queue.put(("result", result_task))
@@ -235,11 +239,15 @@ async def iter_streaming_payloads(
             )
 
         except AgentProcessError as exc:
-            logger.exception("Agent process failed during streaming", extra={"task_id": task.id})
-            await queue.put(("error", {
-                "code": -32603,
-                "message": f"Agent process failed: {str(exc)}"
-            }))
+            logger.exception(
+                "Agent process failed during streaming", extra={"task_id": task.id}
+            )
+            await queue.put(
+                (
+                    "error",
+                    {"code": -32603, "message": f"Agent process failed: {str(exc)}"},
+                )
+            )
             logger.debug(
                 "Queued streaming error payload",
                 extra={
@@ -252,11 +260,19 @@ async def iter_streaming_payloads(
             await task_manager.cancel_task(task.id)
 
         except Exception as exc:
-            logger.exception("Unexpected error during streaming execution", extra={"task_id": task.id})
-            await queue.put(("error", {
-                "code": -32603,
-                "message": f"Failed to stream message: {str(exc)}"
-            }))
+            logger.exception(
+                "Unexpected error during streaming execution",
+                extra={"task_id": task.id},
+            )
+            await queue.put(
+                (
+                    "error",
+                    {
+                        "code": -32603,
+                        "message": f"Failed to stream message: {str(exc)}",
+                    },
+                )
+            )
             logger.debug(
                 "Queued streaming error payload",
                 extra={
@@ -304,7 +320,9 @@ async def iter_streaming_payloads(
                 break
             if kind == "result":
                 formatted = wrap_result(payload)
-                result_body = formatted.get("result", formatted if not include_jsonrpc else {})
+                result_body = formatted.get(
+                    "result", formatted if not include_jsonrpc else {}
+                )
                 result_kind = None
                 if isinstance(result_body, dict):
                     result_kind = result_body.get("kind")
@@ -344,6 +362,7 @@ async def iter_streaming_payloads(
 def get_agent_config() -> Dict[str, Any]:
     """Get the single agent configuration from settings."""
     import shlex
+
     settings = settings_module.get_settings()
 
     def _coerce_str(value: Any, default: str) -> str:
@@ -351,15 +370,21 @@ def get_agent_config() -> Dict[str, Any]:
             return value
         return default
 
-    command_str = _coerce_str(getattr(settings, "agent_command", None), "python tests/dummy_agent.py")
-    description = _coerce_str(getattr(settings, "agent_description", None), "A2A-ACP Development Agent")
+    command_str = _coerce_str(
+        getattr(settings, "agent_command", None), "python tests/dummy_agent.py"
+    )
+    description = _coerce_str(
+        getattr(settings, "agent_description", None), "A2A-ACP Development Agent"
+    )
 
     # Parse command string into argument list for subprocess
     try:
         command = shlex.split(command_str)
     except ValueError as e:
         # Fallback if parsing fails - convert string to list with shell execution
-        logger.warning(f"Failed to parse command string '{command_str}': {e}. Using as single command.")
+        logger.warning(
+            f"Failed to parse command string '{command_str}': {e}. Using as single command."
+        )
         command = [command_str]
 
     def _extract_codex_home_from_command(source: Optional[str]) -> Optional[str]:
@@ -394,8 +419,9 @@ def get_agent_config() -> Dict[str, Any]:
 async def generate_static_agent_card():
     """Generate a static AgentCard for the single configured agent."""
     from a2a_acp.a2a.models import (
-        AgentCard, AgentCapabilities, AgentSkill, AgentProvider,
-        SecurityScheme, HTTPAuthSecurityScheme
+        AgentCard,
+        AgentSkill,
+        HTTPAuthSecurityScheme,
     )
 
     agent_config = get_agent_config()
@@ -425,7 +451,7 @@ async def generate_static_agent_card():
             tags=["bash", "tool"] + tool.tags,
             examples=examples,
             inputModes=["text/plain"],
-            outputModes=["text/plain"]
+            outputModes=["text/plain"],
         )
         tool_skills.append(skill)
 
@@ -438,7 +464,7 @@ async def generate_static_agent_card():
             tags=["coding", "development", "programming"],
             examples=["Create a Python function to calculate fibonacci numbers"],
             inputModes=["text/plain"],
-            outputModes=["text/plain"]
+            outputModes=["text/plain"],
         ),
         AgentSkill(
             id="file_system",
@@ -447,8 +473,8 @@ async def generate_static_agent_card():
             tags=["files", "workspace", "io"],
             examples=["Read the contents of config.json", "Create a new Python script"],
             inputModes=["text/plain"],
-            outputModes=["text/plain"]
-        )
+            outputModes=["text/plain"],
+        ),
     ] + tool_skills
 
     settings = settings_module.get_settings()
@@ -461,15 +487,15 @@ async def generate_static_agent_card():
                     "version": "1.0.0",
                     "metadata": {
                         "description": "Support for development tool interactions including slash commands and tool lifecycles"
-                    }
-                }
+                    },
+                },
             }
         ]
 
     capabilities_dict = {
         "streaming": True,
         "pushNotifications": True,
-        "stateTransitionHistory": True
+        "stateTransitionHistory": True,
     }
     if extensions:
         capabilities_dict["extensions"] = extensions
@@ -484,17 +510,21 @@ async def generate_static_agent_card():
         preferredTransport="JSONRPC",
         version="1.0.0",
         capabilities=capabilities_dict,
-        securitySchemes={
-            "bearer": HTTPAuthSecurityScheme(
-                type="http",
-                scheme="bearer",
-                description="JWT bearer token authentication",
-                bearerFormat="JWT"
-            )
-        } if settings.auth_token else None,
+        securitySchemes=(
+            {
+                "bearer": HTTPAuthSecurityScheme(
+                    type="http",
+                    scheme="bearer",
+                    description="JWT bearer token authentication",
+                    bearerFormat="JWT",
+                )
+            }
+            if settings.auth_token
+            else None
+        ),
         defaultInputModes=["text/plain"],
         defaultOutputModes=["text/plain"],
-        skills=all_skills
+        skills=all_skills,
     )
 
 
@@ -515,10 +545,14 @@ def require_authorization(authorization: Optional[str] = Header(default=None)) -
 
     # If token is configured, enforce authentication
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token"
+        )
     provided = authorization.split(" ", 1)[1]
     if provided != token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid bearer token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid bearer token"
+        )
 
 
 @asynccontextmanager
@@ -532,8 +566,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize push notification manager first with settings
     settings = settings_module.get_settings()
     app.state.push_notification_manager = PushNotificationManager(
-        app.state.database,
-        settings=settings.push_notifications
+        app.state.database, settings=settings.push_notifications
     )
 
     # Initialize streaming manager with push notification manager and settings
@@ -541,7 +574,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.push_notification_manager,
         max_websocket_connections=settings.push_notifications.max_websocket_connections,
         max_sse_connections=settings.push_notifications.max_sse_connections,
-        cleanup_interval=settings.push_notifications.connection_cleanup_interval
+        cleanup_interval=settings.push_notifications.connection_cleanup_interval,
     )
 
     # Connect streaming manager back to push notification manager for broadcasting
@@ -575,14 +608,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         while True:
             try:
                 await asyncio.sleep(cleanup_interval)
-                cleanup_count = await app.state.push_notification_manager.cleanup_expired_configs()
+                cleanup_count = (
+                    await app.state.push_notification_manager.cleanup_expired_configs()
+                )
                 if cleanup_count > 0:
-                    logger.info(f"Periodic cleanup removed {cleanup_count} expired notification configs")
+                    logger.info(
+                        f"Periodic cleanup removed {cleanup_count} expired notification configs"
+                    )
 
                 # Also cleanup stale streaming connections
-                stale_count = await app.state.streaming_manager.cleanup_stale_connections()
+                stale_count = (
+                    await app.state.streaming_manager.cleanup_stale_connections()
+                )
                 if stale_count > 0:
-                    logger.info(f"Periodic cleanup removed {stale_count} stale streaming connections")
+                    logger.info(
+                        f"Periodic cleanup removed {stale_count} stale streaming connections"
+                    )
 
             except Exception as e:
                 logger.error("Error in periodic cleanup", extra={"error": str(e)})
@@ -595,7 +636,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Cleanup
     # Cancel the background cleanup task
-    if hasattr(app.state, 'cleanup_task'):
+    if hasattr(app.state, "cleanup_task"):
         app.state.cleanup_task.cancel()
         try:
             await app.state.cleanup_task
@@ -663,7 +704,7 @@ def handle_push_notification_config_method(
     params: Dict[str, Any],
     request_id: Any,
     handler_func: Callable,
-    param_requirements: Optional[List[str]] = None
+    param_requirements: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Handle push notification configuration methods with consistent error handling.
@@ -681,39 +722,36 @@ def handle_push_notification_config_method(
     try:
         # Validate required parameters
         if param_requirements:
-            missing_params = [param for param in param_requirements if param not in params]
+            missing_params = [
+                param for param in param_requirements if param not in params
+            ]
             if missing_params:
                 return {
                     "jsonrpc": "2.0",
                     "id": request_id,
                     "error": {
                         "code": -32602,
-                        "message": f"Missing required parameters: {', '.join(missing_params)}"
-                    }
+                        "message": f"Missing required parameters: {', '.join(missing_params)}",
+                    },
                 }
 
         # Call the handler function
         result = asyncio.run(handler_func(params))
 
-        return {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": result
-        }
+        return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
     except Exception as e:
         logger.exception(f"Error in {method_name}")
         return {
             "jsonrpc": "2.0",
             "id": request_id,
-            "error": {
-                "code": -32603,
-                "message": f"Failed to {method_name}: {str(e)}"
-            }
+            "error": {"code": -32603, "message": f"Failed to {method_name}: {str(e)}"},
         }
 
 
-async def handle_message_send_jsonrpc(params: Dict[str, Any], request: Request, request_id: Any) -> Dict[str, Any]:
+async def handle_message_send_jsonrpc(
+    params: Dict[str, Any], request: Request, request_id: Any
+) -> Dict[str, Any]:
     """Handle message/send via JSON-RPC."""
     try:
         from a2a_acp.a2a.models import MessageSendParams
@@ -729,7 +767,10 @@ async def handle_message_send_jsonrpc(params: Dict[str, Any], request: Request, 
         agent_config = get_agent_config()
 
         # Create A2A context for this task
-        context_id = message_params.message.contextId or await context_manager.create_context("default-agent")
+        context_id = (
+            message_params.message.contextId
+            or await context_manager.create_context("default-agent")
+        )
 
         # Create A2A task
         metadata_payload = {"mode": "sync"}
@@ -740,17 +781,21 @@ async def handle_message_send_jsonrpc(params: Dict[str, Any], request: Request, 
             context_id=context_id,
             agent_name="default-agent",
             initial_message=message_params.message,
-            metadata=metadata_payload
+            metadata=metadata_payload,
         )
         _strip_development_tool_metadata(task)
         await get_database(request).store_task(task)
 
         try:
-            async with ZedAgentConnection(agent_config["command"], api_key=agent_config["api_key"]) as connection:
+            async with ZedAgentConnection(
+                agent_config["command"], api_key=agent_config["api_key"]
+            ) as connection:
                 await connection.initialize()
 
                 # Create or load ZedACP session if context is provided
-                session_id = await connection.start_session(cwd=os.getcwd(), mcp_servers=[])
+                session_id = await connection.start_session(
+                    cwd=os.getcwd(), mcp_servers=[]
+                )
 
                 # Execute the task (task manager handles translation and history updates)
                 result = await task_manager.execute_task(
@@ -758,7 +803,7 @@ async def handle_message_send_jsonrpc(params: Dict[str, Any], request: Request, 
                     agent_command=agent_config["command"],
                     api_key=agent_config["api_key"],
                     working_directory=os.getcwd(),
-                    mcp_servers=[]
+                    mcp_servers=[],
                 )
                 _strip_development_tool_metadata(result)
 
@@ -768,11 +813,13 @@ async def handle_message_send_jsonrpc(params: Dict[str, Any], request: Request, 
                 return {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "result": serialize_a2a(result)
+                    "result": serialize_a2a(result),
                 }
 
         except AgentProcessError as exc:
-            logger.exception("Agent process failed during A2A message", extra={"task_id": task.id})
+            logger.exception(
+                "Agent process failed during A2A message", extra={"task_id": task.id}
+            )
             # Mark task as failed
             await task_manager.cancel_task(task.id)
 
@@ -781,8 +828,8 @@ async def handle_message_send_jsonrpc(params: Dict[str, Any], request: Request, 
                 "id": request_id,
                 "error": {
                     "code": -32603,
-                    "message": f"Agent process failed: {str(exc)}"
-                }
+                    "message": f"Agent process failed: {str(exc)}",
+                },
             }
 
     except Exception as e:
@@ -790,14 +837,13 @@ async def handle_message_send_jsonrpc(params: Dict[str, Any], request: Request, 
         return {
             "jsonrpc": "2.0",
             "id": request_id,
-            "error": {
-                "code": -32603,
-                "message": f"Failed to send message: {str(e)}"
-            }
+            "error": {"code": -32603, "message": f"Failed to send message: {str(e)}"},
         }
 
 
-async def handle_tasks_get_jsonrpc(params: Dict[str, Any], request: Request, request_id: Any) -> Dict[str, Any]:
+async def handle_tasks_get_jsonrpc(
+    params: Dict[str, Any], request: Request, request_id: Any
+) -> Dict[str, Any]:
     """Handle tasks/get via JSON-RPC."""
     try:
         from a2a_acp.a2a.models import TaskQueryParams
@@ -814,24 +860,19 @@ async def handle_tasks_get_jsonrpc(params: Dict[str, Any], request: Request, req
             if task_query.historyLength and task_query.historyLength > 0:
                 # Limit history to requested length
                 if task.history and len(task.history) > task_query.historyLength:
-                    task.history = task.history[-task_query.historyLength:]
+                    task.history = task.history[-task_query.historyLength :]
 
-            logger.info("Task retrieved successfully",
-                       extra={"task_id": task.id, "status": task.status.state.value})
-            return {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": serialize_a2a(task)
-            }
+            logger.info(
+                "Task retrieved successfully",
+                extra={"task_id": task.id, "status": task.status.state.value},
+            )
+            return {"jsonrpc": "2.0", "id": request_id, "result": serialize_a2a(task)}
         else:
             # Task not found
             return {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "error": {
-                    "code": -32001,
-                    "message": "Task not found"
-                }
+                "error": {"code": -32001, "message": "Task not found"},
             }
 
     except Exception as e:
@@ -839,14 +880,13 @@ async def handle_tasks_get_jsonrpc(params: Dict[str, Any], request: Request, req
         return {
             "jsonrpc": "2.0",
             "id": request_id,
-            "error": {
-                "code": -32603,
-                "message": f"Failed to get task: {str(e)}"
-            }
+            "error": {"code": -32603, "message": f"Failed to get task: {str(e)}"},
         }
 
 
-async def handle_tasks_list_jsonrpc(params: Dict[str, Any], request: Request, request_id: Any) -> Dict[str, Any]:
+async def handle_tasks_list_jsonrpc(
+    params: Dict[str, Any], request: Request, request_id: Any
+) -> Dict[str, Any]:
     """Handle tasks/list via JSON-RPC."""
     try:
         from a2a_acp.a2a.models import ListTasksParams, ListTasksResult
@@ -863,11 +903,15 @@ async def handle_tasks_list_jsonrpc(params: Dict[str, Any], request: Request, re
 
         # Filter by context ID if specified
         if list_params.contextId:
-            filtered_tasks = [t for t in filtered_tasks if t.contextId == list_params.contextId]
+            filtered_tasks = [
+                t for t in filtered_tasks if t.contextId == list_params.contextId
+            ]
 
         # Filter by status if specified
         if list_params.status:
-            filtered_tasks = [t for t in filtered_tasks if t.status.state == list_params.status]
+            filtered_tasks = [
+                t for t in filtered_tasks if t.status.state == list_params.status
+            ]
 
         # Apply pagination
         start_index = 0
@@ -892,7 +936,7 @@ async def handle_tasks_list_jsonrpc(params: Dict[str, Any], request: Request, re
             # Include history if requested
             if list_params.historyLength and list_params.historyLength > 0:
                 if task.history and len(task.history) > list_params.historyLength:
-                    task.history = task.history[-list_params.historyLength:]
+                    task.history = task.history[-list_params.historyLength :]
 
             # Include artifacts if requested
             if not list_params.includeArtifacts:
@@ -904,33 +948,32 @@ async def handle_tasks_list_jsonrpc(params: Dict[str, Any], request: Request, re
             tasks=result_tasks,
             totalSize=len(filtered_tasks),
             pageSize=page_size,
-            nextPageToken=next_page_token
+            nextPageToken=next_page_token,
         )
 
-        logger.info("Tasks listed successfully",
-                   extra={"total_tasks": len(filtered_tasks),
-                         "returned_tasks": len(result_tasks),
-                         "next_page_token": next_page_token})
+        logger.info(
+            "Tasks listed successfully",
+            extra={
+                "total_tasks": len(filtered_tasks),
+                "returned_tasks": len(result_tasks),
+                "next_page_token": next_page_token,
+            },
+        )
 
-        return {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": serialize_a2a(result)
-        }
+        return {"jsonrpc": "2.0", "id": request_id, "result": serialize_a2a(result)}
 
     except Exception as e:
         logger.exception("Error in tasks/list JSON-RPC handler")
         return {
             "jsonrpc": "2.0",
             "id": request_id,
-            "error": {
-                "code": -32603,
-                "message": f"Failed to list tasks: {str(e)}"
-            }
+            "error": {"code": -32603, "message": f"Failed to list tasks: {str(e)}"},
         }
 
 
-async def handle_tasks_cancel_jsonrpc(params: Dict[str, Any], request: Request, request_id: Any) -> Dict[str, Any]:
+async def handle_tasks_cancel_jsonrpc(
+    params: Dict[str, Any], request: Request, request_id: Any
+) -> Dict[str, Any]:
     """Handle tasks/cancel via JSON-RPC."""
     try:
         from a2a_acp.a2a.models import TaskIdParams
@@ -946,27 +989,21 @@ async def handle_tasks_cancel_jsonrpc(params: Dict[str, Any], request: Request, 
             # Get updated task status
             task = await task_manager.get_task(task_id_params.id)
             if task:
-                logger.info("Task cancelled successfully",
-                           extra={"task_id": task_id_params.id})
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": task
-                }
+                logger.info(
+                    "Task cancelled successfully", extra={"task_id": task_id_params.id}
+                )
+                return {"jsonrpc": "2.0", "id": request_id, "result": task}
             else:
                 # Task was cancelled and removed from active tasks
                 from a2a_acp.a2a.models import Task, TaskStatus, TaskState
+
                 cancelled_task = Task(
                     id=task_id_params.id,
                     contextId="unknown",
                     status=TaskStatus(state=TaskState.CANCELLED),
-                    metadata={"cancelled": True}
+                    metadata={"cancelled": True},
                 )
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": cancelled_task
-                }
+                return {"jsonrpc": "2.0", "id": request_id, "result": cancelled_task}
         else:
             # Task not found or cancellation failed
             return {
@@ -974,8 +1011,8 @@ async def handle_tasks_cancel_jsonrpc(params: Dict[str, Any], request: Request, 
                 "id": request_id,
                 "error": {
                     "code": -32001,
-                    "message": "Task not found or could not be cancelled"
-                }
+                    "message": "Task not found or could not be cancelled",
+                },
             }
 
     except Exception as e:
@@ -983,14 +1020,13 @@ async def handle_tasks_cancel_jsonrpc(params: Dict[str, Any], request: Request, 
         return {
             "jsonrpc": "2.0",
             "id": request_id,
-            "error": {
-                "code": -32603,
-                "message": f"Failed to cancel task: {str(e)}"
-            }
+            "error": {"code": -32603, "message": f"Failed to cancel task: {str(e)}"},
         }
 
 
-async def handle_message_stream_jsonrpc(params: Dict[str, Any], request: Request, request_id: Any) -> StreamingResponse:
+async def handle_message_stream_jsonrpc(
+    params: Dict[str, Any], request: Request, request_id: Any
+) -> StreamingResponse:
     """Handle message/stream via JSON-RPC with SSE streaming support."""
     try:
         # Parse MessageSendParams
@@ -1004,14 +1040,17 @@ async def handle_message_stream_jsonrpc(params: Dict[str, Any], request: Request
         agent_config = get_agent_config()
 
         # Create A2A context for this task
-        context_id = message_params.message.contextId or await context_manager.create_context("default-agent")
+        context_id = (
+            message_params.message.contextId
+            or await context_manager.create_context("default-agent")
+        )
 
         # Create A2A task
         task = await task_manager.create_task(
             context_id=context_id,
             agent_name="default-agent",
             initial_message=message_params.message,
-            metadata={"mode": "streaming"}
+            metadata={"mode": "streaming"},
         )
 
         stream_trace_id = f"{task.id}:{uuid4().hex[:8]}"
@@ -1052,8 +1091,8 @@ async def handle_message_stream_jsonrpc(params: Dict[str, Any], request: Request
                     "id": request_id,
                     "error": {
                         "code": -32603,
-                        "message": f"Failed to stream message: {str(e)}"
-                    }
+                        "message": f"Failed to stream message: {str(e)}",
+                    },
                 }
                 yield f"data: {json.dumps(error_response)}\n\n"
             finally:
@@ -1070,7 +1109,7 @@ async def handle_message_stream_jsonrpc(params: Dict[str, Any], request: Request
                 "Connection": "keep-alive",
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Cache-Control",
-            }
+            },
         )
 
     except Exception as e:
@@ -1081,10 +1120,7 @@ async def handle_message_stream_jsonrpc(params: Dict[str, Any], request: Request
             error_response = {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "error": {
-                    "code": -32603,
-                    "message": message
-                }
+                "error": {"code": -32603, "message": message},
             }
             yield f"data: {json.dumps(error_response)}\n\n"
 
@@ -1096,7 +1132,7 @@ async def handle_message_stream_jsonrpc(params: Dict[str, Any], request: Request
                 "Connection": "keep-alive",
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Cache-Control",
-            }
+            },
         )
 
 
@@ -1111,7 +1147,7 @@ def create_app() -> FastAPI:
         title="A2A-ACP Server",
         description="Native A2A protocol server bridging ZedACP agents to A2A clients",
         version="0.1.0",
-        lifespan=lifespan
+        lifespan=lifespan,
     )
 
     # Add CORS middleware for web clients
@@ -1132,8 +1168,7 @@ def create_app() -> FastAPI:
     # Comprehensive health check endpoint
     @app.get("/health")
     async def health_check(
-        request: Request,
-        authorization: Optional[str] = Header(default=None)
+        request: Request, authorization: Optional[str] = Header(default=None)
     ) -> dict[str, Any]:
         """Comprehensive health check including push notification system status."""
         require_authorization(authorization)
@@ -1144,9 +1179,9 @@ def create_app() -> FastAPI:
             "services": {
                 "database": "unknown",
                 "push_notifications": "unknown",
-                "streaming": "unknown"
+                "streaming": "unknown",
             },
-            "version": "1.0.0"
+            "version": "1.0.0",
         }
 
         try:
@@ -1166,7 +1201,9 @@ def create_app() -> FastAPI:
         except Exception as e:
             health_info["services"]["push_notifications"] = "unhealthy"
             health_info["status"] = "unhealthy"
-            logger.error("Push notification health check failed", extra={"error": str(e)})
+            logger.error(
+                "Push notification health check failed", extra={"error": str(e)}
+            )
 
         try:
             # Check streaming manager - basic availability check
@@ -1182,8 +1219,7 @@ def create_app() -> FastAPI:
     # Push notification metrics endpoint
     @app.get("/metrics/push-notifications")
     async def push_notification_metrics(
-        request: Request,
-        authorization: Optional[str] = Header(default=None)
+        request: Request, authorization: Optional[str] = Header(default=None)
     ) -> dict[str, Any]:
         """Get push notification system metrics."""
         require_authorization(authorization)
@@ -1196,33 +1232,43 @@ def create_app() -> FastAPI:
                 "total_deliveries": 0,
                 "successful_deliveries": 0,
                 "failed_deliveries": 0,
-                "success_rate": 0.0
+                "success_rate": 0.0,
             },
             "configuration_stats": {
                 "total_configs": 0,
                 "active_configs": 0,
-                "expired_configs": 0
+                "expired_configs": 0,
             },
             "performance_stats": {
                 "average_response_time": 0.0,
                 "requests_per_minute": 0.0,
-                "error_rate": 0.0
-            }
+                "error_rate": 0.0,
+            },
         }
 
         try:
             # Get basic delivery statistics from delivery history
             deliveries = await push_mgr.get_delivery_history()
             total_deliveries = len(deliveries)
-            successful_deliveries = len([d for d in deliveries if d.delivery_status == "delivered"])
-            failed_deliveries = len([d for d in deliveries if d.delivery_status == "failed"])
+            successful_deliveries = len(
+                [d for d in deliveries if d.delivery_status == "delivered"]
+            )
+            failed_deliveries = len(
+                [d for d in deliveries if d.delivery_status == "failed"]
+            )
 
-            metrics["delivery_stats"].update({
-                "total_deliveries": total_deliveries,
-                "successful_deliveries": successful_deliveries,
-                "failed_deliveries": failed_deliveries,
-                "success_rate": (successful_deliveries / total_deliveries * 100) if total_deliveries > 0 else 0.0
-            })
+            metrics["delivery_stats"].update(
+                {
+                    "total_deliveries": total_deliveries,
+                    "successful_deliveries": successful_deliveries,
+                    "failed_deliveries": failed_deliveries,
+                    "success_rate": (
+                        (successful_deliveries / total_deliveries * 100)
+                        if total_deliveries > 0
+                        else 0.0
+                    ),
+                }
+            )
 
             # Get configuration statistics by counting configs for all tasks
             # Current approach loads all deliveries and queries per task - acceptable for moderate usage
@@ -1241,21 +1287,31 @@ def create_app() -> FastAPI:
                 if recent_deliveries:
                     active_configs += len(configs)
 
-            metrics["configuration_stats"].update({
-                "total_configs": total_configs,
-                "active_configs": active_configs,
-                "expired_configs": total_configs - active_configs
-            })
+            metrics["configuration_stats"].update(
+                {
+                    "total_configs": total_configs,
+                    "active_configs": active_configs,
+                    "expired_configs": total_configs - active_configs,
+                }
+            )
 
             # Basic performance metrics
-            metrics["performance_stats"].update({
-                "average_response_time": 0.0,  # Would need timing data to calculate
-                "requests_per_minute": total_deliveries / 60.0,  # Rough estimate
-                "error_rate": (failed_deliveries / total_deliveries * 100) if total_deliveries > 0 else 0.0
-            })
+            metrics["performance_stats"].update(
+                {
+                    "average_response_time": 0.0,  # Would need timing data to calculate
+                    "requests_per_minute": total_deliveries / 60.0,  # Rough estimate
+                    "error_rate": (
+                        (failed_deliveries / total_deliveries * 100)
+                        if total_deliveries > 0
+                        else 0.0
+                    ),
+                }
+            )
 
         except Exception as e:
-            logger.error("Error retrieving push notification metrics", extra={"error": str(e)})
+            logger.error(
+                "Error retrieving push notification metrics", extra={"error": str(e)}
+            )
             metrics["error"] = str(e)
 
         return metrics
@@ -1263,8 +1319,7 @@ def create_app() -> FastAPI:
     # System metrics endpoint
     @app.get("/metrics/system")
     async def system_metrics(
-        request: Request,
-        authorization: Optional[str] = Header(default=None)
+        request: Request, authorization: Optional[str] = Header(default=None)
     ) -> dict[str, Any]:
         """Get system-wide metrics."""
         require_authorization(authorization)
@@ -1274,39 +1329,42 @@ def create_app() -> FastAPI:
         metrics = {
             "timestamp": datetime.now().isoformat(),
             "streaming_connections": {
-                "websocket": {
-                    "active": 0,
-                    "total": 0,
-                    "limit": 1000
-                },
-                "sse": {
-                    "active": 0,
-                    "total": 0,
-                    "limit": 500
-                }
+                "websocket": {"active": 0, "total": 0, "limit": 1000},
+                "sse": {"active": 0, "total": 0, "limit": 500},
             },
-            "background_tasks": {
-                "cleanup_running": False,
-                "last_cleanup": None
-            }
+            "background_tasks": {"cleanup_running": False, "last_cleanup": None},
         }
 
         try:
             # Get streaming connection stats
             connection_stats = await streaming_mgr.get_connection_stats()
-            metrics["streaming_connections"]["websocket"]["active"] = connection_stats.get("websocket_active", 0)
-            metrics["streaming_connections"]["websocket"]["total"] = connection_stats.get("websocket_total", 0)
-            metrics["streaming_connections"]["sse"]["active"] = connection_stats.get("sse_active", 0)
-            metrics["streaming_connections"]["sse"]["total"] = connection_stats.get("sse_total", 0)
+            metrics["streaming_connections"]["websocket"]["active"] = (
+                connection_stats.get("websocket_active", 0)
+            )
+            metrics["streaming_connections"]["websocket"]["total"] = (
+                connection_stats.get("websocket_total", 0)
+            )
+            metrics["streaming_connections"]["sse"]["active"] = connection_stats.get(
+                "sse_active", 0
+            )
+            metrics["streaming_connections"]["sse"]["total"] = connection_stats.get(
+                "sse_total", 0
+            )
 
             # Get connection limits from settings
             settings = settings_module.get_settings()
-            metrics["streaming_connections"]["websocket"]["limit"] = settings.push_notifications.max_websocket_connections
-            metrics["streaming_connections"]["sse"]["limit"] = settings.push_notifications.max_sse_connections
+            metrics["streaming_connections"]["websocket"]["limit"] = (
+                settings.push_notifications.max_websocket_connections
+            )
+            metrics["streaming_connections"]["sse"]["limit"] = (
+                settings.push_notifications.max_sse_connections
+            )
 
             # Check if cleanup task is running
             cleanup_task = request.app.state.get("cleanup_task")
-            metrics["background_tasks"]["cleanup_running"] = cleanup_task is not None and not cleanup_task.done()
+            metrics["background_tasks"]["cleanup_running"] = (
+                cleanup_task is not None and not cleanup_task.done()
+            )
 
         except Exception as e:
             logger.error("Error retrieving system metrics", extra={"error": str(e)})
@@ -1344,8 +1402,7 @@ def create_app() -> FastAPI:
     @app.post("/a2a/rpc")
     @app.post("/")
     async def a2a_jsonrpc(
-        request: Request,
-        authorization: Optional[str] = Header(default=None)
+        request: Request, authorization: Optional[str] = Header(default=None)
     ):
         """Handle A2A JSON-RPC 2.0 requests."""
         require_authorization(authorization)
@@ -1361,21 +1418,29 @@ def create_app() -> FastAPI:
                     "result": {
                         "message": "A2A-ACP JSON-RPC endpoint ready",
                         "supported_methods": [
-                            "message/send", "message/stream", "tasks/get",
-                            "tasks/list", "tasks/cancel", "agent/getAuthenticatedExtendedCard",
-                            "tasks/pushNotificationConfig/set", "tasks/pushNotificationConfig/get",
-                            "tasks/pushNotificationConfig/list", "tasks/pushNotificationConfig/delete"
+                            "message/send",
+                            "message/stream",
+                            "tasks/get",
+                            "tasks/list",
+                            "tasks/cancel",
+                            "agent/getAuthenticatedExtendedCard",
+                            "tasks/pushNotificationConfig/set",
+                            "tasks/pushNotificationConfig/get",
+                            "tasks/pushNotificationConfig/list",
+                            "tasks/pushNotificationConfig/delete",
                         ],
                         "http_endpoints": {
                             "streaming": "POST /a2a/message/stream (SSE format)",
-                            "non_streaming": "POST /a2a/message/send (JSON response)"
+                            "non_streaming": "POST /a2a/message/send (JSON response)",
                         },
-                        "notes": "JSON-RPC message/stream supports streaming via SSE format with proper A2A response objects."
-                    }
+                        "notes": "JSON-RPC message/stream supports streaming via SSE format with proper A2A response objects.",
+                    },
                 }
 
             body = json.loads(body_bytes)
-            logger.info("Received A2A JSON-RPC request", extra={"method": body.get("method")})
+            logger.info(
+                "Received A2A JSON-RPC request", extra={"method": body.get("method")}
+            )
 
             # Handle A2A methods directly
             method = body.get("method")
@@ -1403,7 +1468,7 @@ def create_app() -> FastAPI:
                 return {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "result": serialize_a2a(agent_card)
+                    "result": serialize_a2a(agent_card),
                 }
             elif method == "tasks/pushNotificationConfig/set":
                 # Handle push notification config set
@@ -1416,8 +1481,10 @@ def create_app() -> FastAPI:
                         task_id=config_params["taskId"],
                         url=config_params["url"],
                         token=config_params.get("token"),
-                        authentication_schemes=config_params.get("authenticationSchemes"),
-                        credentials=config_params.get("credentials")
+                        authentication_schemes=config_params.get(
+                            "authenticationSchemes"
+                        ),
+                        credentials=config_params.get("credentials"),
                     )
 
                     await push_mgr.store_config(config)
@@ -1425,7 +1492,7 @@ def create_app() -> FastAPI:
                     return {
                         "jsonrpc": "2.0",
                         "id": request_id,
-                        "result": {"success": True}
+                        "result": {"success": True},
                     }
 
                 except Exception as e:
@@ -1435,8 +1502,8 @@ def create_app() -> FastAPI:
                         "id": request_id,
                         "error": {
                             "code": -32603,
-                            "message": f"Failed to set push notification config: {str(e)}"
-                        }
+                            "message": f"Failed to set push notification config: {str(e)}",
+                        },
                     }
 
             elif method == "tasks/pushNotificationConfig/get":
@@ -1456,8 +1523,8 @@ def create_app() -> FastAPI:
                             "id": request_id,
                             "error": {
                                 "code": -32602,
-                                "message": "Push notification config not found"
-                            }
+                                "message": "Push notification config not found",
+                            },
                         }
 
                 return handle_push_notification_config_method(
@@ -1465,7 +1532,7 @@ def create_app() -> FastAPI:
                     params,
                     request_id,
                     handle_get,
-                    ["taskId", "id"]
+                    ["taskId", "id"],
                 )
 
             elif method == "tasks/pushNotificationConfig/list":
@@ -1479,8 +1546,8 @@ def create_app() -> FastAPI:
                         "id": request_id,
                         "error": {
                             "code": -32602,
-                            "message": "Missing required parameter: taskId"
-                        }
+                            "message": "Missing required parameter: taskId",
+                        },
                     }
 
                 try:
@@ -1489,9 +1556,7 @@ def create_app() -> FastAPI:
                     return {
                         "jsonrpc": "2.0",
                         "id": request_id,
-                        "result": {
-                            "configs": [config.to_dict() for config in configs]
-                        }
+                        "result": {"configs": [config.to_dict() for config in configs]},
                     }
 
                 except Exception as e:
@@ -1501,8 +1566,8 @@ def create_app() -> FastAPI:
                         "id": request_id,
                         "error": {
                             "code": -32603,
-                            "message": f"Failed to list push notification configs: {str(e)}"
-                        }
+                            "message": f"Failed to list push notification configs: {str(e)}",
+                        },
                     }
 
             elif method == "tasks/pushNotificationConfig/delete":
@@ -1520,7 +1585,7 @@ def create_app() -> FastAPI:
                     params,
                     request_id,
                     handle_delete,
-                    ["taskId", "id"]
+                    ["taskId", "id"],
                 )
 
             else:
@@ -1531,12 +1596,14 @@ def create_app() -> FastAPI:
                     "id": request_id,
                     "error": {
                         "code": -32601,
-                        "message": f"Method '{method}' not implemented in streamlined version"
-                    }
+                        "message": f"Method '{method}' not implemented in streamlined version",
+                    },
                 }
 
         except json.JSONDecodeError as e:
-            logger.warning("Invalid JSON in A2A JSON-RPC request", extra={"error": str(e)})
+            logger.warning(
+                "Invalid JSON in A2A JSON-RPC request", extra={"error": str(e)}
+            )
             raise HTTPException(status_code=400, detail="Invalid JSON payload")
         except Exception as e:
             logger.exception("Error handling A2A JSON-RPC request")
@@ -1550,7 +1617,7 @@ def create_app() -> FastAPI:
         task_manager: A2ATaskManager = Depends(task_manager_dependency),
         context_manager: A2AContextManager = Depends(context_manager_dependency),
         translator: A2ATranslator = Depends(a2a_translator_dependency),
-        authorization: Optional[str] = Header(default=None)
+        authorization: Optional[str] = Header(default=None),
     ):
         """Send an A2A message and return response."""
         require_authorization(authorization)
@@ -1559,14 +1626,25 @@ def create_app() -> FastAPI:
         agent_config = get_agent_config()
 
         # Handle development-tool confirmations before spinning up new tasks
-        confirmation_data = (params.message.metadata or {}).get("development-tool", {}).get("tool_call_confirmation")
+        confirmation_data = (
+            (params.message.metadata or {})
+            .get("development-tool", {})
+            .get("tool_call_confirmation")
+        )
         if confirmation_data:
             tool_call_id = confirmation_data.get("tool_call_id")
             if not tool_call_id:
-                raise HTTPException(status_code=400, detail="Missing tool_call_id in confirmation payload")
-            matching_task_id = await task_manager.get_task_id_for_tool_call(tool_call_id)
+                raise HTTPException(
+                    status_code=400,
+                    detail="Missing tool_call_id in confirmation payload",
+                )
+            matching_task_id = await task_manager.get_task_id_for_tool_call(
+                tool_call_id
+            )
             if not matching_task_id:
-                raise HTTPException(status_code=404, detail=f"Tool call '{tool_call_id}' not found")
+                raise HTTPException(
+                    status_code=404, detail=f"Tool call '{tool_call_id}' not found"
+                )
 
             continued_task = await task_manager.provide_input_and_continue(
                 matching_task_id,
@@ -1574,12 +1652,14 @@ def create_app() -> FastAPI:
                 agent_config["command"],
                 api_key=agent_config["api_key"],
                 working_directory=os.getcwd(),
-                mcp_servers=[]
+                mcp_servers=[],
             )
             return {"task": continued_task}
 
         # Create A2A context for this task
-        context_id = params.message.contextId or await context_manager.create_context("default-agent")
+        context_id = params.message.contextId or await context_manager.create_context(
+            "default-agent"
+        )
 
         # Create A2A task
         metadata_payload = {"mode": "sync"}
@@ -1590,17 +1670,21 @@ def create_app() -> FastAPI:
             context_id=context_id,
             agent_name="default-agent",
             initial_message=params.message,
-            metadata=metadata_payload
+            metadata=metadata_payload,
         )
         _strip_development_tool_metadata(task)
         await get_database(request).store_task(task)
 
         try:
-            async with ZedAgentConnection(agent_config["command"], api_key=agent_config["api_key"]) as connection:
+            async with ZedAgentConnection(
+                agent_config["command"], api_key=agent_config["api_key"]
+            ) as connection:
                 await connection.initialize()
 
                 # Create or load ZedACP session if context is provided
-                session_id = await connection.start_session(cwd=os.getcwd(), mcp_servers=[])
+                session_id = await connection.start_session(
+                    cwd=os.getcwd(), mcp_servers=[]
+                )
 
                 # Execute the task
                 result = await task_manager.execute_task(
@@ -1608,7 +1692,7 @@ def create_app() -> FastAPI:
                     agent_command=agent_config["command"],
                     api_key=agent_config["api_key"],
                     working_directory=os.getcwd(),
-                    mcp_servers=[]
+                    mcp_servers=[],
                 )
                 _strip_development_tool_metadata(result)
 
@@ -1616,8 +1700,10 @@ def create_app() -> FastAPI:
                 zedacp_result = {}  # The task execution result would need to be extracted from the Task object
 
                 # Convert ZedACP response back to A2A format
-                from a2a_acp.a2a.models import TaskStatus, TaskState
-                a2a_response = translator.zedacp_to_a2a_message(zedacp_result, task.id, task.id)
+
+                a2a_response = translator.zedacp_to_a2a_message(
+                    zedacp_result, task.id, task.id
+                )
 
                 # Update task with response
                 if task.history is not None:
@@ -1630,21 +1716,27 @@ def create_app() -> FastAPI:
                 return {"task": task}
 
         except AgentProcessError as exc:
-            logger.exception("Agent process failed during A2A message", extra={"task_id": task.id})
+            logger.exception(
+                "Agent process failed during A2A message", extra={"task_id": task.id}
+            )
             # Mark task as failed
             await task_manager.cancel_task(task.id)
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+            )
 
     @app.get("/a2a/commands/get")
     async def a2a_commands_get(
-        authorization: Optional[str] = Header(default=None)
+        authorization: Optional[str] = Header(default=None),
     ) -> GetAllSlashCommandsResponse:
         """Get all available slash commands based on tool configuration."""
         require_authorization(authorization)
 
         settings = settings_module.get_settings()
         if not settings.development_tool_extension_enabled:
-            raise HTTPException(status_code=404, detail="Development tool extension not enabled")
+            raise HTTPException(
+                status_code=404, detail="Development tool extension not enabled"
+            )
 
         # Load available tools
         tool_manager = get_tool_configuration_manager()
@@ -1659,14 +1751,12 @@ def create_app() -> FastAPI:
                     name=param.name,
                     type=param.type,
                     description=param.description or "",
-                    required=getattr(param, 'required', False)
+                    required=getattr(param, "required", False),
                 )
                 arguments.append(arg)
 
             slash_command = SlashCommand(
-                name=tool.name,
-                description=tool.description,
-                arguments=arguments
+                name=tool.name, description=tool.description, arguments=arguments
             )
             slash_commands.append(slash_command)
 
@@ -1678,14 +1768,16 @@ def create_app() -> FastAPI:
         request: ExecuteSlashCommandRequest,
         task_manager: A2ATaskManager = Depends(task_manager_dependency),
         context_manager: A2AContextManager = Depends(context_manager_dependency),
-        authorization: Optional[str] = Header(default=None)
+        authorization: Optional[str] = Header(default=None),
     ) -> ExecuteSlashCommandResponse:
         """Execute a slash command by creating a task."""
         require_authorization(authorization)
 
         settings = settings_module.get_settings()
         if not settings.development_tool_extension_enabled:
-            raise HTTPException(status_code=404, detail="Development tool extension not enabled")
+            raise HTTPException(
+                status_code=404, detail="Development tool extension not enabled"
+            )
 
         # Create context
         context_id = await context_manager.create_context("slash-command")
@@ -1725,11 +1817,12 @@ def create_app() -> FastAPI:
 
         # Create initial message from the slash command request
         from a2a_acp.a2a.models import Message, TextPart, create_message_id
+
         initial_message = Message(
             role="user",
             parts=[TextPart(text=f"/{request.command} {request.arguments}")],
             messageId=create_message_id(),
-            metadata={"slash_command": request.to_dict()}
+            metadata={"slash_command": request.to_dict()},
         )
 
         # Create task
@@ -1738,16 +1831,21 @@ def create_app() -> FastAPI:
                 context_id=context_id,
                 agent_name="default-agent",
                 initial_message=initial_message,
-                metadata={"type": "slash_command", "command": request.command}
+                metadata={"type": "slash_command", "command": request.command},
             )
-        except Exception as exc:
-            logger.exception("Failed to create slash command task", extra={"command": request.command})
-            raise HTTPException(status_code=500, detail="Internal error while creating slash command task")
+        except Exception:
+            logger.exception(
+                "Failed to create slash command task",
+                extra={"command": request.command},
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Internal error while creating slash command task",
+            )
 
         # Return response with execution_id = task_id
         response = ExecuteSlashCommandResponse(
-            execution_id=task.id,
-            status=CommandExecutionStatus.EXECUTING
+            execution_id=task.id, status=CommandExecutionStatus.EXECUTING
         )
 
         # The task will be streamed via existing mechanisms
@@ -1758,7 +1856,7 @@ def create_app() -> FastAPI:
         params: MessageSendParams,
         task_manager: A2ATaskManager = Depends(task_manager_dependency),
         context_manager: A2AContextManager = Depends(context_manager_dependency),
-        authorization: Optional[str] = Header(default=None)
+        authorization: Optional[str] = Header(default=None),
     ):
         """Stream an A2A message conversation using Server-Sent Events."""
         require_authorization(authorization)
@@ -1767,14 +1865,16 @@ def create_app() -> FastAPI:
         agent_config = get_agent_config()
 
         # Create A2A context for this task
-        context_id = params.message.contextId or await context_manager.create_context("default-agent")
+        context_id = params.message.contextId or await context_manager.create_context(
+            "default-agent"
+        )
 
         # Create A2A task
         task = await task_manager.create_task(
             context_id=context_id,
             agent_name="default-agent",
             initial_message=params.message,
-            metadata={"mode": "streaming"}
+            metadata={"mode": "streaming"},
         )
 
         stream_trace_id = f"{task.id}:{uuid4().hex[:8]}"
@@ -1814,8 +1914,8 @@ def create_app() -> FastAPI:
                     "id": None,
                     "error": {
                         "code": -32603,
-                        "message": f"Failed to stream message: {str(e)}"
-                    }
+                        "message": f"Failed to stream message: {str(e)}",
+                    },
                 }
                 yield f"data: {json.dumps(error_event)}\n\n"
             finally:
@@ -1832,7 +1932,7 @@ def create_app() -> FastAPI:
                 "Connection": "keep-alive",
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Cache-Control",
-            }
+            },
         )
 
     @app.get("/a2a/tasks/{task_id}/governor/history")
@@ -1856,7 +1956,7 @@ def create_app() -> FastAPI:
     async def websocket_notifications(
         websocket: WebSocket,
         task_filter: Optional[str] = None,  # Comma-separated task IDs
-        authorization: Optional[str] = Header(default=None)
+        authorization: Optional[str] = Header(default=None),
     ):
         """WebSocket endpoint for real-time task notifications."""
         require_authorization(authorization)
@@ -1870,7 +1970,9 @@ def create_app() -> FastAPI:
             task_ids = [tid.strip() for tid in task_filter.split(",")]
 
         # Register connection
-        connection_id = await streaming_mgr.register_websocket_connection(websocket, task_ids)
+        connection_id = await streaming_mgr.register_websocket_connection(
+            websocket, task_ids
+        )
 
         try:
             # Handle incoming messages
@@ -1878,7 +1980,7 @@ def create_app() -> FastAPI:
         except Exception as e:
             logger.error(
                 "WebSocket error",
-                extra={"connection_id": connection_id, "error": str(e)}
+                extra={"connection_id": connection_id, "error": str(e)},
             )
         finally:
             await streaming_mgr.unregister_websocket_connection(connection_id)
@@ -1887,7 +1989,7 @@ def create_app() -> FastAPI:
     async def sse_notifications(
         request: Request,
         task_filter: Optional[str] = None,  # Comma-separated task IDs
-        authorization: Optional[str] = Header(default=None)
+        authorization: Optional[str] = Header(default=None),
     ):
         """Server-Sent Events endpoint for real-time task notifications."""
         require_authorization(authorization)
@@ -1900,15 +2002,16 @@ def create_app() -> FastAPI:
             task_ids = [tid.strip() for tid in task_filter.split(",")]
 
         # Register SSE connection
-        connection_id, connection = await streaming_mgr.register_sse_connection(task_ids)
+        connection_id, connection = await streaming_mgr.register_sse_connection(
+            task_ids
+        )
 
         # Return SSE streaming response
         return await streaming_mgr.create_sse_response(connection_id, connection)
 
     @app.get("/streaming/stats")
     async def streaming_stats(
-        request: Request,
-        authorization: Optional[str] = Header(default=None)
+        request: Request, authorization: Optional[str] = Header(default=None)
     ):
         """Get statistics about current streaming connections."""
         require_authorization(authorization)
@@ -1918,8 +2021,7 @@ def create_app() -> FastAPI:
 
     @app.post("/streaming/cleanup")
     async def cleanup_streaming_connections(
-        request: Request,
-        authorization: Optional[str] = Header(default=None)
+        request: Request, authorization: Optional[str] = Header(default=None)
     ):
         """Clean up stale streaming connections."""
         require_authorization(authorization)
@@ -1930,7 +2032,7 @@ def create_app() -> FastAPI:
         return {
             "success": True,
             "cleaned_connections": cleaned_count,
-            "message": f"Cleaned up {cleaned_count} stale connections"
+            "message": f"Cleaned up {cleaned_count} stale connections",
         }
 
     logger.info("A2A-ACP application created successfully")
@@ -1943,9 +2045,4 @@ def run_server(host: str = "localhost", port: int = 8000) -> None:
     import uvicorn
 
     app = create_app()
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-        log_level="info"
-    )
+    uvicorn.run(app, host=host, port=port, log_level="info")

@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Any, Union
 
 class DeliveryStatus(Enum):
     """Enumeration of possible notification delivery statuses."""
+
     PENDING = "pending"
     DELIVERED = "delivered"
     FAILED = "failed"
@@ -22,6 +23,7 @@ class DeliveryStatus(Enum):
 
 class EventType(Enum):
     """Enumeration of possible notification event types."""
+
     TASK_STATUS_CHANGE = "task_status_change"
     TASK_MESSAGE = "task_message"
     TASK_ARTIFACT = "task_artifact"
@@ -46,7 +48,7 @@ class TaskPushNotificationConfig:
     enabled_events: Optional[List[str]] = None
     disabled_events: Optional[List[str]] = None
     quiet_hours_start: Optional[str] = None  # HH:MM format
-    quiet_hours_end: Optional[str] = None    # HH:MM format
+    quiet_hours_end: Optional[str] = None  # HH:MM format
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -54,18 +56,18 @@ class TaskPushNotificationConfig:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
         if self.created_at:
-            data['created_at'] = self.created_at.isoformat()
+            data["created_at"] = self.created_at.isoformat()
         if self.updated_at:
-            data['updated_at'] = self.updated_at.isoformat()
+            data["updated_at"] = self.updated_at.isoformat()
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'TaskPushNotificationConfig':
+    def from_dict(cls, data: Dict[str, Any]) -> "TaskPushNotificationConfig":
         """Create from dictionary."""
-        if 'created_at' in data and data['created_at']:
-            data['created_at'] = datetime.fromisoformat(data['created_at'])
-        if 'updated_at' in data and data['updated_at']:
-            data['updated_at'] = datetime.fromisoformat(data['updated_at'])
+        if "created_at" in data and data["created_at"]:
+            data["created_at"] = datetime.fromisoformat(data["created_at"])
+        if "updated_at" in data and data["updated_at"]:
+            data["updated_at"] = datetime.fromisoformat(data["updated_at"])
         return cls(**data)
 
 
@@ -87,18 +89,18 @@ class NotificationDelivery:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
         if self.attempted_at:
-            data['attempted_at'] = self.attempted_at.isoformat()
+            data["attempted_at"] = self.attempted_at.isoformat()
         if self.delivered_at:
-            data['delivered_at'] = self.delivered_at.isoformat()
+            data["delivered_at"] = self.delivered_at.isoformat()
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'NotificationDelivery':
+    def from_dict(cls, data: Dict[str, Any]) -> "NotificationDelivery":
         """Create from dictionary."""
-        if 'attempted_at' in data and data['attempted_at']:
-            data['attempted_at'] = datetime.fromisoformat(data['attempted_at'])
-        if 'delivered_at' in data and data['delivered_at']:
-            data['delivered_at'] = datetime.fromisoformat(data['delivered_at'])
+        if "attempted_at" in data and data["attempted_at"]:
+            data["attempted_at"] = datetime.fromisoformat(data["attempted_at"])
+        if "delivered_at" in data and data["delivered_at"]:
+            data["delivered_at"] = datetime.fromisoformat(data["delivered_at"])
         return cls(**data)
 
 
@@ -114,7 +116,7 @@ class NotificationPayload:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
-        data['timestamp'] = self.timestamp.isoformat()
+        data["timestamp"] = self.timestamp.isoformat()
         return data
 
 
@@ -128,11 +130,13 @@ class TaskStatusChangePayload(NotificationPayload):
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = super().to_dict()
-        data.update({
-            'event_type': 'task_status_change',
-            'old_state': self.old_state,
-            'new_state': self.new_state
-        })
+        data.update(
+            {
+                "event_type": "task_status_change",
+                "old_state": self.old_state,
+                "new_state": self.new_state,
+            }
+        )
         return data
 
 
@@ -146,11 +150,13 @@ class TaskMessagePayload(NotificationPayload):
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = super().to_dict()
-        data.update({
-            'event_type': 'task_message',
-            'message_role': self.message_role,
-            'message_content': self.message_content
-        })
+        data.update(
+            {
+                "event_type": "task_message",
+                "message_role": self.message_role,
+                "message_content": self.message_content,
+            }
+        )
         return data
 
 
@@ -165,12 +171,14 @@ class TaskArtifactPayload(NotificationPayload):
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = super().to_dict()
-        data.update({
-            'event_type': 'task_artifact',
-            'artifact_type': self.artifact_type,
-            'artifact_name': self.artifact_name,
-            'artifact_size': self.artifact_size
-        })
+        data.update(
+            {
+                "event_type": "task_artifact",
+                "artifact_type": self.artifact_type,
+                "artifact_name": self.artifact_name,
+                "artifact_size": self.artifact_size,
+            }
+        )
         return data
 
 
@@ -182,13 +190,15 @@ class NotificationFilter:
     disabled_events: Optional[List[str]] = field(default_factory=list)
     minimum_priority: Optional[str] = None
     quiet_hours_start: Optional[str] = None  # HH:MM format
-    quiet_hours_end: Optional[str] = None    # HH:MM format
+    quiet_hours_end: Optional[str] = None  # HH:MM format
 
     def __post_init__(self):
         if self.disabled_events is None:
             self.disabled_events = []
 
-    def should_send_notification(self, event_type: str, current_hour: Optional[int] = None) -> bool:
+    def should_send_notification(
+        self, event_type: str, current_hour: Optional[int] = None
+    ) -> bool:
         """Check if notification should be sent based on filter rules."""
         # Check if event is explicitly disabled
         if self.disabled_events and event_type in self.disabled_events:
@@ -200,8 +210,8 @@ class NotificationFilter:
 
         # Check quiet hours
         if current_hour is not None and self.quiet_hours_start and self.quiet_hours_end:
-            quiet_start = int(self.quiet_hours_start.split(':')[0])
-            quiet_end = int(self.quiet_hours_end.split(':')[0])
+            quiet_start = int(self.quiet_hours_start.split(":")[0])
+            quiet_end = int(self.quiet_hours_end.split(":")[0])
 
             if quiet_start <= quiet_end:
                 # Same day quiet hours (e.g., 22:00 to 08:00)
@@ -242,26 +252,33 @@ class NotificationAnalytics:
         # Track events by type
         if self.events_by_type is None:
             self.events_by_type = {}
-        self.events_by_type[delivery.event_type] = self.events_by_type.get(delivery.event_type, 0) + 1
+        self.events_by_type[delivery.event_type] = (
+            self.events_by_type.get(delivery.event_type, 0) + 1
+        )
 
         # Update success rate
         if self.total_sent > 0:
             self.success_rate = (self.total_delivered / self.total_sent) * 100.0
 
+
 def to_dict(self) -> Dict[str, Any]:
     """Convert to dictionary for JSON serialization."""
     return asdict(self)
 
+
 class ToolCallStatus(Enum):
     """Enumeration of tool call statuses."""
+
     PENDING = "pending"
     EXECUTING = "executing"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
 
+
 class DevelopmentToolEventKind(Enum):
     """Enumeration of development tool event kinds."""
+
     UNSPECIFIED = "unspecified"
     TOOL_CALL_CONFIRMATION = "tool_call_confirmation"
     TOOL_CALL_UPDATE = "tool_call_update"
@@ -270,16 +287,20 @@ class DevelopmentToolEventKind(Enum):
     THOUGHT = "thought"
     GOVERNANCE_EVENT = "governance_event"
 
+
 class CommandExecutionStatus(Enum):
     """Enumeration of command execution statuses."""
+
     PENDING = "pending"
     EXECUTING = "executing"
     COMPLETED = "completed"
     FAILED = "failed"
 
+
 @dataclass
 class ConfirmationOption:
     """An option for user confirmation in a confirmation request."""
+
     id: str
     name: str
     description: Optional[str] = None
@@ -289,13 +310,15 @@ class ConfirmationOption:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ConfirmationOption':
+    def from_dict(cls, data: Dict[str, Any]) -> "ConfirmationOption":
         """Create from dictionary."""
         return cls(**data)
+
 
 @dataclass
 class GenericDetails:
     """Generic details for a confirmation request or tool output."""
+
     description: str
 
     def to_dict(self) -> Dict[str, Any]:
@@ -303,13 +326,15 @@ class GenericDetails:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'GenericDetails':
+    def from_dict(cls, data: Dict[str, Any]) -> "GenericDetails":
         """Create from dictionary."""
         return cls(**data)
+
 
 @dataclass
 class FileDiff:
     """Details for a file diff in confirmation or output."""
+
     path: str
     old_content: Optional[str] = None
     new_content: Optional[str] = None
@@ -319,13 +344,15 @@ class FileDiff:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'FileDiff':
+    def from_dict(cls, data: Dict[str, Any]) -> "FileDiff":
         """Create from dictionary."""
         return cls(**data)
+
 
 @dataclass
 class McpDetails:
     """Details for an MCP tool in confirmation or output."""
+
     tool_name: str
     server_id: Optional[str] = None
     description: Optional[str] = None
@@ -335,13 +362,15 @@ class McpDetails:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'McpDetails':
+    def from_dict(cls, data: Dict[str, Any]) -> "McpDetails":
         """Create from dictionary."""
         return cls(**data)
+
 
 @dataclass
 class ExecuteDetails:
     """Details for an execute operation in confirmation or output."""
+
     stdout: str = ""
     stderr: Optional[str] = None
     exit_code: Optional[int] = None
@@ -351,13 +380,15 @@ class ExecuteDetails:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ExecuteDetails':
+    def from_dict(cls, data: Dict[str, Any]) -> "ExecuteDetails":
         """Create from dictionary."""
         return cls(**data)
+
 
 @dataclass
 class ToolOutput:
     """Output from a successful tool call."""
+
     content: str
     details: Optional[Union[ExecuteDetails, FileDiff, McpDetails]] = None
 
@@ -365,31 +396,33 @@ class ToolOutput:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
         if self.details:
-            data['details'] = self.details.to_dict()
+            data["details"] = self.details.to_dict()
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ToolOutput':
+    def from_dict(cls, data: Dict[str, Any]) -> "ToolOutput":
         """Create from dictionary, handling union for details."""
         details = None
-        details_data = data.get('details')
+        details_data = data.get("details")
         if details_data:
             if isinstance(details_data, dict):
-                if 'path' in details_data:
+                if "path" in details_data:
                     details = FileDiff.from_dict(details_data)
-                elif 'stdout' in details_data or 'exit_code' in details_data:
+                elif "stdout" in details_data or "exit_code" in details_data:
                     details = ExecuteDetails.from_dict(details_data)
-                elif 'tool_name' in details_data:
+                elif "tool_name" in details_data:
                     details = McpDetails.from_dict(details_data)
                 else:
                     details = None
             else:
                 details = details_data
-        return cls(content=data['content'], details=details)
+        return cls(content=data["content"], details=details)
+
 
 @dataclass
 class ErrorDetails:
     """Error details from a failed tool call."""
+
     message: str
     code: Optional[str] = None
     details: Optional[Dict[str, Any]] = None
@@ -398,23 +431,29 @@ class ErrorDetails:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
         if self.details:
-            data['details'] = json.dumps(self.details) if isinstance(self.details, dict) else self.details
+            data["details"] = (
+                json.dumps(self.details)
+                if isinstance(self.details, dict)
+                else self.details
+            )
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ErrorDetails':
+    def from_dict(cls, data: Dict[str, Any]) -> "ErrorDetails":
         """Create from dictionary."""
-        details = data.get('details')
+        details = data.get("details")
         if isinstance(details, str):
             try:
                 details = json.loads(details)
             except json.JSONDecodeError:
                 details = {}
-        return cls(message=data['message'], code=data.get('code'), details=details)
+        return cls(message=data["message"], code=data.get("code"), details=details)
+
 
 @dataclass
 class ConfirmationRequest:
     """Request for user confirmation on a tool call."""
+
     options: List[ConfirmationOption]
     details: Union[GenericDetails, ExecuteDetails, FileDiff, McpDetails]
     title: Optional[str] = None
@@ -422,35 +461,37 @@ class ConfirmationRequest:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
-        data['options'] = [option.to_dict() for option in self.options]
-        data['details'] = self.details.to_dict()
+        data["options"] = [option.to_dict() for option in self.options]
+        data["details"] = self.details.to_dict()
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ConfirmationRequest':
+    def from_dict(cls, data: Dict[str, Any]) -> "ConfirmationRequest":
         """Create from dictionary, handling union for details."""
-        options = [ConfirmationOption.from_dict(opt) for opt in data['options']]
-        details_data = data.get('details', {})
+        options = [ConfirmationOption.from_dict(opt) for opt in data["options"]]
+        details_data = data.get("details", {})
         details = None
         if isinstance(details_data, dict):
-            if 'description' in details_data:
+            if "description" in details_data:
                 details = GenericDetails.from_dict(details_data)
-            elif 'path' in details_data:
+            elif "path" in details_data:
                 details = FileDiff.from_dict(details_data)
-            elif 'stdout' in details_data or 'exit_code' in details_data:
+            elif "stdout" in details_data or "exit_code" in details_data:
                 details = ExecuteDetails.from_dict(details_data)
-            elif 'tool_name' in details_data:
+            elif "tool_name" in details_data:
                 details = McpDetails.from_dict(details_data)
             else:
-                details = GenericDetails.from_dict({'description': str(details_data)})
+                details = GenericDetails.from_dict({"description": str(details_data)})
         else:
             details = details_data
-        other = {k: v for k, v in data.items() if k not in ['options', 'details']}
+        other = {k: v for k, v in data.items() if k not in ["options", "details"]}
         return cls(options=options, details=details, **other)
+
 
 @dataclass
 class ToolCall:
     """A tool call in the development tool extension."""
+
     tool_call_id: str
     status: ToolCallStatus
     tool_name: str
@@ -462,30 +503,32 @@ class ToolCall:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
         if isinstance(self.status, ToolCallStatus):
-            data['status'] = self.status.value
+            data["status"] = self.status.value
         if self.confirmation_request:
-            data['confirmation_request'] = self.confirmation_request.to_dict()
+            data["confirmation_request"] = self.confirmation_request.to_dict()
         if self.result:
-            data['result'] = self.result.to_dict()
+            data["result"] = self.result.to_dict()
         # Handle datetimes if added later
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ToolCall':
+    def from_dict(cls, data: Dict[str, Any]) -> "ToolCall":
         """Create from dictionary, handling nested objects and unions."""
         params = data.copy()
-        if 'status' in params and isinstance(params['status'], str):
-            params['status'] = ToolCallStatus(params['status'])
+        if "status" in params and isinstance(params["status"], str):
+            params["status"] = ToolCallStatus(params["status"])
         confirmation_request = None
-        if 'confirmation_request' in data and data['confirmation_request'] is not None:
-            confirmation_request = ConfirmationRequest.from_dict(data['confirmation_request'])
+        if "confirmation_request" in data and data["confirmation_request"] is not None:
+            confirmation_request = ConfirmationRequest.from_dict(
+                data["confirmation_request"]
+            )
         result = None
-        if 'result' in data and data['result'] is not None:
-            res_data = data['result']
+        if "result" in data and data["result"] is not None:
+            res_data = data["result"]
             if isinstance(res_data, dict):
-                if 'content' in res_data:
+                if "content" in res_data:
                     result = ToolOutput.from_dict(res_data)
-                elif 'message' in res_data:
+                elif "message" in res_data:
                     result = ErrorDetails.from_dict(res_data)
                 else:
                     result = None
@@ -493,17 +536,19 @@ class ToolCall:
                 result = res_data
         # input_parameters remains dict
         return cls(
-            tool_call_id=data.get('tool_call_id'),
-            status=params['status'],
-            tool_name=data.get('tool_name'),
-            input_parameters=data.get('input_parameters', {}),
+            tool_call_id=data.get("tool_call_id"),
+            status=params["status"],
+            tool_name=data.get("tool_name"),
+            input_parameters=data.get("input_parameters", {}),
             confirmation_request=confirmation_request,
-            result=result
+            result=result,
         )
+
 
 @dataclass
 class AgentThought:
     """An agent's thought for transparency."""
+
     content: str
     timestamp: Optional[datetime] = None
 
@@ -511,19 +556,21 @@ class AgentThought:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
         if self.timestamp:
-            data['timestamp'] = self.timestamp.isoformat()
+            data["timestamp"] = self.timestamp.isoformat()
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'AgentThought':
+    def from_dict(cls, data: Dict[str, Any]) -> "AgentThought":
         """Create from dictionary."""
-        if 'timestamp' in data and data['timestamp']:
-            data['timestamp'] = datetime.fromisoformat(data['timestamp'])
+        if "timestamp" in data and data["timestamp"]:
+            data["timestamp"] = datetime.fromisoformat(data["timestamp"])
         return cls(**data)
+
 
 @dataclass
 class DevelopmentToolEvent:
     """An event in the development tool extension."""
+
     kind: DevelopmentToolEventKind
     model: Optional[str] = None
     user_tier: Optional[str] = None
@@ -536,19 +583,21 @@ class DevelopmentToolEvent:
         if isinstance(self.kind, DevelopmentToolEventKind):
             data_dict["kind"] = self.kind.value
         if self.data:
-            data_dict['data'] = self.data  # Assume already serializable
+            data_dict["data"] = self.data  # Assume already serializable
         return data_dict
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'DevelopmentToolEvent':
+    def from_dict(cls, data: Dict[str, Any]) -> "DevelopmentToolEvent":
         """Create from dictionary."""
-        if 'kind' in data and isinstance(data['kind'], str):
-            data['kind'] = DevelopmentToolEventKind(data['kind'])
+        if "kind" in data and isinstance(data["kind"], str):
+            data["kind"] = DevelopmentToolEventKind(data["kind"])
         return cls(**data)
+
 
 @dataclass
 class ToolCallConfirmation:
     """Confirmation response for a tool call."""
+
     tool_call_id: str
     selected_option_id: str
 
@@ -557,13 +606,15 @@ class ToolCallConfirmation:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ToolCallConfirmation':
+    def from_dict(cls, data: Dict[str, Any]) -> "ToolCallConfirmation":
         """Create from dictionary."""
         return cls(**data)
+
 
 @dataclass
 class AgentSettings:
     """Settings for the agent in the development tool extension."""
+
     workspace_path: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -571,13 +622,15 @@ class AgentSettings:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'AgentSettings':
+    def from_dict(cls, data: Dict[str, Any]) -> "AgentSettings":
         """Create from dictionary."""
         return cls(**data)
+
 
 @dataclass
 class SlashCommandArgument:
     """An argument for a slash command."""
+
     name: str
     type: str  # e.g., "string", "number"
     description: str
@@ -588,13 +641,15 @@ class SlashCommandArgument:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SlashCommandArgument':
+    def from_dict(cls, data: Dict[str, Any]) -> "SlashCommandArgument":
         """Create from dictionary."""
         return cls(**data)
+
 
 @dataclass
 class SlashCommand:
     """A slash command definition."""
+
     name: str
     description: str
     arguments: List[SlashCommandArgument] = field(default_factory=list)
@@ -602,19 +657,23 @@ class SlashCommand:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
-        data['arguments'] = [arg.to_dict() for arg in self.arguments]
+        data["arguments"] = [arg.to_dict() for arg in self.arguments]
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SlashCommand':
+    def from_dict(cls, data: Dict[str, Any]) -> "SlashCommand":
         """Create from dictionary."""
-        arguments = [SlashCommandArgument.from_dict(arg) for arg in data.get('arguments', [])]
-        other = {k: v for k, v in data.items() if k != 'arguments'}
+        arguments = [
+            SlashCommandArgument.from_dict(arg) for arg in data.get("arguments", [])
+        ]
+        other = {k: v for k, v in data.items() if k != "arguments"}
         return cls(arguments=arguments, **other)
+
 
 @dataclass
 class ExecuteSlashCommandRequest:
     """Request to execute a slash command."""
+
     command: str
     arguments: Dict[str, Any] = field(default_factory=dict)
 
@@ -623,7 +682,7 @@ class ExecuteSlashCommandRequest:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ExecuteSlashCommandRequest':
+    def from_dict(cls, data: Dict[str, Any]) -> "ExecuteSlashCommandRequest":
         """Create from dictionary."""
         return cls(**data)
 
@@ -631,6 +690,7 @@ class ExecuteSlashCommandRequest:
 @dataclass
 class ExecuteSlashCommandResponse:
     """Response from executing a slash command."""
+
     execution_id: str
     status: CommandExecutionStatus
 
@@ -638,30 +698,31 @@ class ExecuteSlashCommandResponse:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
         if isinstance(self.status, str):
-            data['status'] = self.status.value
+            data["status"] = self.status.value
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ExecuteSlashCommandResponse':
+    def from_dict(cls, data: Dict[str, Any]) -> "ExecuteSlashCommandResponse":
         """Create from dictionary."""
-        if 'status' in data and isinstance(data['status'], str):
-            data['status'] = CommandExecutionStatus(data['status'])
+        if "status" in data and isinstance(data["status"], str):
+            data["status"] = CommandExecutionStatus(data["status"])
         return cls(**data)
 
 
 @dataclass
 class GetAllSlashCommandsResponse:
     """Response containing all available slash commands."""
+
     commands: List[SlashCommand]
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
-        data['commands'] = [cmd.to_dict() for cmd in self.commands]
+        data["commands"] = [cmd.to_dict() for cmd in self.commands]
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'GetAllSlashCommandsResponse':
+    def from_dict(cls, data: Dict[str, Any]) -> "GetAllSlashCommandsResponse":
         """Create from dictionary."""
-        commands = [SlashCommand.from_dict(cmd) for cmd in data.get('commands', [])]
+        commands = [SlashCommand.from_dict(cmd) for cmd in data.get("commands", [])]
         return cls(commands=commands)

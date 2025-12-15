@@ -135,7 +135,9 @@ class A2ATaskManager:
     Provides A2A-compliant task lifecycle while maintaining ZedACP compatibility.
     """
 
-    def __init__(self, push_notification_manager: Optional[PushNotificationManager] = None):
+    def __init__(
+        self, push_notification_manager: Optional[PushNotificationManager] = None
+    ):
         self._active_tasks: Dict[str, TaskExecutionContext] = {}
         self._lock: Optional[asyncio.Lock] = None
         self.push_notification_manager = push_notification_manager
@@ -181,21 +183,31 @@ class A2ATaskManager:
                 return dev_meta
         return {}
 
-    def _build_notification_payload(self, task_id: str, event: str, event_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_notification_payload(
+        self, task_id: str, event: str, event_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Construct event payload enriched with development tool metadata."""
         payload = {"event": event, "task_id": task_id, **event_data}
         development_tool_metadata = payload.get("development_tool_metadata")
         if not development_tool_metadata:
-            payload["development_tool_metadata"] = self._get_development_tool_metadata(task_id)
+            payload["development_tool_metadata"] = self._get_development_tool_metadata(
+                task_id
+            )
         return payload
 
-    def _ensure_tool_call_metadata(self, context: TaskExecutionContext, tool_call_data: Dict[str, Any]) -> str:
+    def _ensure_tool_call_metadata(
+        self, context: TaskExecutionContext, tool_call_data: Dict[str, Any]
+    ) -> str:
         """Ensure a tool call entry exists in development tool metadata."""
         task_metadata = context.task.metadata or {}
         context.task.metadata = task_metadata
         dev_tool = task_metadata.setdefault("development-tool", {})
         tool_calls = dev_tool.setdefault("tool_calls", {})
-        tool_call_id = tool_call_data.get("id") or tool_call_data.get("toolCallId") or f"tc_{uuid4()}"
+        tool_call_id = (
+            tool_call_data.get("id")
+            or tool_call_data.get("toolCallId")
+            or f"tc_{uuid4()}"
+        )
         if tool_call_id not in tool_calls:
             tool_call = ToolCall(
                 tool_call_id=tool_call_id,
@@ -206,7 +218,9 @@ class A2ATaskManager:
             tool_calls[tool_call_id] = tool_call.to_dict()
         return tool_call_id
 
-    async def _send_task_notification(self, task_id: str, event: str, event_data: Dict[str, Any]) -> None:
+    async def _send_task_notification(
+        self, task_id: str, event: str, event_data: Dict[str, Any]
+    ) -> None:
         """Send a push notification for a task event."""
         if not self.push_notification_manager:
             return
@@ -218,15 +232,11 @@ class A2ATaskManager:
         except Exception as e:
             logger.error(
                 "Failed to send task notification",
-                extra={"task_id": task_id, "event": event, "error": str(e)}
+                extra={"task_id": task_id, "event": event, "error": str(e)},
             )
 
     async def _handle_task_error(
-        self,
-        task_id: str,
-        old_state: str,
-        error: Exception,
-        context_str: str = ""
+        self, task_id: str, old_state: str, error: Exception, context_str: str = ""
     ) -> None:
         """Handle task errors with consistent status update, notification, and cleanup."""
         try:
@@ -242,20 +252,25 @@ class A2ATaskManager:
 
                 # Update tool call statuses to FAILED if any
                 exec_context = self._active_tasks[task_id]
-                if exec_context.permission_decisions or exec_context.pending_permissions:
+                if (
+                    exec_context.permission_decisions
+                    or exec_context.pending_permissions
+                ):
                     task_metadata = task.metadata or {}
                     exec_context.task.metadata = task_metadata
                     dev_tool = task_metadata.setdefault("development-tool", {})
                     tool_calls = dev_tool.setdefault("tool_calls", {})
 
-                    all_tc_ids = [d.tool_call_id for d in exec_context.permission_decisions] + list(exec_context.pending_permissions.keys())
+                    all_tc_ids = [
+                        d.tool_call_id for d in exec_context.permission_decisions
+                    ] + list(exec_context.pending_permissions.keys())
                     for tc_id in all_tc_ids:
                         if tc_id in tool_calls:
                             tc = ToolCall.from_dict(tool_calls[tc_id])
                             tc.status = ToolCallStatus.FAILED
                             tc.result = ErrorDetails(
                                 message=f"Task failed with error: {str(error)}",
-                                code="TASK_FAILED"
+                                code="TASK_FAILED",
                             )
                             tool_calls[tc_id] = tc.to_dict()
 
@@ -266,35 +281,58 @@ class A2ATaskManager:
                     exec_context.pending_permissions.clear()
 
                     # Add AgentThought for failure
-                    agent_thought = AgentThought(content=f"Task failed due to error: {str(error)}. Review and retry if appropriate.")
+                    agent_thought = AgentThought(
+                        content=f"Task failed due to error: {str(error)}. Review and retry if appropriate."
+                    )
                     if "thoughts" not in dev_tool:
                         dev_tool["thoughts"] = []
                     dev_tool["thoughts"].append(agent_thought.to_dict())
 
                 if task:
-                    dev_tool_meta = task.metadata.get("development-tool", {}) if task and task.metadata else {}
+                    dev_tool_meta = (
+                        task.metadata.get("development-tool", {})
+                        if task and task.metadata
+                        else {}
+                    )
 
             # Send notification for failure
-            error_message = f"{context_str}: {str(error)}" if context_str else str(error)
-            asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
-                "old_state": old_state,
-                "new_state": TaskState.FAILED.value,
-                "message": error_message,
-                "error": str(error),
-                "development_tool_metadata": dev_tool_meta
-            }))
+            error_message = (
+                f"{context_str}: {str(error)}" if context_str else str(error)
+            )
+            asyncio.create_task(
+                self._send_task_notification(
+                    task_id,
+                    EventType.TASK_STATUS_CHANGE.value,
+                    {
+                        "old_state": old_state,
+                        "new_state": TaskState.FAILED.value,
+                        "message": error_message,
+                        "error": str(error),
+                        "development_tool_metadata": dev_tool_meta,
+                    },
+                )
+            )
 
             # Clean up notification configs for failed tasks (immediate deletion)
             if self.push_notification_manager:
-                asyncio.create_task(self.push_notification_manager.cleanup_by_task_state(
-                    task_id, TaskState.FAILED.value
-                ))
+                asyncio.create_task(
+                    self.push_notification_manager.cleanup_by_task_state(
+                        task_id, TaskState.FAILED.value
+                    )
+                )
 
-            logger.error(f"Task failed: {error_message}", extra={"task_id": task_id, "error": str(error)})
+            logger.error(
+                f"Task failed: {error_message}",
+                extra={"task_id": task_id, "error": str(error)},
+            )
         except Exception as e:
             logger.error(
                 "Error in task error handler",
-                extra={"task_id": task_id, "original_error": str(error), "handler_error": str(e)}
+                extra={
+                    "task_id": task_id,
+                    "original_error": str(error),
+                    "handler_error": str(e),
+                },
             )
 
     def _finalize_tool_calls_success(
@@ -333,7 +371,9 @@ class A2ATaskManager:
                 dev_tool["thoughts"] = []
             dev_tool["thoughts"].append(agent_thought.to_dict())
 
-    async def _handle_task_cancellation(self, task_id: str, old_state: str, context: str = "") -> None:
+    async def _handle_task_cancellation(
+        self, task_id: str, old_state: str, context: str = ""
+    ) -> None:
         """Handle task cancellation with consistent status update and notification."""
         try:
             # Update task status to cancelled
@@ -344,17 +384,23 @@ class A2ATaskManager:
 
             # Send notification for cancellation
             cancel_message = f"Task was cancelled{': ' + context if context else ''}"
-            asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
-                "old_state": old_state,
-                "new_state": TaskState.CANCELLED.value,
-                "message": cancel_message
-            }))
+            asyncio.create_task(
+                self._send_task_notification(
+                    task_id,
+                    EventType.TASK_STATUS_CHANGE.value,
+                    {
+                        "old_state": old_state,
+                        "new_state": TaskState.CANCELLED.value,
+                        "message": cancel_message,
+                    },
+                )
+            )
 
             logger.info(f"Task cancelled: {cancel_message}", extra={"task_id": task_id})
         except Exception as e:
             logger.error(
                 "Error in task cancellation handler",
-                extra={"task_id": task_id, "context": context, "error": str(e)}
+                extra={"task_id": task_id, "context": context, "error": str(e)},
             )
 
     def _extract_message_content(self, message) -> str:
@@ -428,17 +474,27 @@ class A2ATaskManager:
         # Fallback to default types
         return ["text/plain"]
 
-    async def _send_message_notification(self, task_id: str, message, message_type: str) -> None:
+    async def _send_message_notification(
+        self, task_id: str, message, message_type: str
+    ) -> None:
         """Send a notification for a task message with extracted content."""
         content = self._extract_message_content(message)
 
-        asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_MESSAGE.value, {
-            "message_role": message.role,
-            "message_content": content,
-            "message_type": message_type
-        }))
+        asyncio.create_task(
+            self._send_task_notification(
+                task_id,
+                EventType.TASK_MESSAGE.value,
+                {
+                    "message_role": message.role,
+                    "message_content": content,
+                    "message_type": message_type,
+                },
+            )
+        )
 
-    def _serialize_policy_decision(self, decision: Optional[AutoApprovalDecision]) -> Optional[Dict[str, Any]]:
+    def _serialize_policy_decision(
+        self, decision: Optional[AutoApprovalDecision]
+    ) -> Optional[Dict[str, Any]]:
         if not decision:
             return None
         return {
@@ -449,18 +505,22 @@ class A2ATaskManager:
             "skipGovernors": decision.skip_governors,
         }
 
-    def _serialize_governor_results(self, results: List[GovernorResult]) -> List[Dict[str, Any]]:
+    def _serialize_governor_results(
+        self, results: List[GovernorResult]
+    ) -> List[Dict[str, Any]]:
         serialized = []
         for result in results:
-            serialized.append({
-                "governorId": result.governor_id,
-                "status": result.status,
-                "optionId": result.option_id,
-                "score": result.score,
-                "messages": result.messages,
-                "followUpPrompt": result.follow_up_prompt,
-                "metadata": result.metadata,
-            })
+            serialized.append(
+                {
+                    "governorId": result.governor_id,
+                    "status": result.status,
+                    "optionId": result.option_id,
+                    "score": result.score,
+                    "messages": result.messages,
+                    "followUpPrompt": result.follow_up_prompt,
+                    "metadata": result.metadata,
+                }
+            )
         return serialized
 
     def _record_permission_decision(
@@ -485,14 +545,16 @@ class A2ATaskManager:
         task_metadata = context.task.metadata or {}
         context.task.metadata = task_metadata
         decisions_meta = task_metadata.setdefault("permissionDecisions", [])
-        decisions_meta.append({
-            "toolCallId": tool_call_id,
-            "source": source,
-            "optionId": option_id,
-            "governorsInvolved": record.governors_involved,
-            "timestamp": record.timestamp.isoformat(),
-            "metadata": record.metadata,
-        })
+        decisions_meta.append(
+            {
+                "toolCallId": tool_call_id,
+                "source": source,
+                "optionId": option_id,
+                "governorsInvolved": record.governors_involved,
+                "timestamp": record.timestamp.isoformat(),
+                "metadata": record.metadata,
+            }
+        )
 
     def _append_governor_feedback(
         self,
@@ -519,17 +581,23 @@ class A2ATaskManager:
         self,
         task_id: str,
         context: TaskExecutionContext,
-        request: ToolPermissionRequest
+        request: ToolPermissionRequest,
     ) -> ToolPermissionDecision:
         """Evaluate permission request via policies and governors."""
-        evaluation: PermissionEvaluationResult = await self.governor_manager.evaluate_permission(
-            task_id=task_id,
-            session_id=request.session_id,
-            tool_call=request.tool_call,
-            options=request.options,
+        evaluation: PermissionEvaluationResult = (
+            await self.governor_manager.evaluate_permission(
+                task_id=task_id,
+                session_id=request.session_id,
+                tool_call=request.tool_call,
+                options=request.options,
+            )
         )
 
-        tool_call_id = str(request.tool_call.get("id") or request.tool_call.get("toolCallId") or uuid4())
+        tool_call_id = str(
+            request.tool_call.get("id")
+            or request.tool_call.get("toolCallId")
+            or uuid4()
+        )
         async with context.lock:
             if evaluation.selected_option_id:
                 # Create ToolCall for auto-approval case
@@ -541,7 +609,7 @@ class A2ATaskManager:
                             ConfirmationOption(
                                 id=option_id,
                                 name=opt.get("name", option_id),
-                                description=opt.get("description")
+                                description=opt.get("description"),
                             )
                         )
 
@@ -550,7 +618,7 @@ class A2ATaskManager:
                     options=confirmation_options,
                     details=GenericDetails(
                         description=f"Tool permission required for {request.tool_call.get('toolId', 'unknown_tool')}"
-                    )
+                    ),
                 )
 
                 # Create ToolCall object for extension serialization
@@ -559,7 +627,7 @@ class A2ATaskManager:
                     status=ToolCallStatus.EXECUTING,
                     tool_name=request.tool_call.get("toolId", "unknown_tool"),
                     input_parameters=request.tool_call.get("parameters", {}),
-                    confirmation_request=None  # Cleared after approval
+                    confirmation_request=None,  # Cleared after approval
                 )
 
                 # Serialize ToolCall to task metadata for extension support
@@ -567,7 +635,9 @@ class A2ATaskManager:
                 context.task.metadata = task_metadata
                 if "development-tool" not in task_metadata:
                     task_metadata["development-tool"] = {}
-                tool_calls = task_metadata["development-tool"].setdefault("tool_calls", {})
+                tool_calls = task_metadata["development-tool"].setdefault(
+                    "tool_calls", {}
+                )
                 tool_calls[tool_call_id] = tool_call.to_dict()
 
                 self._record_permission_decision(
@@ -592,7 +662,7 @@ class A2ATaskManager:
                         ConfirmationOption(
                             id=option_id,
                             name=opt.get("name", option_id),
-                            description=opt.get("description")
+                            description=opt.get("description"),
                         )
                     )
 
@@ -601,7 +671,7 @@ class A2ATaskManager:
                 options=confirmation_options,
                 details=GenericDetails(
                     description=f"Tool permission required for {request.tool_call.get('toolId', 'unknown_tool')}"
-                )
+                ),
             )
 
             # Create ToolCall object for extension serialization
@@ -610,7 +680,7 @@ class A2ATaskManager:
                 status=ToolCallStatus.PENDING,
                 tool_name=request.tool_call.get("toolId", "unknown_tool"),
                 input_parameters=request.tool_call.get("parameters", {}),
-                confirmation_request=confirmation_request
+                confirmation_request=confirmation_request,
             )
 
             metadata = {
@@ -620,8 +690,12 @@ class A2ATaskManager:
                 "toolCall": request.tool_call,
                 "options": list(request.options),
                 "summary": evaluation.summary_lines,
-                "policyDecision": self._serialize_policy_decision(evaluation.policy_decision),
-                "governorResults": self._serialize_governor_results(evaluation.governor_results),
+                "policyDecision": self._serialize_policy_decision(
+                    evaluation.policy_decision
+                ),
+                "governorResults": self._serialize_governor_results(
+                    evaluation.governor_results
+                ),
                 "tool_call": tool_call.to_dict(),
             }
 
@@ -662,11 +736,13 @@ class A2ATaskManager:
             "tool_call": metadata["tool_call"],
         }
 
-        asyncio.create_task(self._send_task_notification(
-            task_id,
-            EventType.TASK_INPUT_REQUIRED.value,
-            notification_payload,
-        ))
+        asyncio.create_task(
+            self._send_task_notification(
+                task_id,
+                EventType.TASK_INPUT_REQUIRED.value,
+                notification_payload,
+            )
+        )
 
         logger.info(
             "Permission input required",
@@ -713,7 +789,9 @@ class A2ATaskManager:
             if output_settings is not None:
                 max_iter_value = getattr(output_settings, "max_iterations", None)
                 try:
-                    max_iterations = max(1, int(max_iter_value if max_iter_value else max_iterations))
+                    max_iterations = max(
+                        1, int(max_iter_value if max_iter_value else max_iterations)
+                    )
                 except (TypeError, ValueError):
                     pass
 
@@ -731,9 +809,13 @@ class A2ATaskManager:
             else:
                 evaluation = evaluation_call
 
-            summary_lines = self._normalize_sequence(getattr(evaluation, "summary_lines", []))
-            governor_results = self._normalize_sequence(getattr(evaluation, "governor_results", []))
-            if (not summary_lines or not governor_results):
+            summary_lines = self._normalize_sequence(
+                getattr(evaluation, "summary_lines", [])
+            )
+            governor_results = self._normalize_sequence(
+                getattr(evaluation, "governor_results", [])
+            )
+            if not summary_lines or not governor_results:
                 fallback_eval = self._get_fallback_post_run_evaluation()
                 if fallback_eval and fallback_eval is not evaluation:
                     if not summary_lines:
@@ -745,7 +827,9 @@ class A2ATaskManager:
                             getattr(fallback_eval, "governor_results", [])
                         )
 
-            self._append_governor_feedback(context, "post_run", summary_lines, governor_results)
+            self._append_governor_feedback(
+                context, "post_run", summary_lines, governor_results
+            )
 
             follow_up_prompts = getattr(evaluation, "follow_up_prompts", None)
             if isinstance(follow_up_prompts, Sequence):
@@ -755,11 +839,17 @@ class A2ATaskManager:
 
             if follow_up_prompts_list:
                 for governor_id, followup_prompt in follow_up_prompts_list:
-                    asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_GOVERNOR_FOLLOWUP.value, {
-                        "governor_id": governor_id,
-                        "prompt": followup_prompt,
-                        "iteration": iteration,
-                    }))
+                    asyncio.create_task(
+                        self._send_task_notification(
+                            task_id,
+                            EventType.TASK_GOVERNOR_FOLLOWUP.value,
+                            {
+                                "governor_id": governor_id,
+                                "prompt": followup_prompt,
+                                "iteration": iteration,
+                            },
+                        )
+                    )
 
                     governor_message = Message(
                         role="user",
@@ -801,19 +891,31 @@ class A2ATaskManager:
                     context.task.status.state = TaskState.INPUT_REQUIRED
                     context.task.status.timestamp = current_timestamp()
 
-                asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_FEEDBACK_REQUIRED.value, {
-                    "message": "Governor blocked final response",
-                    "summary": summary_lines,
-                }))
+                asyncio.create_task(
+                    self._send_task_notification(
+                        task_id,
+                        EventType.TASK_FEEDBACK_REQUIRED.value,
+                        {
+                            "message": "Governor blocked final response",
+                            "summary": summary_lines,
+                        },
+                    )
+                )
 
-                asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_INPUT_REQUIRED.value, {
-                    "old_state": old_state,
-                    "new_state": TaskState.INPUT_REQUIRED.value,
-                    "message": "Governor requested human review",
-                    "input_types": ["text/plain"],
-                    "detection_method": "governor_block",
-                    "summary": summary_lines,
-                }))
+                asyncio.create_task(
+                    self._send_task_notification(
+                        task_id,
+                        EventType.TASK_INPUT_REQUIRED.value,
+                        {
+                            "old_state": old_state,
+                            "new_state": TaskState.INPUT_REQUIRED.value,
+                            "message": "Governor requested human review",
+                            "input_types": ["text/plain"],
+                            "detection_method": "governor_block",
+                            "summary": summary_lines,
+                        },
+                    )
+                )
 
                 logger.warning(
                     "Governor blocked response",
@@ -830,23 +932,22 @@ class A2ATaskManager:
         context_id: str,
         agent_name: str,
         initial_message: Optional[Message] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Task:
         """Create a new A2A task."""
         async with self.lock:
             task_id = create_task_id()
-    
+
             # Create initial task status
             status = TaskStatus(
-                state=TaskState.SUBMITTED,
-                timestamp=current_timestamp()
+                state=TaskState.SUBMITTED, timestamp=current_timestamp()
             )
-    
+
             # Create A2A task
             history = None
             if initial_message:
                 history = [Message(**initial_message.model_dump(exclude_none=True))]
-    
+
             task = Task(
                 id=task_id,
                 contextId=context_id,
@@ -854,15 +955,12 @@ class A2ATaskManager:
                 history=history,
                 artifacts=None,
                 metadata=metadata or {},
-                kind="task"
+                kind="task",
             )
-    
+
             # Create execution context
-            context = TaskExecutionContext(
-                task=task,
-                agent_name=agent_name
-            )
-    
+            context = TaskExecutionContext(task=task, agent_name=agent_name)
+
             # Parse AgentSettings from initial_message metadata if present
             if initial_message and initial_message.metadata:
                 agent_settings_data = initial_message.metadata.get("agent_settings")
@@ -873,32 +971,47 @@ class A2ATaskManager:
                             context.working_directory = agent_settings.workspace_path
                             logger.debug(
                                 "Set working directory from AgentSettings",
-                                extra={"task_id": task_id, "working_directory": context.working_directory}
+                                extra={
+                                    "task_id": task_id,
+                                    "working_directory": context.working_directory,
+                                },
                             )
                     except Exception as e:
                         logger.warning(
                             "Failed to parse AgentSettings from metadata",
-                            extra={"task_id": task_id, "error": str(e)}
+                            extra={"task_id": task_id, "error": str(e)},
                         )
-    
+
             # Fallback to current directory if not set
             if not context.working_directory:
                 context.working_directory = os.getcwd()
-    
+
             self._active_tasks[task_id] = context
-        
-            logger.info("Created A2A task",
-                       extra={"task_id": task_id, "context_id": context_id, "agent": agent_name})
-        
+
+            logger.info(
+                "Created A2A task",
+                extra={
+                    "task_id": task_id,
+                    "context_id": context_id,
+                    "agent": agent_name,
+                },
+            )
+
             # Send notification for task creation
-            asyncio.create_task(self._send_task_notification(task_id, "task_created", {
-                "old_state": None,
-                "new_state": TaskState.SUBMITTED.value,
-                "context_id": context_id,
-                "agent_name": agent_name,
-                "creation_event": True
-            }))
-        
+            asyncio.create_task(
+                self._send_task_notification(
+                    task_id,
+                    "task_created",
+                    {
+                        "old_state": None,
+                        "new_state": TaskState.SUBMITTED.value,
+                        "context_id": context_id,
+                        "agent_name": agent_name,
+                        "creation_event": True,
+                    },
+                )
+            )
+
             return task
 
     async def execute_task(
@@ -908,34 +1021,42 @@ class A2ATaskManager:
         api_key: Optional[str] = None,
         working_directory: str = ".",
         mcp_servers: Optional[List[Dict]] = None,
-        stream_handler: Optional[Callable[[str], Awaitable[None]]] = None
+        stream_handler: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> Task:
         """Execute an A2A task using ZedACP agent with input-required support."""
         async with self.lock:
             if task_id not in self._active_tasks:
                 raise ValueError(f"Unknown task: {task_id}")
             context = self._active_tasks[task_id]
-    
+
         task = context.task
-    
+
         # Use context working_directory if set, otherwise fallback to parameter
         effective_working_directory = context.working_directory or working_directory
-    
+
         try:
             async with context.lock:
                 old_state = task.status.state.value
                 task.status.state = TaskState.WORKING
                 task.status.timestamp = current_timestamp()
-    
-            asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
-                "old_state": old_state,
-                "new_state": TaskState.WORKING.value,
-                "message": "Task execution started"
-            }))
-    
-            async def permission_handler(request: ToolPermissionRequest) -> ToolPermissionDecision:
+
+            asyncio.create_task(
+                self._send_task_notification(
+                    task_id,
+                    EventType.TASK_STATUS_CHANGE.value,
+                    {
+                        "old_state": old_state,
+                        "new_state": TaskState.WORKING.value,
+                        "message": "Task execution started",
+                    },
+                )
+            )
+
+            async def permission_handler(
+                request: ToolPermissionRequest,
+            ) -> ToolPermissionDecision:
                 return await self._handle_tool_permission(task_id, context, request)
-    
+
             # Provide a built-in stub agent when no external command is configured
             if agent_command in (None, ["true"]):
                 logger.info(
@@ -943,53 +1064,60 @@ class A2ATaskManager:
                     extra={"task_id": task_id, "agent_command": agent_command},
                 )
                 return await self._execute_stub_agent(task_id, context, stream_handler)
-    
+
             # Execute via ZedACP agent
             async with ZedAgentConnection(
                 agent_command,
                 api_key=api_key,
                 permission_handler=permission_handler,
             ) as connection:
-                original_permission_handler = getattr(connection, "permission_handler", None)
-                if original_permission_handler and original_permission_handler is not permission_handler:
-                    async def combined_permission_handler(request: ToolPermissionRequest) -> ToolPermissionDecision:
+                original_permission_handler = getattr(
+                    connection, "permission_handler", None
+                )
+                if (
+                    original_permission_handler
+                    and original_permission_handler is not permission_handler
+                ):
+
+                    async def combined_permission_handler(
+                        request: ToolPermissionRequest,
+                    ) -> ToolPermissionDecision:
                         decision = await permission_handler(request)
                         fallback = await original_permission_handler(request)
                         return fallback or decision
 
                     connection.permission_handler = combined_permission_handler
                 await connection.initialize()
-    
+
                 # Create ZedACP session for this task
                 zed_session_id = await connection.start_session(
-                    cwd=effective_working_directory,
-                    mcp_servers=mcp_servers or []
+                    cwd=effective_working_directory, mcp_servers=mcp_servers or []
                 )
-    
+
                 async with context.lock:
                     context.zedacp_session_id = zed_session_id
                     context.working_directory = effective_working_directory
-    
+
                 # Convert A2A message to ZedACP format if we have history
                 if task.history and len(task.history) > 0:
                     user_message = task.history[0]  # First message should be user input
                     translator = _create_translator()
                     zedacp_parts = translator.a2a_to_zedacp_message(user_message)
-    
+
                     # Execute the task with protocol-compliant input-required detection
                     cancel_event = context.cancel_event
-    
+
                     # Chunk handler that accumulates content and handles artifacts
                     accumulated_content = []
-    
+
                     async def on_chunk(text: str) -> None:
                         # Accumulate all chunks for the final response
                         accumulated_content.append(text)
-    
+
                         # Forward to streaming handler if provided
                         if stream_handler:
                             await stream_handler(text)
-    
+
                         # Embed DevelopmentToolEvent for tool call updates in streaming
                         if task.metadata and "development-tool" in task.metadata:
                             dev_tool = task.metadata["development-tool"]
@@ -997,27 +1125,37 @@ class A2ATaskManager:
                                 # For simplicity, emit a generic update for ongoing execution
                                 event = DevelopmentToolEvent(
                                     kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
-                                    data={"status": "streaming", "chunk_length": len(text)}
+                                    data={
+                                        "status": "streaming",
+                                        "chunk_length": len(text),
+                                    },
                                 )
                                 # This would be sent via streaming metadata if supported, or batched
-    
+
                         # Also check for artifact creation notifications
                         upper_text = text.upper()
-                        if ("ARTIFACT:" in upper_text or
-                            "FILE:" in upper_text or
-                            "CREATED:" in upper_text):
-    
-                            asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_ARTIFACT.value, {
-                                "artifact_type": "detected",
-                                "artifact_name": "processing",
-                                "detection_text": text[:100]
-                            }))
-    
+                        if (
+                            "ARTIFACT:" in upper_text
+                            or "FILE:" in upper_text
+                            or "CREATED:" in upper_text
+                        ):
+                            asyncio.create_task(
+                                self._send_task_notification(
+                                    task_id,
+                                    EventType.TASK_ARTIFACT.value,
+                                    {
+                                        "artifact_type": "detected",
+                                        "artifact_name": "processing",
+                                        "detection_text": text[:100],
+                                    },
+                                )
+                            )
+
                     result = await connection.prompt(
                         zed_session_id,
                         zedacp_parts,
                         on_chunk=on_chunk,
-                        cancel_event=cancel_event
+                        cancel_event=cancel_event,
                     )
                     # Handle any tool call events emitted before the final response
                     while result.get("toolCalls"):
@@ -1027,9 +1165,9 @@ class A2ATaskManager:
                             zed_session_id,
                             zedacp_parts,
                             on_chunk=on_chunk,
-                            cancel_event=cancel_event
+                            cancel_event=cancel_event,
                         )
-    
+
                     result, blocked = await self._run_post_run_governors(
                         task_id,
                         context,
@@ -1038,90 +1176,130 @@ class A2ATaskManager:
                         result,
                         translator,
                     )
-    
+
                     if blocked:
-                        logger.info("Task awaiting feedback due to governor block", extra={"task_id": task_id})
+                        logger.info(
+                            "Task awaiting feedback due to governor block",
+                            extra={"task_id": task_id},
+                        )
                         return task
-    
+
                     if accumulated_content:
                         full_text = "".join(accumulated_content)
                         result.setdefault("result", {})
                         result["result"]["text"] = full_text
-                        logger.debug("Added accumulated content to result",
-                                     extra={"content_length": len(full_text), "chunks": len(accumulated_content)})
-    
-                    is_input_required, reason = self._is_input_required_from_response(result)
-                    logger.info("Protocol analysis of ZedACP response",
-                                extra={
-                                    "task_id": task_id,
-                                    "stop_reason": result.get("stopReason"),
-                                    "tool_calls_count": len(result.get("toolCalls", [])),
-                                    "is_input_required": is_input_required,
-                                    "reason": reason
-                                })
-    
+                        logger.debug(
+                            "Added accumulated content to result",
+                            extra={
+                                "content_length": len(full_text),
+                                "chunks": len(accumulated_content),
+                            },
+                        )
+
+                    is_input_required, reason = self._is_input_required_from_response(
+                        result
+                    )
+                    logger.info(
+                        "Protocol analysis of ZedACP response",
+                        extra={
+                            "task_id": task_id,
+                            "stop_reason": result.get("stopReason"),
+                            "tool_calls_count": len(result.get("toolCalls", [])),
+                            "is_input_required": is_input_required,
+                            "reason": reason,
+                        },
+                    )
+
                     if is_input_required:
                         old_state = task.status.state.value
                         task.status.state = TaskState.INPUT_REQUIRED
                         task.status.timestamp = current_timestamp()
-    
+
                         input_types = self._extract_input_types_from_response(result)
-    
-                        asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_INPUT_REQUIRED.value, {
-                            "old_state": old_state,
-                            "new_state": TaskState.INPUT_REQUIRED.value,
-                            "message": "Additional input required",
-                            "input_types": input_types,
-                            "detection_method": "protocol_compliant"
-                        }))
-    
+
+                        asyncio.create_task(
+                            self._send_task_notification(
+                                task_id,
+                                EventType.TASK_INPUT_REQUIRED.value,
+                                {
+                                    "old_state": old_state,
+                                    "new_state": TaskState.INPUT_REQUIRED.value,
+                                    "message": "Additional input required",
+                                    "input_types": input_types,
+                                    "detection_method": "protocol_compliant",
+                                },
+                            )
+                        )
+
                         input_notification = InputRequiredNotification(
                             taskId=task_id,
                             contextId=task.contextId,
                             message="Additional input required",
                             inputTypes=input_types,
-                            timeout=300
+                            timeout=300,
                         )
-    
-                        logger.info("Task requires input (protocol-compliant detection)",
-                                    extra={
-                                        "task_id": task_id,
-                                        "notification": input_notification.model_dump(),
-                                        "input_types": input_types,
-                                        "detection_reason": reason
-                                    })
+
+                        logger.info(
+                            "Task requires input (protocol-compliant detection)",
+                            extra={
+                                "task_id": task_id,
+                                "notification": input_notification.model_dump(),
+                                "input_types": input_types,
+                                "detection_reason": reason,
+                            },
+                        )
                         return task
-    
-                    response_message = translator.zedacp_to_a2a_message(result, task.contextId, task_id)
+
+                    response_message = translator.zedacp_to_a2a_message(
+                        result, task.contextId, task_id
+                    )
                     task.history.append(response_message)
-                    asyncio.create_task(self._send_message_notification(task_id, response_message, "agent_response"))
-    
+                    asyncio.create_task(
+                        self._send_message_notification(
+                            task_id, response_message, "agent_response"
+                        )
+                    )
+
                     old_state = task.status.state.value
                     task.status.state = TaskState.COMPLETED
                     task.status.timestamp = current_timestamp()
-    
+
                     final_text = result.get("result", {}).get("text")
                     self._finalize_tool_calls_success(
                         context,
                         add_agent_thought=True,
                         tool_output_text=final_text,
                     )
-                    dev_tool_meta = context.task.metadata.get("development-tool", {}) if context.task and context.task.metadata else {}
-                    asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
-                        "old_state": old_state,
-                        "new_state": TaskState.COMPLETED.value,
-                        "message": "Task completed successfully",
-                        "development_tool_metadata": dev_tool_meta
-                    }))
-    
+                    dev_tool_meta = (
+                        context.task.metadata.get("development-tool", {})
+                        if context.task and context.task.metadata
+                        else {}
+                    )
+                    asyncio.create_task(
+                        self._send_task_notification(
+                            task_id,
+                            EventType.TASK_STATUS_CHANGE.value,
+                            {
+                                "old_state": old_state,
+                                "new_state": TaskState.COMPLETED.value,
+                                "message": "Task completed successfully",
+                                "development_tool_metadata": dev_tool_meta,
+                            },
+                        )
+                    )
+
                     if self.push_notification_manager:
-                        asyncio.create_task(self.push_notification_manager.cleanup_by_task_state(
-                            task_id, TaskState.COMPLETED.value
-                        ))
-    
-                    logger.info("Task completed successfully",
-                                extra={"task_id": task_id, "agent": context.agent_name})
-    
+                        asyncio.create_task(
+                            self.push_notification_manager.cleanup_by_task_state(
+                                task_id, TaskState.COMPLETED.value
+                            )
+                        )
+
+                    logger.info(
+                        "Task completed successfully",
+                        extra={"task_id": task_id, "agent": context.agent_name},
+                    )
+
                     return task
                 else:
                     # No message to execute, finalize any serialized tool calls before exiting
@@ -1129,17 +1307,19 @@ class A2ATaskManager:
                     task.status.timestamp = current_timestamp()
                     self._finalize_tool_calls_success(context, add_agent_thought=True)
                     return task
-    
+
         except PromptCancelled:
             await self._handle_task_cancellation(task_id, task.status.state.value)
             return task
-    
+
         except AgentProcessError as e:
             await self._handle_task_error(task_id, task.status.state.value, e)
             raise
-    
+
         except Exception as e:
-            await self._handle_task_error(task_id, task.status.state.value, e, "Unexpected error")
+            await self._handle_task_error(
+                task_id, task.status.state.value, e, "Unexpected error"
+            )
             raise
 
     async def _execute_stub_agent(
@@ -1192,12 +1372,16 @@ class A2ATaskManager:
             task_metadata = context.task.metadata or {}
             context.task.metadata = task_metadata
             dev_tool = task_metadata.setdefault("development-tool", {})
-            agent_thought = AgentThought(content="Stub agent completed the task simulation successfully.")
+            agent_thought = AgentThought(
+                content="Stub agent completed the task simulation successfully."
+            )
             if "thoughts" not in dev_tool:
                 dev_tool["thoughts"] = []
             dev_tool["thoughts"].append(agent_thought.to_dict())
 
-        asyncio.create_task(self._send_message_notification(task_id, response_message, "agent_response"))
+        asyncio.create_task(
+            self._send_message_notification(task_id, response_message, "agent_response")
+        )
         dev_tool_meta = context.task.metadata.get("development-tool", {})
         asyncio.create_task(
             self._send_task_notification(
@@ -1207,7 +1391,7 @@ class A2ATaskManager:
                     "old_state": previous_state,
                     "new_state": TaskState.COMPLETED.value,
                     "message": "Task execution completed via stub agent",
-                    "development_tool_metadata": dev_tool_meta
+                    "development_tool_metadata": dev_tool_meta,
                 },
             )
         )
@@ -1299,11 +1483,17 @@ class A2ATaskManager:
         task.status.timestamp = current_timestamp()
 
         # Send notification for cancellation
-        asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
-            "old_state": old_state,
-            "new_state": TaskState.CANCELLED.value,
-            "message": "Task was cancelled by user"
-        }))
+        asyncio.create_task(
+            self._send_task_notification(
+                task_id,
+                EventType.TASK_STATUS_CHANGE.value,
+                {
+                    "old_state": old_state,
+                    "new_state": TaskState.CANCELLED.value,
+                    "message": "Task was cancelled by user",
+                },
+            )
+        )
 
         logger.info("Cancelled A2A task", extra={"task_id": task_id})
         return True
@@ -1335,7 +1525,10 @@ class A2ATaskManager:
 
         task = context.task
 
-        if not context.pending_permissions and task.status.state != TaskState.INPUT_REQUIRED:
+        if (
+            not context.pending_permissions
+            and task.status.state != TaskState.INPUT_REQUIRED
+        ):
             raise ValueError(f"Task {task_id} is not in input-required state")
 
         # Handle permission decisions first, including extension ToolCallConfirmation
@@ -1355,35 +1548,56 @@ class A2ATaskManager:
 
                         # Validate the tool_call_id exists in pending permissions
                         if tool_call_id_to_update not in context.pending_permissions:
-                            raise ValueError(f"Tool call ID not found in pending permissions: {tool_call_id_to_update}")
+                            raise ValueError(
+                                f"Tool call ID not found in pending permissions: {tool_call_id_to_update}"
+                            )
 
                         logger.info(
                             "ToolCallConfirmation deserialized from extension metadata",
-                            extra={"task_id": task_id, "tool_call_id": tool_call_id_to_update, "selected_option_id": effective_permission_option_id}
+                            extra={
+                                "task_id": task_id,
+                                "tool_call_id": tool_call_id_to_update,
+                                "selected_option_id": effective_permission_option_id,
+                            },
                         )
                     except ValueError:
                         raise
                     except Exception as e:
                         logger.warning(
                             "Failed to deserialize ToolCallConfirmation, falling back to legacy handling",
-                            extra={"task_id": task_id, "error": str(e)}
+                            extra={"task_id": task_id, "error": str(e)},
                         )
 
         if context.pending_permissions:
             if effective_permission_option_id is None:
-                raise ValueError("permissionOptionId is required to resolve pending permissions")
+                raise ValueError(
+                    "permissionOptionId is required to resolve pending permissions"
+                )
 
             if user_input and any(
-                part.kind == "text" and isinstance(getattr(part, "text", None), str) and part.text.strip()
+                part.kind == "text"
+                and isinstance(getattr(part, "text", None), str)
+                and part.text.strip()
                 for part in user_input.parts
             ):
-                raise ValueError("Cannot provide message content while a permission decision is pending")
+                raise ValueError(
+                    "Cannot provide message content while a permission decision is pending"
+                )
 
             async with context.lock:
                 pending_id, pending = next(iter(context.pending_permissions.items()))
-                selected_option = next((opt for opt in pending.options if opt.get("optionId") == effective_permission_option_id), None)
+                selected_option = next(
+                    (
+                        opt
+                        for opt in pending.options
+                        if opt.get("optionId") == effective_permission_option_id
+                    ),
+                    None,
+                )
                 if not selected_option:
-                    raise ValueError(f"Invalid permission option: {effective_permission_option_id}")
+                    raise ValueError(
+                        f"Invalid permission option: {effective_permission_option_id}"
+                    )
 
                 if not pending.decision_future.done():
                     pending.decision_future.set_result(effective_permission_option_id)
@@ -1407,9 +1621,11 @@ class A2ATaskManager:
                     task_metadata = task.metadata or {}
                     dev_tool_meta = task_metadata.setdefault("development-tool", {})
                     tool_calls = dev_tool_meta.setdefault("tool_calls", {})
-                    
+
                     if tool_call_id_to_update in tool_calls:
-                        tool_call = ToolCall.from_dict(tool_calls[tool_call_id_to_update])
+                        tool_call = ToolCall.from_dict(
+                            tool_calls[tool_call_id_to_update]
+                        )
                     else:
                         tool_call = ToolCall(
                             tool_call_id=tool_call_id_to_update,
@@ -1426,11 +1642,12 @@ class A2ATaskManager:
                     # Emit DevelopmentToolEvent for status update
                     event = DevelopmentToolEvent(
                         kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
-                        data={"tool_call_id": tool_call_id_to_update, "status": "executing"}
+                        data={
+                            "tool_call_id": tool_call_id_to_update,
+                            "status": "executing",
+                        },
                     )
-                    notification_metadata = {
-                        "development-tool": event.to_dict()
-                    }
+                    notification_metadata = {"development-tool": event.to_dict()}
                 else:
                     notification_metadata = {}
 
@@ -1439,20 +1656,30 @@ class A2ATaskManager:
                 "new_state": TaskState.WORKING.value,
                 "message": "Permission decision recorded",
                 "permission_option_id": effective_permission_option_id,
-                **notification_metadata
+                **notification_metadata,
             }
 
-            asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, notification_payload))
+            asyncio.create_task(
+                self._send_task_notification(
+                    task_id, EventType.TASK_STATUS_CHANGE.value, notification_payload
+                )
+            )
 
             logger.info(
                 "Permission decision applied",
-                extra={"task_id": task_id, "permission_option_id": effective_permission_option_id, "tool_call_id": tool_call_id_to_update},
+                extra={
+                    "task_id": task_id,
+                    "permission_option_id": effective_permission_option_id,
+                    "tool_call_id": tool_call_id_to_update,
+                },
             )
 
             return task
 
         if user_input is None:
-            raise ValueError("user_input is required when no permission decision is pending")
+            raise ValueError(
+                "user_input is required when no permission decision is pending"
+            )
 
         async with context.lock:
             old_state = task.status.state.value
@@ -1463,21 +1690,36 @@ class A2ATaskManager:
                 task.history = []
             task.history.append(user_input)
 
-        asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
-            "old_state": old_state,
-            "new_state": TaskState.WORKING.value,
-            "message": "Task resumed after user input"
-        }))
+        asyncio.create_task(
+            self._send_task_notification(
+                task_id,
+                EventType.TASK_STATUS_CHANGE.value,
+                {
+                    "old_state": old_state,
+                    "new_state": TaskState.WORKING.value,
+                    "message": "Task resumed after user input",
+                },
+            )
+        )
 
-        asyncio.create_task(self._send_message_notification(task_id, user_input, "user_input"))
+        asyncio.create_task(
+            self._send_message_notification(task_id, user_input, "user_input")
+        )
 
         try:
             # Use existing ZedACP session if available, otherwise create new connection
-            if context.zedacp_session_id and working_directory == context.working_directory:
-                async with ZedAgentConnection(agent_command, api_key=api_key) as connection:
+            if (
+                context.zedacp_session_id
+                and working_directory == context.working_directory
+            ):
+                async with ZedAgentConnection(
+                    agent_command, api_key=api_key
+                ) as connection:
                     await connection.initialize()
 
-                    await connection.load_session(context.zedacp_session_id, context.working_directory or ".")
+                    await connection.load_session(
+                        context.zedacp_session_id, context.working_directory or "."
+                    )
 
                     translator = _create_translator()
                     zedacp_parts = translator.a2a_to_zedacp_message(user_input)
@@ -1517,10 +1759,15 @@ class A2ATaskManager:
                         result["result"]["text"] = full_text
                         logger.debug(
                             "Added continuation content to result",
-                            extra={"content_length": len(full_text), "chunks": len(continuation_content)},
+                            extra={
+                                "content_length": len(full_text),
+                                "chunks": len(continuation_content),
+                            },
                         )
 
-                    response_message = translator.zedacp_to_a2a_message(result, task.contextId, task_id)
+                    response_message = translator.zedacp_to_a2a_message(
+                        result, task.contextId, task_id
+                    )
 
                     async with context.lock:
                         if task.history is None:
@@ -1530,13 +1777,27 @@ class A2ATaskManager:
                     if response_message.parts:
                         for part in response_message.parts:
                             if part.kind == "file":
-                                asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_ARTIFACT.value, {
-                                    "artifact_type": "file",
-                                    "artifact_name": part.file.name or "unnamed",
-                                    "artifact_size": len(part.file.bytes) if hasattr(part.file, 'bytes') and part.file.bytes else 0
-                                }))
+                                asyncio.create_task(
+                                    self._send_task_notification(
+                                        task_id,
+                                        EventType.TASK_ARTIFACT.value,
+                                        {
+                                            "artifact_type": "file",
+                                            "artifact_name": part.file.name
+                                            or "unnamed",
+                                            "artifact_size": (
+                                                len(part.file.bytes)
+                                                if hasattr(part.file, "bytes")
+                                                and part.file.bytes
+                                                else 0
+                                            ),
+                                        },
+                                    )
+                                )
 
-                    is_input_required, reason = self._is_input_required_from_response(result)
+                    is_input_required, reason = self._is_input_required_from_response(
+                        result
+                    )
                     if is_input_required:
                         async with context.lock:
                             old_state = task.status.state.value
@@ -1545,17 +1806,27 @@ class A2ATaskManager:
 
                         input_types = self._extract_input_types_from_response(result)
 
-                        asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_INPUT_REQUIRED.value, {
-                            "old_state": old_state,
-                            "new_state": TaskState.INPUT_REQUIRED.value,
-                            "message": "Additional input required after continuation",
-                            "input_types": input_types,
-                            "detection_method": "protocol_compliant"
-                        }))
+                        asyncio.create_task(
+                            self._send_task_notification(
+                                task_id,
+                                EventType.TASK_INPUT_REQUIRED.value,
+                                {
+                                    "old_state": old_state,
+                                    "new_state": TaskState.INPUT_REQUIRED.value,
+                                    "message": "Additional input required after continuation",
+                                    "input_types": input_types,
+                                    "detection_method": "protocol_compliant",
+                                },
+                            )
+                        )
 
                         logger.info(
                             "Additional input required after continuation",
-                            extra={"task_id": task_id, "detection_reason": reason, "input_types": input_types},
+                            extra={
+                                "task_id": task_id,
+                                "detection_reason": reason,
+                                "input_types": input_types,
+                            },
                         )
                         return task
 
@@ -1564,13 +1835,22 @@ class A2ATaskManager:
                         task.status.state = TaskState.COMPLETED
                         task.status.timestamp = current_timestamp()
 
-                    asyncio.create_task(self._send_task_notification(task_id, EventType.TASK_STATUS_CHANGE.value, {
-                        "old_state": old_state,
-                        "new_state": TaskState.COMPLETED.value,
-                        "message": "Task completed after input continuation"
-                    }))
+                    asyncio.create_task(
+                        self._send_task_notification(
+                            task_id,
+                            EventType.TASK_STATUS_CHANGE.value,
+                            {
+                                "old_state": old_state,
+                                "new_state": TaskState.COMPLETED.value,
+                                "message": "Task completed after input continuation",
+                            },
+                        )
+                    )
 
-                    logger.info("Task completed after input", extra={"task_id": task_id, "agent": context.agent_name})
+                    logger.info(
+                        "Task completed after input",
+                        extra={"task_id": task_id, "agent": context.agent_name},
+                    )
                     return task
 
             # Need to restart with new connection
@@ -1583,15 +1863,21 @@ class A2ATaskManager:
             )
 
         except PromptCancelled:
-            await self._handle_task_cancellation(task_id, task.status.state.value, "during input continuation")
+            await self._handle_task_cancellation(
+                task_id, task.status.state.value, "during input continuation"
+            )
             return task
 
         except AgentProcessError as e:
-            await self._handle_task_error(task_id, task.status.state.value, e, "during continuation")
+            await self._handle_task_error(
+                task_id, task.status.state.value, e, "during continuation"
+            )
             raise
 
         except Exception as e:
-            await self._handle_task_error(task_id, task.status.state.value, e, "during continuation")
+            await self._handle_task_error(
+                task_id, task.status.state.value, e, "during continuation"
+            )
             raise
 
     async def get_task_id_for_tool_call(self, tool_call_id: str) -> Optional[str]:
@@ -1609,10 +1895,16 @@ class A2ATaskManager:
         """Clean up old completed tasks."""
         to_remove = []
         for task_id, context in self._active_tasks.items():
-            if context.task.status.state in [TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED]:
+            if context.task.status.state in [
+                TaskState.COMPLETED,
+                TaskState.FAILED,
+                TaskState.CANCELLED,
+            ]:
                 # Keep for a while for history, then remove
                 if context.created_at:
-                    age = (datetime.now(timezone.utc) - context.created_at).total_seconds()
+                    age = (
+                        datetime.now(timezone.utc) - context.created_at
+                    ).total_seconds()
                     if age > 3600:  # Remove after 1 hour
                         to_remove.append(task_id)
 

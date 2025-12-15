@@ -22,17 +22,17 @@ class ToolTestRunner:
 
     def run_test_suite(self, test_file: str, description: str) -> Dict[str, Any]:
         """Run a specific test file and return results."""
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Running: {description}")
         print(f"File: {test_file}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "pytest", test_file, "-v", "--tb=short"],
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minute timeout
+                timeout=300,  # 5 minute timeout
             )
 
             success = result.returncode == 0
@@ -42,7 +42,7 @@ class ToolTestRunner:
                 "return_code": result.returncode,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
-                "duration": result.returncode  # Placeholder for actual timing
+                "duration": result.returncode,  # Placeholder for actual timing
             }
 
             if success:
@@ -52,9 +52,9 @@ class ToolTestRunner:
 
             # Show summary of results
             if result.stdout:
-                lines = result.stdout.split('\n')
+                lines = result.stdout.split("\n")
                 for line in lines[-10:]:  # Show last 10 lines
-                    if line.strip() and not line.startswith('='):
+                    if line.strip() and not line.startswith("="):
                         print(f"  {line}")
 
             return self.test_results[test_file]
@@ -64,7 +64,7 @@ class ToolTestRunner:
             self.test_results[test_file] = {
                 "success": False,
                 "return_code": -1,
-                "error": "Test timeout"
+                "error": "Test timeout",
             }
             return self.test_results[test_file]
         except Exception as e:
@@ -72,7 +72,7 @@ class ToolTestRunner:
             self.test_results[test_file] = {
                 "success": False,
                 "return_code": -1,
-                "error": str(e)
+                "error": str(e),
             }
             return self.test_results[test_file]
 
@@ -83,7 +83,7 @@ class ToolTestRunner:
             ("test_tools_simple.py", "Additional Tool Tests"),
         ]
 
-        print(f"\n{'🔧'*20} UNIT TESTS {'🔧'*20}")
+        print(f"\n{'🔧' * 20} UNIT TESTS {'🔧' * 20}")
 
         for test_file, description in unit_tests:
             # Use absolute path from the tests directory
@@ -98,11 +98,14 @@ class ToolTestRunner:
     def run_protocol_tests(self) -> Dict[str, Any]:
         """Run protocol compliance tests."""
         protocol_tests = [
-            ("test_tool_protocol_compliance.py", "A2A and ZedACP Protocol Compliance Tests"),
+            (
+                "test_tool_protocol_compliance.py",
+                "A2A and ZedACP Protocol Compliance Tests",
+            ),
             ("test_tool_system_integration.py", "End-to-End Integration Tests"),
         ]
 
-        print(f"\n{'📋'*20} PROTOCOL TESTS {'📋'*20}")
+        print(f"\n{'📋' * 20} PROTOCOL TESTS {'📋' * 20}")
 
         for test_file, description in protocol_tests:
             # Use absolute path from the tests directory
@@ -116,7 +119,7 @@ class ToolTestRunner:
 
     def run_integration_tests(self) -> Dict[str, Any]:
         """Run integration tests with dummy agent."""
-        print(f"\n{'🔗'*20} INTEGRATION TESTS {'🔗'*20}")
+        print(f"\n{'🔗' * 20} INTEGRATION TESTS {'🔗' * 20}")
 
         # Test dummy agent functionality
         integration_tests = [
@@ -129,13 +132,18 @@ class ToolTestRunner:
                 try:
                     # Simple import test instead of execution test
                     import importlib.util
-                    spec = importlib.util.spec_from_file_location("dummy_agent", test_file)
+
+                    spec = importlib.util.spec_from_file_location(
+                        "dummy_agent", test_file
+                    )
                     if spec is not None:
                         importlib.util.module_from_spec(spec)
                         # Just test that it can be loaded without syntax errors
                         print(f"✅ PASSED: {description} - Module structure is valid")
                     else:
-                        print(f"❌ FAILED: {description} - Could not create module spec")
+                        print(
+                            f"❌ FAILED: {description} - Could not create module spec"
+                        )
                 except Exception as e:
                     print(f"❌ FAILED: {description} - {e}")
             else:
@@ -145,7 +153,7 @@ class ToolTestRunner:
 
     def run_system_tests(self) -> Dict[str, Any]:
         """Run full system tests."""
-        print(f"\n{'🚀'*20} SYSTEM TESTS {'🚀'*20}")
+        print(f"\n{'🚀' * 20} SYSTEM TESTS {'🚀' * 20}")
 
         # Test complete system integration
         try:
@@ -168,7 +176,7 @@ class ToolTestRunner:
             "passed": 0,
             "failed": 0,
             "skipped": 0,
-            "duration": 0.0
+            "duration": 0.0,
         }
 
         for test_file, result in self.test_results.items():
@@ -187,33 +195,41 @@ class ToolTestRunner:
         """Print comprehensive test summary."""
         total_time = time.time() - self.start_time
 
-        print(f"\n{'🎯'*20} TEST SUMMARY {'🎯'*20}")
+        print(f"\n{'🎯' * 20} TEST SUMMARY {'🎯' * 20}")
         print(f"Total execution time: {total_time:.2f} seconds")
         print()
 
         # Overall statistics
-        total_tests = sum(results["total"] for results in [
-            self.get_suite_results("unit_tests"),
-            self.get_suite_results("protocol_tests"),
-            self.get_suite_results("integration_tests"),
-            self.get_suite_results("system_tests")
-        ])
+        total_tests = sum(
+            results["total"]
+            for results in [
+                self.get_suite_results("unit_tests"),
+                self.get_suite_results("protocol_tests"),
+                self.get_suite_results("integration_tests"),
+                self.get_suite_results("system_tests"),
+            ]
+        )
 
-        total_passed = sum(results["passed"] for results in [
-            self.get_suite_results("unit_tests"),
-            self.get_suite_results("protocol_tests"),
-            self.get_suite_results("integration_tests"),
-            self.get_suite_results("system_tests")
-        ])
+        total_passed = sum(
+            results["passed"]
+            for results in [
+                self.get_suite_results("unit_tests"),
+                self.get_suite_results("protocol_tests"),
+                self.get_suite_results("integration_tests"),
+                self.get_suite_results("system_tests"),
+            ]
+        )
 
-        print(f"Overall Results: {total_passed}/{total_tests} tests passed ({total_passed/total_tests*100:.1f}%)")
+        print(
+            f"Overall Results: {total_passed}/{total_tests} tests passed ({total_passed / total_tests * 100:.1f}%)"
+        )
 
         # Suite breakdown
         suites = [
             ("Unit Tests", self.get_suite_results("unit_tests")),
             ("Protocol Tests", self.get_suite_results("protocol_tests")),
             ("Integration Tests", self.get_suite_results("integration_tests")),
-            ("System Tests", self.get_suite_results("system_tests"))
+            ("System Tests", self.get_suite_results("system_tests")),
         ]
 
         for suite_name, results in suites:
@@ -222,13 +238,14 @@ class ToolTestRunner:
                 print(f"  Passed: {results['passed']}")
                 print(f"  Failed: {results['failed']}")
                 print(f"  Total:  {results['total']}")
-                print(f"  Rate:   {results['passed']/results['total']*100:.1f}%")
+                print(f"  Rate:   {results['passed'] / results['total'] * 100:.1f}%")
 
         # Failed test details
         failed_tests = [
             (test_file, result)
             for test_file, result in self.test_results.items()
-            if not result.get("success", False) and result.get("error") != "Test timeout"
+            if not result.get("success", False)
+            and result.get("error") != "Test timeout"
         ]
 
         if failed_tests:
@@ -236,7 +253,7 @@ class ToolTestRunner:
             for test_file, result in failed_tests:
                 print(f"  {test_file}: {result.get('error', 'Unknown error')}")
 
-        print(f"\n{'🎯'*60}")
+        print(f"\n{'🎯' * 60}")
 
     def run_all_tests(self) -> bool:
         """Run all test suites and return overall success."""
@@ -259,7 +276,7 @@ class ToolTestRunner:
                 self.get_suite_results("unit_tests"),
                 self.get_suite_results("protocol_tests"),
                 self.get_suite_results("integration_tests"),
-                self.get_suite_results("system_tests")
+                self.get_suite_results("system_tests"),
             ]
             if results["total"] > 0
         )

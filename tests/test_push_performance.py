@@ -41,7 +41,7 @@ class TestPushNotificationPerformance:
                 config = TaskPushNotificationConfig(
                     id=f"perf-config-{i}",
                     task_id=f"perf-task-{i % 10}",  # 10 different tasks
-                    url=f"https://example.com/webhook/{i}"
+                    url=f"https://example.com/webhook/{i}",
                 )
                 await push_manager.store_config(config)
 
@@ -71,7 +71,7 @@ class TestPushNotificationPerformance:
                 config = TaskPushNotificationConfig(
                     id=f"perf-multi-config-{i}",
                     task_id=task_id,
-                    url=f"https://example.com/webhook/{i}"
+                    url=f"https://example.com/webhook/{i}",
                 )
                 await push_manager.store_config(config)
 
@@ -85,10 +85,9 @@ class TestPushNotificationPerformance:
             # Test notification creation performance
             for config in configs:
                 # Test that filtering works quickly
-                should_send = push_manager._should_send_notification(config, {
-                    "event": "status_change",
-                    "task_id": task_id
-                })
+                should_send = push_manager._should_send_notification(
+                    config, {"event": "status_change", "task_id": task_id}
+                )
                 assert should_send
 
             end_time = time.time()
@@ -96,7 +95,9 @@ class TestPushNotificationPerformance:
 
             # Should process 50 configs quickly
             assert total_time < 2.0  # Should complete within 2 seconds
-            print(f"Processed {num_endpoints} notification configs in {total_time:.2f} seconds")
+            print(
+                f"Processed {num_endpoints} notification configs in {total_time:.2f} seconds"
+            )
 
         asyncio.run(send_to_many_endpoints())
 
@@ -112,7 +113,7 @@ class TestPushNotificationPerformance:
                     config = TaskPushNotificationConfig(
                         id=f"concurrent-config-{task_i}-{config_i}",
                         task_id=f"concurrent-task-{task_i}",
-                        url=f"https://example.com/concurrent/{task_i}/{config_i}"
+                        url=f"https://example.com/concurrent/{task_i}/{config_i}",
                     )
                     await push_manager.store_config(config)
 
@@ -138,7 +139,9 @@ class TestPushNotificationPerformance:
 
             # Should handle concurrent load efficiently
             assert total_time < 5.0  # Should complete within 5 seconds for 20 tasks
-            print(f"Listed configs for {num_tasks} tasks concurrently in {total_time:.2f} seconds")
+            print(
+                f"Listed configs for {num_tasks} tasks concurrently in {total_time:.2f} seconds"
+            )
 
         asyncio.run(concurrent_operations())
 
@@ -152,7 +155,7 @@ class TestPushNotificationPerformance:
                 config = TaskPushNotificationConfig(
                     id=f"query-perf-{i}",
                     task_id=f"query-task-{i % 50}",  # 50 different tasks
-                    url=f"https://example.com/query/{i}"
+                    url=f"https://example.com/query/{i}",
                 )
                 await push_manager.store_config(config)
 
@@ -166,7 +169,9 @@ class TestPushNotificationPerformance:
             query_time = end_time - start_time
             assert query_time < 2.0  # Should query 50 tasks quickly
 
-            print(f"Queried {num_configs} configs across 50 tasks in {query_time:.2f} seconds")
+            print(
+                f"Queried {num_configs} configs across 50 tasks in {query_time:.2f} seconds"
+            )
 
         asyncio.run(database_performance_test())
 
@@ -184,7 +189,7 @@ class TestPushNotificationPerformance:
                 config = TaskPushNotificationConfig(
                     id=f"memory-test-{i}",
                     task_id="memory-test-task",
-                    url=f"https://example.com/memory/{i}"
+                    url=f"https://example.com/memory/{i}",
                 )
                 await push_manager.store_config(config)
 
@@ -215,7 +220,7 @@ class TestPushNotificationPerformance:
                 config = TaskPushNotificationConfig(
                     id=f"cleanup-perf-{i}",
                     task_id=f"cleanup-task-{i % 25}",  # 25 different tasks
-                    url=f"https://example.com/cleanup/{i}"
+                    url=f"https://example.com/cleanup/{i}",
                 )
                 await push_manager.store_config(config)
 
@@ -224,13 +229,17 @@ class TestPushNotificationPerformance:
             total_deleted = 0
 
             for task_i in range(25):
-                deleted = await push_manager.cleanup_by_task_state(f"cleanup-task-{task_i}", "failed")
+                deleted = await push_manager.cleanup_by_task_state(
+                    f"cleanup-task-{task_i}", "failed"
+                )
                 total_deleted += deleted
 
             end_time = time.time()
             cleanup_time = end_time - start_time
 
-            assert total_deleted == num_configs  # All configs should be deleted for failed tasks
+            assert (
+                total_deleted == num_configs
+            )  # All configs should be deleted for failed tasks
             assert cleanup_time < 5.0  # Should cleanup quickly
 
             print(f"Cleaned up {total_deleted} configs in {cleanup_time:.2f} seconds")
@@ -251,7 +260,9 @@ class TestPushNotificationPerformance:
 
             start_time = time.time()
             for i in range(num_connections):
-                connection_id, connection = await streaming_mgr.register_sse_connection([f"task-{i}"])
+                connection_id, connection = await streaming_mgr.register_sse_connection(
+                    [f"task-{i}"]
+                )
                 connections.append((connection_id, connection))
             end_time = time.time()
 
@@ -260,10 +271,10 @@ class TestPushNotificationPerformance:
 
             # Test broadcasting performance
             broadcast_start = time.time()
-            await streaming_mgr.broadcast_notification("test-task", {
-                "event": "broadcast_performance_test",
-                "data": "test_data"
-            })
+            await streaming_mgr.broadcast_notification(
+                "test-task",
+                {"event": "broadcast_performance_test", "data": "test_data"},
+            )
             broadcast_end = time.time()
 
             broadcast_time = broadcast_end - broadcast_start
@@ -279,7 +290,9 @@ class TestPushNotificationPerformance:
             assert cleanup_time < 2.0  # Cleanup should be efficient
 
             print("Streaming performance:")
-            print(f"  Registered {num_connections} connections in {registration_time:.2f}s")
+            print(
+                f"  Registered {num_connections} connections in {registration_time:.2f}s"
+            )
             print(f"  Broadcast to connections in {broadcast_time:.2f}s")
             print(f"  Cleaned up connections in {cleanup_time:.2f}s")
 
@@ -287,6 +300,7 @@ class TestPushNotificationPerformance:
 
     def test_high_throughput_scenario(self, test_db, push_manager):
         """Test system under high throughput conditions."""
+
         async def high_throughput_test():
             # Simulate high throughput: rapid config creation and listing
 
@@ -300,7 +314,7 @@ class TestPushNotificationPerformance:
                     config = TaskPushNotificationConfig(
                         id=f"throughput-{batch}-{i}",
                         task_id=f"throughput-task-{batch}",
-                        url=f"https://example.com/throughput/{batch}/{i}"
+                        url=f"https://example.com/throughput/{batch}/{i}",
                     )
                     await push_manager.store_config(config)
                     operations_count += 1
@@ -323,13 +337,16 @@ class TestPushNotificationPerformance:
             throughput = operations_count / total_time
             assert throughput > 3  # Should achieve at least 3 operations per second
 
-            print(f"High throughput test: {operations_count} operations in {total_time:.2f}s")
+            print(
+                f"High throughput test: {operations_count} operations in {total_time:.2f}s"
+            )
             print(f"Average throughput: {throughput:.1f} operations/second")
 
         asyncio.run(high_throughput_test())
 
     def test_scalability_with_task_count(self, test_db, push_manager):
         """Test scalability as the number of tasks increases."""
+
         async def scalability_test():
             # Test with increasing numbers of tasks
             task_counts = [10, 50, 100]
@@ -342,7 +359,7 @@ class TestPushNotificationPerformance:
                     config = TaskPushNotificationConfig(
                         id=f"scale-config-{task_i}",
                         task_id=f"scale-task-{task_i}",
-                        url=f"https://example.com/scale/{task_i}"
+                        url=f"https://example.com/scale/{task_i}",
                     )
                     await push_manager.store_config(config)
 
@@ -364,7 +381,9 @@ class TestPushNotificationPerformance:
 
                 # Clean up for next iteration
                 for task_i in range(num_tasks):
-                    await push_manager.delete_config(f"scale-task-{task_i}", f"scale-config-{task_i}")
+                    await push_manager.delete_config(
+                        f"scale-task-{task_i}", f"scale-config-{task_i}"
+                    )
 
         asyncio.run(scalability_test())
 
@@ -385,6 +404,7 @@ class TestStressTests:
 
     def test_rapid_fire_notifications(self, test_db, push_manager):
         """Test rapid-fire notification config operations."""
+
         async def rapid_fire_test():
             # Set up configs for rapid operations
             num_configs = 50  # Reduced from 200 for faster testing
@@ -396,7 +416,7 @@ class TestStressTests:
                 config = TaskPushNotificationConfig(
                     id=f"rapid-fire-config-{i}",
                     task_id="rapid-fire-task",
-                    url=f"https://example.com/rapid/{i}"
+                    url=f"https://example.com/rapid/{i}",
                 )
                 await push_manager.store_config(config)
 
@@ -419,6 +439,7 @@ class TestStressTests:
 
     def test_large_payload_handling(self, test_db, push_manager):
         """Test handling of large notification payloads."""
+
         async def large_payload_test():
             # Create a large payload for testing payload creation performance
             large_data = {
@@ -426,13 +447,7 @@ class TestStressTests:
                 "task_id": "large-payload-task",
                 "large_field": "x" * 10000,  # 10KB of data
                 "array_field": ["item"] * 1000,  # Array with 1000 items
-                "nested_object": {
-                    "level1": {
-                        "level2": {
-                            "level3": "deep_value"
-                        }
-                    }
-                }
+                "nested_object": {"level1": {"level2": {"level3": "deep_value"}}},
             }
 
             # Test payload creation performance (no HTTP calls)
@@ -440,6 +455,7 @@ class TestStressTests:
 
             # Test that payload creation works with large data
             from a2a_acp.push_notification_manager import PushNotificationManager
+
             mgr = PushNotificationManager(test_db)
 
             # Test payload creation multiple times
@@ -474,13 +490,14 @@ class TestResourceUsage:
 
     def test_connection_pool_efficiency(self, test_db, push_manager):
         """Test that database operations are efficient."""
+
         async def connection_test():
             # Set up multiple configs and test database efficiency
             for i in range(10):
                 config = TaskPushNotificationConfig(
                     id=f"connection-test-{i}",
                     task_id="connection-test-task",
-                    url=f"https://example.com/test/{i}"
+                    url=f"https://example.com/test/{i}",
                 )
                 await push_manager.store_config(config)
 
@@ -491,12 +508,14 @@ class TestResourceUsage:
                 config = TaskPushNotificationConfig(
                     id=f"efficiency-test-{i}",
                     task_id="efficiency-test-task",
-                    url=f"https://example.com/efficiency/{i}"
+                    url=f"https://example.com/efficiency/{i}",
                 )
                 await push_manager.store_config(config)
 
                 # Immediately retrieve to test round-trip performance
-                retrieved = await push_manager.get_config("efficiency-test-task", f"efficiency-test-{i}")
+                retrieved = await push_manager.get_config(
+                    "efficiency-test-task", f"efficiency-test-{i}"
+                )
                 assert retrieved is not None
 
             end_time = time.time()
@@ -522,7 +541,7 @@ class TestResourceUsage:
                 config = TaskPushNotificationConfig(
                     id=f"gc-test-{i}",
                     task_id="gc-test-task",
-                    url=f"https://example.com/gc/{i}"
+                    url=f"https://example.com/gc/{i}",
                 )
                 await push_manager.store_config(config)
 
@@ -545,7 +564,9 @@ class TestResourceUsage:
 
             # Object count should be reasonable
             assert object_increase < 5000
-            print(f"Garbage collection test completed. Object increase: {object_increase}")
+            print(
+                f"Garbage collection test completed. Object increase: {object_increase}"
+            )
 
         asyncio.run(gc_test())
 

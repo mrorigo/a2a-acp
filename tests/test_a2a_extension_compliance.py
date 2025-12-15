@@ -69,9 +69,11 @@ def mock_task_manager_full(mock_push_manager):
     mock = AsyncMock(spec=A2ATaskManager)
     tool_calls_by_task: dict[str, ToolCall] = {}
     tool_call_counter = {"count": 0}
+
     def _next_tool_call_id() -> str:
         tool_call_counter["count"] += 1
         return f"tc_rfc_{tool_call_counter['count']}"
+
     tasks_by_id: dict[str, Task] = {}
 
     def _build_dev_tool_metadata(task_id: str) -> dict:
@@ -122,7 +124,9 @@ def mock_task_manager_full(mock_push_manager):
         }
         await mock_push_manager.send_notification(task_id, payload)
 
-    async def create_task_mock(context_id, agent_name, initial_message=None, metadata=None):
+    async def create_task_mock(
+        context_id, agent_name, initial_message=None, metadata=None
+    ):
         task_id = create_task_id()
         task = Task(
             id=task_id,
@@ -153,17 +157,29 @@ def mock_task_manager_full(mock_push_manager):
         tool_name = "echo"
         confirmation_request = ConfirmationRequest(
             options=[
-                ConfirmationOption(id="approve", name="Approve", description="Approve tool call"),
-                ConfirmationOption(id="deny", name="Deny", description="Deny tool call"),
+                ConfirmationOption(
+                    id="approve", name="Approve", description="Approve tool call"
+                ),
+                ConfirmationOption(
+                    id="deny", name="Deny", description="Deny tool call"
+                ),
             ],
-            details=GenericDetails(description=f"Permission required to run {tool_name}"),
+            details=GenericDetails(
+                description=f"Permission required to run {tool_name}"
+            ),
         )
         tool_call_id = _next_tool_call_id()
         tool_call = ToolCall(
             tool_call_id=tool_call_id,
             status=ToolCallStatus.PENDING,
             tool_name=tool_name,
-            input_parameters={"message": initial_message.parts[0].text if initial_message and initial_message.parts else ""},
+            input_parameters={
+                "message": (
+                    initial_message.parts[0].text
+                    if initial_message and initial_message.parts
+                    else ""
+                )
+            },
             confirmation_request=confirmation_request,
         )
 
@@ -183,7 +199,9 @@ def mock_task_manager_full(mock_push_manager):
             )
 
         tool_calls_by_task[task_id] = tool_call
-        dev_tool_meta.setdefault("tool_calls", {})[tool_call.tool_call_id] = tool_call.to_dict()
+        dev_tool_meta.setdefault("tool_calls", {})[tool_call.tool_call_id] = (
+            tool_call.to_dict()
+        )
         tasks_by_id[task_id] = task
         await _emit_push_event(task_id, event="task_created")
         return task
@@ -195,7 +213,10 @@ def mock_task_manager_full(mock_push_manager):
                 return _snapshot_task(task_id, TaskState.INPUT_REQUIRED)
 
             message_content = tool_call.input_parameters.get("message", "")
-            if "Confirm" in message_content and tool_call.status == ToolCallStatus.PENDING:
+            if (
+                "Confirm" in message_content
+                and tool_call.status == ToolCallStatus.PENDING
+            ):
                 return _snapshot_task(task_id, TaskState.INPUT_REQUIRED)
 
             tool_call.status = ToolCallStatus.SUCCEEDED
@@ -222,7 +243,9 @@ def mock_task_manager_full(mock_push_manager):
         await _emit_push_event(task_id, event="task_status_check")
         return snapshot
 
-    async def provide_input_and_continue_mock(task_id, user_input=None, *args, **kwargs):
+    async def provide_input_and_continue_mock(
+        task_id, user_input=None, *args, **kwargs
+    ):
         tool_call = tool_calls_by_task.get(task_id)
         metadata = {}
         if user_input and hasattr(user_input, "metadata"):
@@ -253,6 +276,7 @@ def mock_task_manager_full(mock_push_manager):
     mock.execute_task.side_effect = execute_task_mock
     mock.get_task.side_effect = get_task_mock
     mock.provide_input_and_continue.side_effect = provide_input_and_continue_mock
+
     async def get_task_id_for_tool_call(tool_call_id):
         for tid, tc in tool_calls_by_task.items():
             if tc.tool_call_id == tool_call_id:
@@ -278,18 +302,24 @@ def mock_push_manager():
 
 
 @pytest.fixture
-def test_client_full(mock_settings, mock_tool_manager, mock_task_manager_full, mock_push_manager):
+def test_client_full(
+    mock_settings, mock_tool_manager, mock_task_manager_full, mock_push_manager
+):
     """Test client with full mocks for E2E simulation."""
     context_manager = MagicMock()
     context_manager.create_context = AsyncMock(return_value="ctx")
     context_manager.add_task_to_context = AsyncMock()
     context_manager.add_message_to_context = AsyncMock()
     with (
-        patch("a2a_acp.main.get_tool_configuration_manager", return_value=mock_tool_manager),
+        patch(
+            "a2a_acp.main.get_tool_configuration_manager",
+            return_value=mock_tool_manager,
+        ),
         patch("a2a_acp.main.get_task_manager", return_value=mock_task_manager_full),
         patch("a2a_acp.main.PushNotificationManager", return_value=mock_push_manager),
         patch("a2a_acp.main.get_context_manager", return_value=context_manager),
     ):
+
         class DummyZedAgentConnection:
             def __init__(self, *args, **kwargs):
                 pass
@@ -315,7 +345,9 @@ def test_client_full(mock_settings, mock_tool_manager, mock_task_manager_full, m
 class TestRFCFlowSimulation:
     """Tests simulating complete RFC flows (tool call lifecycle, etc.)."""
 
-    def test_complete_tool_call_lifecycle(self, test_client_full, mock_task_manager_full):
+    def test_complete_tool_call_lifecycle(
+        self, test_client_full, mock_task_manager_full
+    ):
         """Simulate full tool call flow: pending -> confirmation -> executing -> succeeded."""
         # 1. Create task that triggers tool call (via message)
         message_data = {
@@ -324,7 +356,9 @@ class TestRFCFlowSimulation:
             "messageId": str(create_message_id()),
             "metadata": {},
         }
-        response = test_client_full.post("/a2a/message/send", json={"message": message_data})
+        response = test_client_full.post(
+            "/a2a/message/send", json={"message": message_data}
+        )
 
         assert response.status_code == 200
         task_data = response.json()["task"]
@@ -358,19 +392,26 @@ class TestRFCFlowSimulation:
         assert continue_response.status_code == 200
         continued_task = continue_response.json()["task"]
         continued_metadata = continued_task["metadata"]["development-tool"]
-        updated_tool_call = ToolCall.from_dict(list(continued_metadata["tool_calls"].values())[0])
+        updated_tool_call = ToolCall.from_dict(
+            list(continued_metadata["tool_calls"].values())[0]
+        )
         assert updated_tool_call.status == ToolCallStatus.EXECUTING
 
         # 3. Verify completion: get task shows SUCCEEDED
-        get_response = test_client_full.post("/a2a/rpc", json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tasks/get",
-            "params": {"id": task_id},
-        })
+        get_response = test_client_full.post(
+            "/a2a/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tasks/get",
+                "params": {"id": task_id},
+            },
+        )
         final_task = get_response.json()["result"]
         final_dev_tool = final_task["metadata"]["development-tool"]
-        final_tool_call = ToolCall.from_dict(list(final_dev_tool["tool_calls"].values())[0])
+        final_tool_call = ToolCall.from_dict(
+            list(final_dev_tool["tool_calls"].values())[0]
+        )
         assert final_tool_call.status == ToolCallStatus.SUCCEEDED
         assert isinstance(final_tool_call.result, ToolOutput)
         assert "echo" in final_tool_call.result.content  # From mock
@@ -387,7 +428,9 @@ class TestRFCFlowSimulation:
             "messageId": str(create_message_id()),
             "metadata": {},
         }
-        response = test_client_full.post("/a2a/message/send", json={"message": message_data})
+        response = test_client_full.post(
+            "/a2a/message/send", json={"message": message_data}
+        )
         task_data = response.json()["task"]
         task_id = task_data["id"]
 
@@ -411,7 +454,9 @@ class TestRFCFlowSimulation:
                 "development-tool": {"tool_call_confirmation": deny_confirmation},
             },
         }
-        deny_response = test_client_full.post("/a2a/message/send", json={"message": deny_input})
+        deny_response = test_client_full.post(
+            "/a2a/message/send", json={"message": deny_input}
+        )
         assert deny_response.status_code == 200
         denied_task = deny_response.json()["task"]
         denied_tool_call = ToolCall.from_dict(
@@ -427,7 +472,9 @@ class TestRFCFlowSimulation:
             "parts": [{"kind": "text", "text": "Approve tool"}],
             "messageId": str(create_message_id()),
         }
-        approve_response = test_client_full.post("/a2a/message/send", json={"message": approve_message})
+        approve_response = test_client_full.post(
+            "/a2a/message/send", json={"message": approve_message}
+        )
         approve_task = approve_response.json()["task"]
         approve_tool_call = ToolCall.from_dict(
             list(approve_task["metadata"]["development-tool"]["tool_calls"].values())[0]
@@ -446,7 +493,9 @@ class TestSlashCommandExecutionLifecycle:
         commands = commands_resp.json()["commands"]
         assert len(commands) > 0
         cmd_name = commands[0]["name"]
-        cmd_args = {arg["name"]: "test" for arg in commands[0]["arguments"] if arg["required"]}
+        cmd_args = {
+            arg["name"]: "test" for arg in commands[0]["arguments"] if arg["required"]
+        }
 
         # 2. Execute command
         exec_request = {"command": cmd_name, "arguments": cmd_args}
@@ -475,7 +524,9 @@ class TestSlashCommandExecutionLifecycle:
         # 4. Simulate completion (mocked)
         assert task_data["status"]["state"] == "completed"  # From mock
 
-    def test_slash_command_push_notification_with_metadata(self, test_client_full, mock_push_manager):
+    def test_slash_command_push_notification_with_metadata(
+        self, test_client_full, mock_push_manager
+    ):
         """Test slash command execution emits push notification with extension metadata."""
         exec_request = {"command": "echo", "arguments": {"message": "Notify"}}
         test_client_full.post("/a2a/command/execute", json=exec_request)
@@ -491,11 +542,19 @@ class TestSlashCommandExecutionLifecycle:
 class TestPushNotificationsWithExtensionMetadata:
     """Tests for push notifications including extension metadata."""
 
-    def test_task_events_include_development_tool_metadata(self, test_client_full, mock_push_manager):
+    def test_task_events_include_development_tool_metadata(
+        self, test_client_full, mock_push_manager
+    ):
         """Test task status changes include DevelopmentToolEvent in notifications."""
         # Create task
-        message_data = {"role": "user", "parts": [{"kind": "text", "text": "Test event"}], "messageId": str(create_message_id())}
-        response = test_client_full.post("/a2a/message/send", json={"message": message_data})
+        message_data = {
+            "role": "user",
+            "parts": [{"kind": "text", "text": "Test event"}],
+            "messageId": str(create_message_id()),
+        }
+        response = test_client_full.post(
+            "/a2a/message/send", json={"message": message_data}
+        )
         task_id = response.json()["task"]["id"]
 
         # Verify notifications emitted with metadata
@@ -507,20 +566,33 @@ class TestPushNotificationsWithExtensionMetadata:
                 assert isinstance(dev_meta, dict)
                 # Verify structure
                 if "tool_calls" in dev_meta:
-                    tool_call = ToolCall.from_dict(list(dev_meta["tool_calls"].values())[0])
-                    assert tool_call.status in [ToolCallStatus.PENDING, ToolCallStatus.SUCCEEDED]
+                    tool_call = ToolCall.from_dict(
+                        list(dev_meta["tool_calls"].values())[0]
+                    )
+                    assert tool_call.status in [
+                        ToolCallStatus.PENDING,
+                        ToolCallStatus.SUCCEEDED,
+                    ]
 
-    def test_error_notifications_include_error_details(self, test_client_full, mock_push_manager):
+    def test_error_notifications_include_error_details(
+        self, test_client_full, mock_push_manager
+    ):
         """Test error events include ErrorDetails in metadata."""
         # Mock task failure
         with patch.object(mock_push_manager, "send_notification"):
             # Simulate failed task (via RPC or send)
-            fail_message = {"role": "user", "parts": [{"kind": "text", "text": "Fail task"}], "messageId": str(create_message_id())}
+            fail_message = {
+                "role": "user",
+                "parts": [{"kind": "text", "text": "Fail task"}],
+                "messageId": str(create_message_id()),
+            }
             test_client_full.post("/a2a/message/send", json={"message": fail_message})
 
         # Verify failure notification
         calls = mock_push_manager.send_notification.call_args_list
-        failure_call = next((c for c in calls if c[0][1].get("event") == "task_failed"), None)
+        failure_call = next(
+            (c for c in calls if c[0][1].get("event") == "task_failed"), None
+        )
         if failure_call:
             payload = failure_call[0][1]
             dev_meta = payload.get("development_tool_metadata", {})
@@ -540,7 +612,9 @@ class TestBackwardCompatibility:
             "parts": [{"kind": "text", "text": "Simple message"}],
             "messageId": str(create_message_id()),
         }
-        response = test_client_full.post("/a2a/message/send", json={"message": message_data})
+        response = test_client_full.post(
+            "/a2a/message/send", json={"message": message_data}
+        )
 
         assert response.status_code == 200
         task_data = response.json()["task"]
@@ -550,7 +624,9 @@ class TestBackwardCompatibility:
         assert task_data["status"]["state"] == "completed"  # Mock
         # Extension metadata optional, not required
         metadata = task_data.get("metadata", {})
-        assert "development-tool" not in metadata or isinstance(metadata.get("development-tool"), dict)
+        assert "development-tool" not in metadata or isinstance(
+            metadata.get("development-tool"), dict
+        )
 
     def test_extension_optional_in_agent_card(self, test_client_full):
         """Test agent card works without extension when disabled."""
@@ -569,10 +645,16 @@ class TestBackwardCompatibility:
             # No extensions
             assert "extensions" not in capabilities
 
-    def test_push_notifications_backward_compatible(self, test_client_full, mock_push_manager):
+    def test_push_notifications_backward_compatible(
+        self, test_client_full, mock_push_manager
+    ):
         """Test push notifications work without extension metadata for legacy clients."""
         # Send message
-        message_data = {"role": "user", "parts": [{"kind": "text", "text": "Legacy test"}], "messageId": str(create_message_id())}
+        message_data = {
+            "role": "user",
+            "parts": [{"kind": "text", "text": "Legacy test"}],
+            "messageId": str(create_message_id()),
+        }
         test_client_full.post("/a2a/message/send", json={"message": message_data})
 
         # Verify notifications emitted with optional metadata
@@ -600,9 +682,17 @@ async def test_full_rfc_example_flow(test_client_full):
             "agent_settings": {"workspace_path": "/rfc/workspace"},
         },
     }
-    init_response = test_client_full.post("/a2a/message/send", json={"message": settings_message})
+    init_response = test_client_full.post(
+        "/a2a/message/send", json={"message": settings_message}
+    )
     init_task = init_response.json()["task"]
-    assert init_task["metadata"].get("development-tool", {}).get("agent_settings", {}).get("workspace_path") == "/rfc/workspace"
+    assert (
+        init_task["metadata"]
+        .get("development-tool", {})
+        .get("agent_settings", {})
+        .get("workspace_path")
+        == "/rfc/workspace"
+    )
 
     # Step 2: Get slash commands
     commands_resp = test_client_full.get("/a2a/commands/get")
@@ -616,7 +706,12 @@ async def test_full_rfc_example_flow(test_client_full):
     exec_id = exec_resp.json()["execution_id"]
 
     # Step 4: Get task and verify slash metadata
-    get_rpc = {"jsonrpc": "2.0", "id": 4, "method": "tasks/get", "params": {"id": exec_id}}
+    get_rpc = {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tasks/get",
+        "params": {"id": exec_id},
+    }
     task_resp = test_client_full.post("/a2a/rpc", json=get_rpc)
     slash_task = task_resp.json()["result"]
     assert slash_task["metadata"]["type"] == "slash_command"
@@ -635,7 +730,9 @@ async def test_full_rfc_example_flow(test_client_full):
             }
         },
     }
-    confirm_resp = test_client_full.post("/a2a/message/send", json={"message": confirm_input})
+    confirm_resp = test_client_full.post(
+        "/a2a/message/send", json={"message": confirm_input}
+    )
     assert confirm_resp.status_code == 200
 
     # Step 6: Verify completion with push notification metadata

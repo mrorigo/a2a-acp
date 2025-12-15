@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ContextState:
     """A2A context state with ACP session mapping."""
+
     context_id: str
     agent_name: str
     acp_session_id: Optional[str] = None
@@ -64,9 +65,7 @@ class A2AContextManager:
         return self._lock
 
     async def create_context(
-        self,
-        agent_name: str,
-        metadata: Optional[Dict[str, Any]] = None
+        self, agent_name: str, metadata: Optional[Dict[str, Any]] = None
     ) -> str:
         """Create a new A2A context."""
         async with self.lock:
@@ -79,7 +78,7 @@ class A2AContextManager:
                 agent=agent_name,
                 cwd=".",
                 zed_session_id="",  # Will be set later when ZedACP session is created
-                metadata=metadata or {}
+                metadata=metadata or {},
             )
 
             # Create context state
@@ -87,13 +86,19 @@ class A2AContextManager:
                 context_id=context_id,
                 agent_name=agent_name,
                 acp_session_id=acp_session_id,
-                metadata=metadata or {}
+                metadata=metadata or {},
             )
 
             self._active_contexts[context_id] = context_state
 
-            logger.info("Created A2A context",
-                       extra={"context_id": context_id, "agent": agent_name, "acp_session": acp_session_id})
+            logger.info(
+                "Created A2A context",
+                extra={
+                    "context_id": context_id,
+                    "agent": agent_name,
+                    "acp_session": acp_session_id,
+                },
+            )
 
             return context_id
 
@@ -111,7 +116,7 @@ class A2AContextManager:
                 agent_name=acp_session.agent_name,
                 acp_session_id=acp_session.context_id,
                 created_at=acp_session.created_at,
-                updated_at=acp_session.updated_at
+                updated_at=acp_session.updated_at,
             )
             self._active_contexts[context_id] = context_state
             return context_state
@@ -130,8 +135,10 @@ class A2AContextManager:
                     context_state.tasks.append(task)
                 context_state.updated_at = datetime.now(timezone.utc)
 
-                logger.debug("Added task to context",
-                           extra={"context_id": context_id, "task_id": task.id})
+                logger.debug(
+                    "Added task to context",
+                    extra={"context_id": context_id, "task_id": task.id},
+                )
 
     async def add_message_to_context(self, context_id: str, message: Message) -> None:
         """Add a message to an A2A context."""
@@ -142,8 +149,10 @@ class A2AContextManager:
                     context_state.messages.append(message)
                 context_state.updated_at = datetime.now(timezone.utc)
 
-                logger.debug("Added message to context",
-                           extra={"context_id": context_id, "message_id": message.messageId})
+                logger.debug(
+                    "Added message to context",
+                    extra={"context_id": context_id, "message_id": message.messageId},
+                )
 
     async def list_contexts(self) -> List[ContextState]:
         """List all active contexts."""
@@ -173,7 +182,9 @@ class A2AContextManager:
 
         # Load from database if available
         context_state = await self.get_context(context_id)
-        return context_state.messages if context_state and context_state.messages else []
+        return (
+            context_state.messages if context_state and context_state.messages else []
+        )
 
     async def close_context(self, context_id: str) -> bool:
         """Close an A2A context."""
@@ -188,8 +199,13 @@ class A2AContextManager:
                 # Remove from memory
                 del self._active_contexts[context_id]
 
-                logger.info("Closed A2A context",
-                           extra={"context_id": context_id, "acp_session": context_state.acp_session_id})
+                logger.info(
+                    "Closed A2A context",
+                    extra={
+                        "context_id": context_id,
+                        "acp_session": context_state.acp_session_id,
+                    },
+                )
                 return True
 
             return False
@@ -200,12 +216,17 @@ class A2AContextManager:
         cutoff_time = datetime.now(timezone.utc).timestamp() - (24 * 3600)
 
         # Use the database cleanup method
-        cleaned_count = await _db.cleanup_inactive_sessions(days_old=1)  # 24 hours = 1 day
+        cleaned_count = await _db.cleanup_inactive_sessions(
+            days_old=1
+        )  # 24 hours = 1 day
 
         # Remove from memory
         to_remove = []
         for context_id, context_state in self._active_contexts.items():
-            if not context_state.updated_at or context_state.updated_at.timestamp() < cutoff_time:
+            if (
+                not context_state.updated_at
+                or context_state.updated_at.timestamp() < cutoff_time
+            ):
                 to_remove.append(context_id)
 
         for context_id in to_remove:

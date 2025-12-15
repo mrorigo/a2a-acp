@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ToolParameter:
     """Definition of a tool parameter with validation rules."""
+
     name: str
     type: str  # string, number, boolean, object, array
     required: bool = False
@@ -68,6 +69,7 @@ class ToolParameter:
 @dataclass
 class ToolConfig:
     """Sandboxing and execution configuration for a tool."""
+
     requires_confirmation: bool = False
     confirmation_message: str = ""
     timeout: int = 30
@@ -75,23 +77,26 @@ class ToolConfig:
     use_temp_isolation: bool = False  # New: Whether to create isolated temp directory
     environment_variables: Optional[Dict[str, str]] = None
     allowed_commands: Optional[List[str]] = None  # Command allowlist for security
-    allowed_paths: List[str] = field(default_factory=list)  # Paths allowed when not using temp isolation
+    allowed_paths: List[str] = field(
+        default_factory=list
+    )  # Paths allowed when not using temp isolation
     resource_limits: Optional[Dict[str, Any]] = None
     caching_enabled: bool = True
     cache_ttl_seconds: int = 3600  # 1 hour default
     cache_max_size_mb: float = 100.0
 
     # Process-level resource limits (overrides sandbox defaults)
-    max_memory_mb: Optional[int] = None      # Max memory in MB (default: 512)
+    max_memory_mb: Optional[int] = None  # Max memory in MB (default: 512)
     max_cpu_time_seconds: Optional[int] = None  # Max CPU time in seconds (default: 30)
-    max_file_size_mb: Optional[int] = None   # Max file size in MB (default: 10)
-    max_open_files: Optional[int] = None     # Max open files (default: 100)
-    max_processes: Optional[int] = None      # Max child processes (default: 10)
+    max_file_size_mb: Optional[int] = None  # Max file size in MB (default: 10)
+    max_open_files: Optional[int] = None  # Max open files (default: 100)
+    max_processes: Optional[int] = None  # Max child processes (default: 10)
 
 
 @dataclass
 class ToolErrorMappingEntry:
     """Maps a tool exit code to a Zed MCP error response."""
+
     code: int
     message: Optional[str] = None
     retryable: Optional[bool] = None
@@ -101,6 +106,7 @@ class ToolErrorMappingEntry:
 @dataclass
 class BashTool:
     """Complete definition of a bash-based tool."""
+
     id: str
     name: str
     description: str
@@ -117,7 +123,9 @@ class BashTool:
 
     def __post_init__(self):
         """Normalize nested configuration structures for consistent typing."""
-        self.parameters = [self._normalize_parameter(p) for p in (self.parameters or [])]
+        self.parameters = [
+            self._normalize_parameter(p) for p in (self.parameters or [])
+        ]
         self.config = self._normalize_config(self.config)
 
     def _normalize_parameter(self, param: Any) -> ToolParameter:
@@ -191,7 +199,7 @@ class BashTool:
             "parameter_count": len(self.parameters),
             "requires_confirmation": self.config.requires_confirmation,
             "timeout": self.config.timeout,
-            "working_directory": self.config.working_directory
+            "working_directory": self.config.working_directory,
         }
 
     def to_dict(self) -> Dict[str, Any]:
@@ -211,7 +219,7 @@ class BashTool:
                     "enum": p.enum,
                     "minimum": p.minimum,
                     "maximum": p.maximum,
-                    "pattern": p.pattern
+                    "pattern": p.pattern,
                 }
                 for p in self.parameters
             ],
@@ -231,21 +239,25 @@ class BashTool:
                 "max_cpu_time_seconds": self.config.max_cpu_time_seconds,
                 "max_file_size_mb": self.config.max_file_size_mb,
                 "max_open_files": self.config.max_open_files,
-                "max_processes": self.config.max_processes
+                "max_processes": self.config.max_processes,
             },
             "tags": self.tags,
             "examples": self.examples,
             "version": self.version,
             "author": self.author,
             "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
         if self.error_mapping:
             data["error_mapping"] = {
                 str(code): {
                     "code": entry.code,
                     **({"message": entry.message} if entry.message else {}),
-                    **({"retryable": entry.retryable} if entry.retryable is not None else {}),
+                    **(
+                        {"retryable": entry.retryable}
+                        if entry.retryable is not None
+                        else {}
+                    ),
                     **({"detail": entry.detail} if entry.detail is not None else {}),
                 }
                 for code, entry in self.error_mapping.items()
@@ -255,6 +267,7 @@ class BashTool:
 
 class ToolConfigurationError(Exception):
     """Raised when tool configuration is invalid."""
+
     pass
 
 
@@ -277,12 +290,16 @@ class ToolConfigurationManager:
             "tools.yml",
             "config/tools.yaml",
             "config/tools.yml",
-            "/etc/a2a-acp/tools.yaml"
+            "/etc/a2a-acp/tools.yaml",
         ]
         base_paths = config_paths if config_paths is not None else default_paths
 
         env_value = os.environ.get("A2A_TOOLS_CONFIG", "")
-        env_paths = [p.strip() for p in env_value.split(os.pathsep) if p.strip()] if env_value else []
+        env_paths = (
+            [p.strip() for p in env_value.split(os.pathsep) if p.strip()]
+            if env_value
+            else []
+        )
 
         combined_paths: List[str] = []
         for path in env_paths + base_paths:
@@ -343,20 +360,24 @@ class ToolConfigurationManager:
                     continue
 
             try:
-               # Load and parse configuration file
-               tools_config = await self._load_config_file(path)
-               if tools_config:
-                   # Validate and create tool objects
-                   tools = await self._parse_tools_config(tools_config, str(path))
-                   updated_tools.update(tools)
-                   self._config_mtimes[config_path] = current_mtime
+                # Load and parse configuration file
+                tools_config = await self._load_config_file(path)
+                if tools_config:
+                    # Validate and create tool objects
+                    tools = await self._parse_tools_config(tools_config, str(path))
+                    updated_tools.update(tools)
+                    self._config_mtimes[config_path] = current_mtime
                 #    logger.info(f"Loaded {len(tools)} tools from {config_path}")
 
             except Exception as e:
-                logger.error(f"Failed to load tools from {config_path}", extra={"error": str(e)})
+                logger.error(
+                    f"Failed to load tools from {config_path}", extra={"error": str(e)}
+                )
                 if config_path not in self._config_mtimes:
                     # Only raise error for new files, not existing ones
-                    raise ToolConfigurationError(f"Failed to load tools from {config_path}: {e}")
+                    raise ToolConfigurationError(
+                        f"Failed to load tools from {config_path}: {e}"
+                    )
 
         self._tools = updated_tools
 
@@ -365,7 +386,7 @@ class ToolConfigurationManager:
         try:
             # Use asyncio.to_thread for file I/O operations
             def read_file():
-                with open(path, 'r', encoding='utf-8') as f:
+                with open(path, "r", encoding="utf-8") as f:
                     return yaml.safe_load(f)
 
             return await asyncio.to_thread(read_file)
@@ -373,17 +394,23 @@ class ToolConfigurationManager:
             logger.error(f"Error reading config file {path}", extra={"error": str(e)})
             return None
 
-    async def _parse_tools_config(self, config: Dict[str, Any], source_file: str) -> Dict[str, BashTool]:
+    async def _parse_tools_config(
+        self, config: Dict[str, Any], source_file: str
+    ) -> Dict[str, BashTool]:
         """Parse tools configuration and create BashTool objects."""
         tools = {}
 
         if not isinstance(config, dict) or "tools" not in config:
-            logger.warning(f"Invalid config format in {source_file}: missing 'tools' key")
+            logger.warning(
+                f"Invalid config format in {source_file}: missing 'tools' key"
+            )
             return tools
 
         tools_config = config["tools"]
         if not isinstance(tools_config, dict):
-            logger.warning(f"Invalid config format in {source_file}: 'tools' must be a dictionary")
+            logger.warning(
+                f"Invalid config format in {source_file}: 'tools' must be a dictionary"
+            )
             return tools
 
         for tool_id, tool_config in tools_config.items():
@@ -394,11 +421,16 @@ class ToolConfigurationManager:
             except ToolConfigurationError:
                 raise
             except Exception as e:
-                logger.error(f"Failed to parse tool '{tool_id}' from {source_file}", extra={"error": str(e)})
+                logger.error(
+                    f"Failed to parse tool '{tool_id}' from {source_file}",
+                    extra={"error": str(e)},
+                )
 
         return tools
 
-    async def _parse_tool_config(self, tool_id: str, config: Dict[str, Any], source_file: str) -> Optional[BashTool]:
+    async def _parse_tool_config(
+        self, tool_id: str, config: Dict[str, Any], source_file: str
+    ) -> Optional[BashTool]:
         """Parse a single tool configuration."""
         try:
             # DEBUG: Parsing tool '{tool_id}' from {source_file}
@@ -417,13 +449,17 @@ class ToolConfigurationManager:
                 # Validate parameter configuration
                 param_name = param_config.get("name", "")
                 if not param_name or not param_name.strip():
-                    logger.error(f"Tool '{tool_id}' has parameter with empty name in {source_file}")
+                    logger.error(
+                        f"Tool '{tool_id}' has parameter with empty name in {source_file}"
+                    )
                     return None
 
                 param_type = param_config.get("type", "string")
                 valid_types = ["string", "number", "boolean", "object", "array"]
                 if param_type not in valid_types:
-                    logger.error(f"Tool '{tool_id}' has parameter '{param_name}' with invalid type '{param_type}' in {source_file}")
+                    logger.error(
+                        f"Tool '{tool_id}' has parameter '{param_name}' with invalid type '{param_type}' in {source_file}"
+                    )
                     return None
 
                 param = ToolParameter(
@@ -435,14 +471,16 @@ class ToolConfigurationManager:
                     enum=param_config.get("enum"),
                     minimum=param_config.get("minimum"),
                     maximum=param_config.get("maximum"),
-                    pattern=param_config.get("pattern")
+                    pattern=param_config.get("pattern"),
                 )
                 parameters.append(param)
 
             # Parse sandbox configuration
             sandbox_config = config.get("sandbox", {})
             tool_config = ToolConfig(
-                requires_confirmation=sandbox_config.get("requires_confirmation", False),
+                requires_confirmation=sandbox_config.get(
+                    "requires_confirmation", False
+                ),
                 confirmation_message=sandbox_config.get("confirmation_message", ""),
                 timeout=sandbox_config.get("timeout", 30),
                 working_directory=sandbox_config.get("working_directory", "/tmp"),
@@ -457,7 +495,7 @@ class ToolConfigurationManager:
                 max_cpu_time_seconds=sandbox_config.get("max_cpu_time_seconds"),
                 max_file_size_mb=sandbox_config.get("max_file_size_mb"),
                 max_open_files=sandbox_config.get("max_open_files"),
-                max_processes=sandbox_config.get("max_processes")
+                max_processes=sandbox_config.get("max_processes"),
             )
 
             # Error mapping configuration (maps process exit codes to MCP errors)
@@ -483,7 +521,9 @@ class ToolConfigurationManager:
                         mcp_code = entry.get("code")
                         message = entry.get("message")
                         retryable_value = entry.get("retryable")
-                        if retryable_value is not None and not isinstance(retryable_value, bool):
+                        if retryable_value is not None and not isinstance(
+                            retryable_value, bool
+                        ):
                             logger.error(
                                 f"Tool '{tool_id}' has non-boolean retryable for exit code {exit_code} in {source_file}"
                             )
@@ -491,7 +531,9 @@ class ToolConfigurationManager:
                             retryable = retryable_value
 
                         detail_value = entry.get("detail")
-                        if detail_value is not None and not isinstance(detail_value, str):
+                        if detail_value is not None and not isinstance(
+                            detail_value, str
+                        ):
                             if self.error_profile is ErrorProfile.ACP_BASIC:
                                 raise ToolConfigurationError(
                                     f"Tool '{tool_id}' uses non-string detail for exit code {exit_code} in {source_file} "
@@ -540,13 +582,15 @@ class ToolConfigurationManager:
                 examples=examples,
                 version=version,
                 author=author,
-                error_mapping=parsed_error_mapping
+                error_mapping=parsed_error_mapping,
             )
 
         except ToolConfigurationError:
             raise
         except Exception as e:
-            logger.error(f"Error parsing tool '{tool_id}' config", extra={"error": str(e)})
+            logger.error(
+                f"Error parsing tool '{tool_id}' config", extra={"error": str(e)}
+            )
             return None
 
     def enable_hot_reload(self, enabled: bool = True) -> None:
