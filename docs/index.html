@@ -3,13 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>A2A-ACP — Native A2A Protocol Server</title>
+  <title>A2A-ACP — Governed Agent-to-Agent Gateway</title>
   <style>
     :root {
-      --bg1: #0f172a;
-      --bg2: #1e293b;
+      --bg1: #020617;
+      --bg2: #0f172a;
+      --bg3: #1e293b;
       --accent1: #f59e0b;
       --accent2: #ef4444;
+      --accent3: #34d399;
       --text: #f1f6fa;
       --muted: #9ca3af;
       --border: rgba(255,255,255,0.08);
@@ -19,124 +21,554 @@
     body {
       margin: 0;
       font-family: 'Inter', system-ui, sans-serif;
-      background: radial-gradient(circle at 30% 20%, var(--bg2), var(--bg1));
+      background: radial-gradient(circle at 20% -10%, rgba(245,158,11,0.15), transparent 45%),
+                  radial-gradient(circle at 80% 0%, rgba(239,68,68,0.2), transparent 50%),
+                  var(--bg1);
       color: var(--text);
-      overflow-x: hidden;
+      min-height: 100vh;
     }
 
-    /* Cloud animation */
-    .clouds {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
+    a { color: inherit; }
+
+    .hero-wrapper {
+      position: relative;
+      padding: 4rem 1.5rem 2rem;
       overflow: hidden;
-      z-index: -1;
-      pointer-events: none;
     }
 
-    .cloud {
+    .grid {
+      display: grid;
+      gap: 1.5rem;
+    }
+
+    .layout {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding-bottom: 4rem;
+    }
+
+    .logo {
+      font-weight: 700;
+      font-size: 1.25rem;
+      letter-spacing: 0.05em;
+      padding: 0.5rem 1.25rem;
+      background: linear-gradient(120deg, var(--accent1), var(--accent2));
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .logo span {
+      font-size: 0.9rem;
+      opacity: 0.9;
+    }
+
+    nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 2rem;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .hero {
+      display: grid;
+      gap: 1.5rem;
+      padding: 1rem 0 2rem;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.4rem, 4vw, 3.5rem);
+      margin-bottom: 0.5rem;
+    }
+
+    .hero p {
+      max-width: 640px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .cta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .cta button {
+      border: none;
+      border-radius: 10px;
+      padding: 0.9rem 1.5rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .cta button.primary {
+      background: linear-gradient(120deg, var(--accent1), var(--accent3));
+      color: white;
+      box-shadow: 0 10px 30px rgba(245,158,11,0.25);
+    }
+
+    .cta button.secondary {
+      background: rgba(255,255,255,0.08);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .cta button:hover {
+      transform: translateY(-2px);
+    }
+
+    .clouds {
       position: absolute;
-      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.08), rgba(255,255,255,0));
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .clouds::after,
+    .clouds::before {
+      content: '';
+      position: absolute;
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(255,255,255,0.12), transparent 60%);
+      filter: blur(60px);
+      animation: float 25s ease-in-out infinite;
+    }
+
+    .clouds::after { top: -80px; right: -80px; }
+    .clouds::before { bottom: -60px; left: -120px; animation-delay: 5s; }
+
+    @keyframes float {
+      0% { transform: translateY(0); }
+      50% { transform: translateY(40px); }
+      100% { transform: translateY(0); }
+    }
+
+    .section {
+      background: rgba(15,23,42,0.85);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 24px;
+      padding: 2rem;
+      box-shadow: 0 20px 60px rgba(2,6,23,0.6);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .section h2 {
+      margin: 0 0 1rem;
+      font-size: 1.75rem;
+    }
+
+    .section p {
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 1.25rem;
+    }
+
+    .badge {
+      border: 1px solid var(--border);
+      padding: 0.5rem 1rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.04);
+      font-size: 0.85rem;
+    }
+
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+
+    .feature-card {
+      padding: 1.4rem;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(239,68,68,0.6);
+      box-shadow: 0 12px 30px rgba(239,68,68,0.15);
+    }
+
+    .feature-card h3 {
+      margin-bottom: 0.5rem;
+    }
+
+    .feature-card p {
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+
+    .timeline-item {
+      padding: 1rem 1.25rem;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+
+    .timeline-item::before {
+      content: '';
+      width: 12px;
+      height: 12px;
       border-radius: 50%;
-      filter: blur(80px);
-      opacity: 0.5;
-      animation: drift 90s linear infinite;
+      background: linear-gradient(120deg, var(--accent1), var(--accent2));
+      flex-shrink: 0;
     }
 
-    .cloud:nth-child(1) { width: 600px; height: 300px; top: 10%; left: -10%; animation-delay: 0s; }
-    .cloud:nth-child(2) { width: 800px; height: 400px; top: 40%; left: 70%; animation-delay: 10s; }
-    .cloud:nth-child(3) { width: 700px; height: 350px; top: 70%; left: -50%; animation-delay: 20s; }
-
-    @keyframes drift {
-      0% { transform: translateX(0); opacity: 0.5; }
-      50% { opacity: 0.7; }
-      100% { transform: translateX(180%); opacity: 0.5; }
+    .quick-list {
+      margin: 1rem 0 0;
+      padding-left: 1.25rem;
+      color: var(--muted);
+      line-height: 1.7;
     }
 
-    .container { max-width: 1100px; margin: 0 auto; padding: 3rem 1.5rem; position: relative; }
+    .doc-list {
+      list-style: none;
+      padding: 0;
+      margin: 1.25rem 0 0;
+      display: grid;
+      gap: 0.75rem;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    }
 
-    .nav { display: flex; justify-content: space-between; align-items: center; }
-    .logo { background: linear-gradient(135deg, var(--accent1), var(--accent2)); color: white; padding: 0.75rem 1.25rem; border-radius: 10px; font-weight: 700; font-size: 1.2rem; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
-    .actions .btn { padding: 0.6rem 1.1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; }
-    .btn.primary { background: linear-gradient(90deg, #ff9f43, #ff5252); color: #fff; }
-    .btn { background: rgba(255,255,255,0.05); color: var(--text); transition: background 0.3s ease; }
-    .btn:hover { background: rgba(255,255,255,0.1); }
+    .doc-card {
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.06);
+      padding: 1rem 1.25rem;
+      background: rgba(255,255,255,0.03);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
 
-    .hero { text-align: center; padding: 0rem 0rem 1rem 2rem; }
-    .hero h1 { font-size: 2.6rem; font-weight: 700; margin-bottom: 1rem; }
-    .hero p { color: var(--muted); max-width: 720px; margin: 0 auto 2rem; font-size: 1.05rem; line-height: 1.6; }
+    .doc-card:hover {
+      border-color: rgba(52,211,153,0.5);
+      box-shadow: 0 16px 35px rgba(52,211,153,0.15);
+    }
 
-    .badges { display: flex; justify-content: center; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 2rem; }
-    .badge { background: rgba(255,255,255,0.08); border: 1px solid var(--border); padding: 0.4rem 0.8rem; border-radius: 999px; font-size: 0.8rem; color: var(--muted); }
+    .stat-grid {
+      margin-top: 1.5rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 0.75rem;
+    }
 
-    .info { max-width: 800px; margin: 2rem auto; color: var(--muted); font-size: 1rem; line-height: 1.6; }
-    .info strong { color: var(--accent1); }
+    .stat {
+      padding: 1.1rem 1.25rem;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      background: rgba(15,23,42,0.7);
+    }
 
-    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-top: 2.5rem; }
-    .card { background: rgba(255,255,255,0.04); border-radius: 10px; padding: 1.2rem; border: 1px solid var(--border); transition: transform 0.2s ease, box-shadow 0.2s ease; }
-    .card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
-    .card h3 { color: var(--accent1); font-size: 1.1rem; margin-bottom: 0.5rem; }
-    .card p { color: var(--muted); margin: 0; }
+    .stat strong {
+      font-size: 0.85rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
 
-    footer { text-align: center; margin-top: 3rem; padding-top: 2rem; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
+    .stat span {
+      font-size: 1.2rem;
+    }
+
+    .agents {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+
+    .agent {
+      padding: 0.5rem 0.9rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.2);
+      font-size: 0.9rem;
+      color: var(--text);
+    }
+
+    .snippet {
+      background: #020617;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 1.5rem;
+      font-family: 'JetBrains Mono', 'SFMono-Regular', monospace;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .snippet code {
+      display: block;
+      white-space: pre-wrap;
+      font-size: 0.9rem;
+      color: #d2d5ff;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 0.35rem 0.9rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 3rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 720px) {
+      nav {
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .section {
+        padding: 1.5rem;
+      }
+    }
   </style>
 </head>
 <body>
-  <div class="clouds">
-    <div class="cloud"></div>
-    <div class="cloud"></div>
-    <div class="cloud"></div>
+  <div class="hero-wrapper">
+    <div class="clouds"></div>
+    <div class="layout">
+      <nav>
+        <div class="logo">
+          A2A-ACP <span>Protocol Gateway</span>
+        </div>
+        <div class="pill">Governed Automation</div>
+      </nav>
+
+      <section class="hero">
+        <div>
+          <h1>Bring Zed ACP agents into every agent workflow.</h1>
+          <p>A2A-ACP makes Claude Code, Codex, and Gemini CLI first-class A2A citizens with a secure, governed protocol server that speaks HTTP, enforces policies, and delivers interactive experiences across teams.</p>
+        </div>
+        <div class="cta">
+          <button class="primary" onclick="openRepo()">View GitHub</button>
+          <button class="secondary" onclick="copyInstall()">Copy curl demo</button>
+        </div>
+      </section>
+    </div>
   </div>
 
-  <div class="container">
-    <nav class="nav">
-      <div class="logo">A2A-ACP</div>
-      <div class="actions">
-        <button class="btn" onclick="openRepo()">GitHub</button>
-        <button class="btn primary" onclick="copyInstall()">Try A2A</button>
+  <div class="layout">
+    <section class="section">
+      <h2>Governed Automation, Visualized</h2>
+      <p>Every request flows through governance pipelines and auto-approval policies so that permission decisions, tool executions, and agent conversations are explainable, auditable, and adaptable.</p>
+      <div class="badge-row">
+        <div class="badge">Auto-approval policies</div>
+        <div class="badge">Scripted & HTTP governors</div>
+        <div class="badge">Permission mediation</div>
+        <div class="badge">Push notifications</div>
       </div>
-    </nav>
-
-    <section class="hero">
-      <h1>Zed ACP Agents, First-Class A2A Citizens</h1>
-      <p>A2A-ACP transforms <strong>Zed ACP agents into first-class citizens</strong> of the modern agent ecosystem. By implementing native A2A v0.3.0 over HTTP, it makes <strong>Claude Code</strong>, <strong>Codex</strong>, and <strong>Gemini CLI</strong> accessible to any A2A-compliant platform, enabling seamless integration into broader agent workflows and applications.</p>
-      <div class="badges">
-        <div class="badge">HTTP-Native Agents</div>
-        <div class="badge">Agent Ecosystem Integration</div>
-        <div class="badge">A2A Platform Compatible</div>
-        <div class="badge">Universal Agent Access</div>
-        <div class="badge">Enterprise Ready</div>
+      <div class="timeline">
+        <div class="timeline-item">
+          <strong>1. Request mediation</strong>
+          <span style="color:var(--muted);">Permission prompts from agents are captured and routed to the same policy pipeline used for tools.</span>
+        </div>
+        <div class="timeline-item">
+          <strong>2. Governor reviews</strong>
+          <span style="color:var(--muted);">Python, script, or HTTP governors can approve, block, or modify actions before execution.</span>
+        </div>
+        <div class="timeline-item">
+          <strong>3. Auditable decisions</strong>
+          <span style="color:var(--muted);">Every outcome is versioned and available via the governance history API.</span>
+        </div>
       </div>
     </section>
 
-    <section class="info">
-      <p><strong>A2A</strong> (Agent-to-Agent Protocol) enables agents to communicate as first-class citizens in modern HTTP-based ecosystems. <strong>Zed ACP</strong> provides powerful agent capabilities but remains isolated to stdio-based tooling.</p>
-      <p><strong>A2A-ACP</strong> bridges this gap by implementing native A2A v0.3.0 over HTTP — making Zed ACP agents accessible to any A2A-compliant platform or application. This unlocks enterprise integration, agent marketplaces, and seamless workflows across different agent ecosystems.</p>
+    <section class="section" style="margin-top: 2rem;">
+      <h2>Quick Start</h2>
+      <p>Follow the README quick start: install, point at your ACP agent, configure credentials, launch the gateway, and ship a JSON-RPC message.</p>
+      <div class="snippet" style="margin-top: 1rem;">
+        <code>git clone https://github.com/mrorigo/a2a-acp.git
+cd a2a-acp
+uv sync && uv pip install -e .
+
+export A2A_AGENT_COMMAND="/usr/local/bin/codex"
+export A2A_AGENT_API_KEY="${OPENAI_API_KEY}"
+export A2A_AUTH_TOKEN="your-secret-token"
+make run</code>
+      </div>
+      <p class="quick-list">Run the JSON-RPC demo and validate it with <code>make test</code> (and the governance-focused pytest slice) once you have tooling and policies wired up.</p>
     </section>
 
-    <section class="info">
-      <h2 style="color:var(--accent1);text-align:center;margin-bottom:1rem;">Universal Agent Access</h2>
-      <p>A2A-ACP makes <strong>Claude Code</strong>, <strong>Codex</strong>, and <strong>Gemini CLI</strong> available to the entire agent ecosystem. No longer confined to local development environments, these agents become accessible via standard HTTP APIs to any A2A-compliant platform, service, or application.</p>
-      <p>This transforms local Zed ACP tools into enterprise-ready services that can participate in automated workflows, agent orchestration platforms, and multi-agent conversations — all while maintaining their full capabilities and interactive potential.</p>
+    <section class="section" style="margin-top: 2rem;">
+      <h2>Docs & Guides</h2>
+      <p>Explore the curated user docs for configuration, deployment, and governance.</p>
+      <ul class="doc-list">
+        <li class="doc-card">
+          <strong>Quick start & installation</strong>
+          <p>Five-minute setup plus environment variables to integrate Claude Code, Codex, and Gemini CLI.</p>
+        </li>
+        <li class="doc-card">
+          <strong>Configuration & security</strong>
+          <p>OAuth, auth tokens, governors, auto-approval policies, and webhook settings.</p>
+        </li>
+        <li class="doc-card">
+          <strong>API reference</strong>
+          <p>JSON-RPC methods, task lifecycle hooks, and governance history endpoints.</p>
+        </li>
+        <li class="doc-card">
+          <strong>Events & push notifications</strong>
+          <p>Audit payloads, SSE streams, and webhook analytics for production monitoring.</p>
+        </li>
+        <li class="doc-card">
+          <strong>Testing & development</strong>
+          <p>240+ tests, local dev scripts, and the make-driven commands that keep the suite green.</p>
+        </li>
+      </ul>
     </section>
 
-    <section class="features">
-      <div class="card">
-        <h3>Ecosystem Integration</h3>
-        <p>Makes Zed ACP agents first-class citizens in A2A-compliant platforms and agent marketplaces.</p>
+    <section class="section" style="margin-top: 2rem;">
+      <div class="grid">
+        <div>
+          <h2>Enterprise-ready controls</h2>
+          <p>Built-in authentication, fine-grained policies, and resource-limited tool execution make A2A-ACP a reliable foundation for complex workflows spanning Jira, GitHub, and deskside automation.</p>
+        </div>
+        <div class="features">
+          <div class="feature-card">
+            <h3>Permission mediation</h3>
+            <p>Auto-resolve session permission prompts with the same policy chain used for direct tool calls.</p>
+          </div>
+          <div class="feature-card">
+            <h3>Sandboxed tooling</h3>
+            <p>Bash-based executor enforces resource limits, path isolation, and detailed MCP error mapping.</p>
+          </div>
+          <div class="feature-card">
+            <h3>Push alerts</h3>
+            <p>Webhooks and SSE deliver task state, permission decisions, and artifact notices to every watcher.</p>
+          </div>
+          <div class="feature-card">
+            <h3>Agent orchestration</h3>
+            <p>Coordinate multi-agent conversations while bridging Claude, Gemini, Codex, and any A2A-compliant client.</p>
+          </div>
+        </div>
       </div>
-      <div class="card">
-        <h3>HTTP-Native Access</h3>
-        <p>Exposes powerful Zed ACP agents via standard HTTP APIs accessible to any A2A client or platform.</p>
+    </section>
+
+    <section class="section" style="margin-top: 2rem;">
+      <h2>Key Capabilities</h2>
+      <p>From governance to observability, A2A-ACP is built for enterprise coding automation.</p>
+      <div class="stat-grid">
+        <div class="stat">
+          <strong>Governance</strong>
+          <span>Auto-approval policies, programmable governors, permission mediation, and governance history APIs.</span>
+        </div>
+        <div class="stat">
+          <strong>Tool execution</strong>
+          <span>Tool sandboxing, bash executor limits, MCP error mapping, and interactive workflows.</span>
+        </div>
+        <div class="stat">
+          <strong>Observability</strong>
+          <span>Structured logging, health metrics, SSE/webhooks, and push notifications with analytics.</span>
+        </div>
       </div>
-      <div class="card">
-        <h3>Enterprise Ready</h3>
-        <p>Production-grade A2A server with authentication, monitoring, and scalable agent management.</p>
+    </section>
+
+    <section class="section" style="margin-top: 2rem;">
+      <div class="grid">
+        <div>
+          <h2>Supported Agents</h2>
+          <p>Bring Claude Code, Codex, Gemini CLI, and any Zed ACP-compliant agent into the A2A mesh.</p>
+          <div class="agents">
+            <span class="agent">codex</span>
+            <span class="agent">claude-code</span>
+            <span class="agent">gemini-cli</span>
+            <span class="agent">Zed ACP-compliant</span>
+          </div>
+        </div>
+        <div>
+          <h2>Project Status</h2>
+          <div class="stat-grid">
+            <div class="stat">
+              <strong>Current capabilities</strong>
+              <span>Governed execution, A2A v0.3.0 compliance, enterprise security, 240+ tests, and production tooling.</span>
+            </div>
+            <div class="stat">
+              <strong>Testing</strong>
+              <span><code>make test</code> (plus governance slice with pytest) keeps the suite solid.</span>
+            </div>
+            <div class="stat">
+              <strong>On the horizon</strong>
+              <span>External policy engines, deeper governor sandboxing, and agent marketplace tools.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" style="margin-top: 2rem;">
+      <h2>Instantly tap into the protocol</h2>
+      <p>Run the server locally or in your cloud environment, then deliver messages through familiar JSON-RPC over HTTP.</p>
+      <div class="snippet">
+        <button class="copy-btn" onclick="copyInstall()">Copy</button>
+        <code id="curlSnippet">curl -X POST http://localhost:8001/ \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer $A2A_AUTH_TOKEN" \\
+  -d '{ 
+    "jsonrpc": "2.0",
+    "method": "message/send",
+    "id": "msg_001",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "Hello from the A2A mesh"}],
+        "messageId": "msg_001"
+      },
+      "metadata": {"agent_name": "codex-acp"}
+    }
+  }'</code>
       </div>
     </section>
 
     <footer>
-      <p>Built for modern agent ecosystems with native A2A protocol and interactive conversations. — <a href="https://github.com/mrorigo/a2a-acp" style="color:var(--accent1);text-decoration:none;">GitHub</a></p>
+        <p>Made with ❤️ and too much ☕ by developers who care about good tooling — <a href="https://github.com/mrorigo/a2a-acp">GitHub</a></p>
     </footer>
   </div>
 
@@ -144,22 +576,23 @@
     const repo = 'https://github.com/mrorigo/a2a-acp';
     function openRepo() { window.open(repo, '_blank'); }
     function copyInstall() {
-      const a2aExample = `curl -X POST http://localhost:8001/ \\
+      const snippet = `curl -X POST http://localhost:8001/ \\
   -H "Content-Type: application/json" \\
-  -d '{
+  -H "Authorization: Bearer $A2A_AUTH_TOKEN" \\
+  -d '{ 
     "jsonrpc": "2.0",
     "method": "message/send",
     "id": "msg_001",
     "params": {
       "message": {
         "role": "user",
-        "parts": [{"kind": "text", "text": "Hello A2A!"}],
+        "parts": [{"kind": "text", "text": "Hello from the A2A mesh"}],
         "messageId": "msg_001"
       },
-      "metadata": {"agent_name": "codex-acp"}
+      "metadata": {"agent_name": "codex"}
     }
   }'`;
-      navigator.clipboard.writeText(a2aExample).then(() => alert('Copied A2A example!'));
+      navigator.clipboard.writeText(snippet).then(() => alert('Copied A2A example!'));
     }
   </script>
 </body>
