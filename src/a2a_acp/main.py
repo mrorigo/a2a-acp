@@ -17,11 +17,12 @@ from typing import (
     Any,
     AsyncGenerator,
     AsyncIterator,
-    Optional,
-    List,
-    Dict,
     Callable,
+    Dict,
+    List,
+    Optional,
     Tuple,
+    cast,
 )
 from uuid import uuid4
 
@@ -136,7 +137,7 @@ async def iter_streaming_payloads(
     queue: asyncio.Queue[Tuple[str, Any]] = asyncio.Queue()
     accumulated_chunks: List[str] = []
 
-    def wrap_result(payload: Any) -> Dict[str, Any]:
+    def wrap_result(payload: Any) -> Any:
         body = serialize_a2a(payload)
         if include_jsonrpc:
             return {"jsonrpc": "2.0", "id": request_id, "result": body}
@@ -160,8 +161,6 @@ async def iter_streaming_payloads(
             metadata={"streaming": True, "chunk_index": chunk_index},
         )
 
-        chunk_message_payload = chunk_message.model_dump(exclude_none=True)
-
         status_metadata: Dict[str, Any] = {"chunk_index": chunk_index}
         dev_tool_event_data: Optional[Dict[str, Any]] = None
         if task.metadata:
@@ -177,7 +176,7 @@ async def iter_streaming_payloads(
             status=TaskStatus(
                 state=TaskState.WORKING,
                 timestamp=current_timestamp(),
-                message=chunk_message_payload,
+                message=chunk_message,
             ),
             final=False,
             metadata=status_metadata,
@@ -667,19 +666,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 def get_task_manager(request: Request) -> A2ATaskManager:
-    return request.app.state.task_manager
+    return cast(A2ATaskManager, request.app.state.task_manager)
 
 
 def get_context_manager(request: Request) -> A2AContextManager:
-    return request.app.state.context_manager
+    return cast(A2AContextManager, request.app.state.context_manager)
 
 
 def get_database(request: Request) -> SessionDatabase:
-    return request.app.state.database
+    return cast(SessionDatabase, request.app.state.database)
 
 
 def get_a2a_translator(request: Request) -> A2ATranslator:
-    return request.app.state.a2a_translator
+    return cast(A2ATranslator, request.app.state.a2a_translator)
 
 
 def task_manager_dependency(request: Request) -> A2ATaskManager:
@@ -698,15 +697,15 @@ def a2a_translator_dependency(request: Request) -> A2ATranslator:
 
 
 def get_push_notification_manager(request: Request) -> PushNotificationManager:
-    return request.app.state.push_notification_manager
+    return cast(PushNotificationManager, request.app.state.push_notification_manager)
 
 
 def get_streaming_manager(request: Request) -> StreamingManager:
-    return request.app.state.streaming_manager
+    return cast(StreamingManager, request.app.state.streaming_manager)
 
 
-def get_bash_executor(request: Request):
-    return request.app.state.bash_executor
+def get_bash_executor(request: Request) -> BashToolExecutor:
+    return cast(BashToolExecutor, request.app.state.bash_executor)
 
 
 async def get_agent_card(request: Request):
@@ -1188,14 +1187,15 @@ def create_app() -> FastAPI:
         """Comprehensive health check including push notification system status."""
         require_authorization(authorization)
 
-        health_info = {
+        services: Dict[str, str] = {
+            "database": "unknown",
+            "push_notifications": "unknown",
+            "streaming": "unknown",
+        }
+        health_info: Dict[str, Any] = {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
-            "services": {
-                "database": "unknown",
-                "push_notifications": "unknown",
-                "streaming": "unknown",
-            },
+            "services": services,
             "version": "1.0.0",
         }
 
@@ -1203,18 +1203,18 @@ def create_app() -> FastAPI:
             # Check database connection - simple check if database exists and is accessible
             get_database(request)
             # Try to execute a simple query to verify database is working
-            health_info["services"]["database"] = "healthy"
+            services["database"] = "healthy"
         except Exception as e:
-            health_info["services"]["database"] = "unhealthy"
+            services["database"] = "unhealthy"
             health_info["status"] = "degraded"
             logger.error("Database health check failed", extra={"error": str(e)})
 
         try:
             # Check push notification manager - basic availability check
             get_push_notification_manager(request)
-            health_info["services"]["push_notifications"] = "healthy"
+            services["push_notifications"] = "healthy"
         except Exception as e:
-            health_info["services"]["push_notifications"] = "unhealthy"
+            services["push_notifications"] = "unhealthy"
             health_info["status"] = "unhealthy"
             logger.error(
                 "Push notification health check failed", extra={"error": str(e)}
@@ -1223,9 +1223,9 @@ def create_app() -> FastAPI:
         try:
             # Check streaming manager - basic availability check
             get_streaming_manager(request)
-            health_info["services"]["streaming"] = "healthy"
+            services["streaming"] = "healthy"
         except Exception as e:
-            health_info["services"]["streaming"] = "unhealthy"
+            services["streaming"] = "unhealthy"
             health_info["status"] = "degraded"
             logger.error("Streaming health check failed", extra={"error": str(e)})
 
@@ -1241,24 +1241,27 @@ def create_app() -> FastAPI:
 
         push_mgr = get_push_notification_manager(request)
 
-        metrics = {
+        delivery_stats: Dict[str, Any] = {
+            "total_deliveries": 0,
+            "successful_deliveries": 0,
+            "failed_deliveries": 0,
+            "success_rate": 0.0,
+        }
+        configuration_stats: Dict[str, Any] = {
+            "total_configs": 0,
+            "active_configs": 0,
+            "expired_configs": 0,
+        }
+        performance_stats: Dict[str, Any] = {
+            "average_response_time": 0.0,
+            "requests_per_minute": 0.0,
+            "error_rate": 0.0,
+        }
+        metrics: Dict[str, Any] = {
             "timestamp": datetime.now().isoformat(),
-            "delivery_stats": {
-                "total_deliveries": 0,
-                "successful_deliveries": 0,
-                "failed_deliveries": 0,
-                "success_rate": 0.0,
-            },
-            "configuration_stats": {
-                "total_configs": 0,
-                "active_configs": 0,
-                "expired_configs": 0,
-            },
-            "performance_stats": {
-                "average_response_time": 0.0,
-                "requests_per_minute": 0.0,
-                "error_rate": 0.0,
-            },
+            "delivery_stats": delivery_stats,
+            "configuration_stats": configuration_stats,
+            "performance_stats": performance_stats,
         }
 
         try:
@@ -1272,7 +1275,7 @@ def create_app() -> FastAPI:
                 [d for d in deliveries if d.delivery_status == "failed"]
             )
 
-            metrics["delivery_stats"].update(
+            delivery_stats.update(
                 {
                     "total_deliveries": total_deliveries,
                     "successful_deliveries": successful_deliveries,
@@ -1302,7 +1305,7 @@ def create_app() -> FastAPI:
                 if recent_deliveries:
                     active_configs += len(configs)
 
-            metrics["configuration_stats"].update(
+            configuration_stats.update(
                 {
                     "total_configs": total_configs,
                     "active_configs": active_configs,
@@ -1311,7 +1314,7 @@ def create_app() -> FastAPI:
             )
 
             # Basic performance metrics
-            metrics["performance_stats"].update(
+            performance_stats.update(
                 {
                     "average_response_time": 0.0,  # Would need timing data to calculate
                     "requests_per_minute": total_deliveries / 60.0,  # Rough estimate
@@ -1341,43 +1344,40 @@ def create_app() -> FastAPI:
 
         streaming_mgr = get_streaming_manager(request)
 
-        metrics = {
+        websocket_stats: Dict[str, int] = {"active": 0, "total": 0, "limit": 1000}
+        sse_stats: Dict[str, int] = {"active": 0, "total": 0, "limit": 500}
+        streaming_connections: Dict[str, Dict[str, int]] = {
+            "websocket": websocket_stats,
+            "sse": sse_stats,
+        }
+        background_tasks: Dict[str, Any] = {
+            "cleanup_running": False,
+            "last_cleanup": None,
+        }
+        metrics: Dict[str, Any] = {
             "timestamp": datetime.now().isoformat(),
-            "streaming_connections": {
-                "websocket": {"active": 0, "total": 0, "limit": 1000},
-                "sse": {"active": 0, "total": 0, "limit": 500},
-            },
-            "background_tasks": {"cleanup_running": False, "last_cleanup": None},
+            "streaming_connections": streaming_connections,
+            "background_tasks": background_tasks,
         }
 
         try:
             # Get streaming connection stats
             connection_stats = await streaming_mgr.get_connection_stats()
-            metrics["streaming_connections"]["websocket"]["active"] = (
-                connection_stats.get("websocket_active", 0)
-            )
-            metrics["streaming_connections"]["websocket"]["total"] = (
-                connection_stats.get("websocket_total", 0)
-            )
-            metrics["streaming_connections"]["sse"]["active"] = connection_stats.get(
-                "sse_active", 0
-            )
-            metrics["streaming_connections"]["sse"]["total"] = connection_stats.get(
-                "sse_total", 0
-            )
+            websocket_stats["active"] = connection_stats.get("websocket_active", 0)
+            websocket_stats["total"] = connection_stats.get("websocket_total", 0)
+            sse_stats["active"] = connection_stats.get("sse_active", 0)
+            sse_stats["total"] = connection_stats.get("sse_total", 0)
 
             # Get connection limits from settings
             settings = settings_module.get_settings()
-            metrics["streaming_connections"]["websocket"]["limit"] = (
+            websocket_stats["limit"] = (
                 settings.push_notifications.max_websocket_connections
             )
-            metrics["streaming_connections"]["sse"]["limit"] = (
-                settings.push_notifications.max_sse_connections
-            )
+            sse_stats["limit"] = settings.push_notifications.max_sse_connections
 
             # Check if cleanup task is running
             cleanup_task = request.app.state.get("cleanup_task")
-            metrics["background_tasks"]["cleanup_running"] = (
+            background_tasks["cleanup_running"] = (
                 cleanup_task is not None and not cleanup_task.done()
             )
 
@@ -1710,7 +1710,9 @@ def create_app() -> FastAPI:
                 _strip_development_tool_metadata(result)
 
                 # Extract the ZedACP result from the task for translation
-                zedacp_result = {}  # The task execution result would need to be extracted from the Task object
+                zedacp_result: Dict[
+                    str, Any
+                ] = {}  # The task execution result would need to be extracted from the Task object
 
                 # Convert ZedACP response back to A2A format
 

@@ -11,7 +11,7 @@ import sqlite3
 import threading
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TypeVar, cast
 from a2a_acp.a2a.models import Message, Task
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,10 @@ def serialize_dataclass_with_dates(obj: Any) -> Dict[str, Any]:
     return data
 
 
-def deserialize_dataclass_with_dates(cls: Any, data: Dict[str, Any]) -> Any:
+T = TypeVar("T")
+
+
+def deserialize_dataclass_with_dates(cls: type[T], data: Dict[str, Any]) -> T:
     """Create dataclass from dictionary with proper datetime and metadata handling."""
     # Handle datetime fields
     for field_name in ["created_at", "updated_at"]:
@@ -150,7 +153,7 @@ class SessionDatabase:
             self._local.connection.execute("PRAGMA cache_size=10000")
             self._local.connection.execute("PRAGMA temp_store=memory")
 
-        return self._local.connection
+        return cast(sqlite3.Connection, self._local.connection)
 
     def _init_database(self) -> None:
         """Initialize database schema."""

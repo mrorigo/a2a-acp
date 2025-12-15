@@ -29,7 +29,7 @@ import shlex
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 import httpx
 
@@ -463,7 +463,7 @@ def read_auth_file(codex_home: Path) -> Optional[Dict[str, Any]]:
         return None
     try:
         with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            data = cast(Dict[str, Any], json.load(f))
         return data
     except Exception:
         logger.exception("Failed to read auth file", extra={"path": str(path)})

@@ -169,7 +169,7 @@ async def auth_start(
     return payload
 
 
-@router.get("/{agent_id}/auth/callback")
+@router.get("/{agent_id}/auth/callback", response_model=None)
 async def auth_callback(
     request: Request,
     agent_id: str,
@@ -269,8 +269,9 @@ async def auth_callback(
     }
 
 
-@router.post("/{agent_id}/auth/manual")
+@router.post("/{agent_id}/auth/manual", response_model=None)
 async def auth_manual(
+    request: Request,
     agent_id: str,
     body: ManualAuthRequest,
     authorization: Optional[str] = Depends(_require_authorization),
@@ -306,7 +307,7 @@ async def auth_manual(
 
     # Reuse callback handling logic
     return await auth_callback(
-        request=None,
+        request=request,
         agent_id=agent_id,
         code=code,
         state=state,

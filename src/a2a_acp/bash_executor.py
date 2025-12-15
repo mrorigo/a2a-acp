@@ -12,7 +12,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypedDict, Union
 
 from .tool_config import BashTool
 from .sandbox import (
@@ -97,6 +97,24 @@ class ToolExecutionResult:
                 execution_result.mcp_error if execution_result.mcp_error else None
             ),
         )
+
+
+class ToolExecutionCacheEntry(TypedDict):
+    """Typed dict representing cached tool execution metadata."""
+
+    result: ToolExecutionResult
+    timestamp: datetime
+    tool_id: str
+    tool_version: str
+
+
+class ToolCacheStats(TypedDict):
+    """Typed dict for cache statistics per tool."""
+
+    entries: int
+    oldest_entry: Optional[datetime]
+    newest_entry: Optional[datetime]
+    total_size_mb: float
 
 
 class ParameterError(Exception):
@@ -203,7 +221,7 @@ class BashToolExecutor:
         self.push_notification_manager = push_notification_manager
         self.task_manager = task_manager
         self.error_profile = error_profile
-        self._execution_cache: Dict[str, Dict[str, Any]] = {}
+        self._execution_cache: Dict[str, ToolExecutionCacheEntry] = {}
 
         # Circuit breakers for failing tools
         self._circuit_breakers: Dict[str, ToolCircuitBreaker] = {}
@@ -337,6 +355,7 @@ class BashToolExecutor:
             tool_result.metadata.setdefault("error_profile", metadata_profile)
 
             # Map to extension schemas
+            details: Union[McpDetails, ExecuteDetails]
             if tool_result.success:
                 if tool_result.metadata.get("mcp"):
                     details = McpDetails(tool_name=tool.name)
@@ -1090,7 +1109,7 @@ class BashToolExecutor:
 
                     # Check if cache entry has expired
                     if cache_age < tool.config.cache_ttl_seconds:
-                        cached_result = cached_entry["result"]
+                        cached_result: ToolExecutionResult = cached_entry["result"]
                         cached_result.metadata["cached"] = True
                         logger.debug(
                             f"Using cached result for tool: {tool.id}",
@@ -1248,7 +1267,7 @@ class BashToolExecutor:
             )  # Rough estimate
 
             # Tool-specific stats
-            tool_stats = {}
+            tool_stats: dict[str, ToolCacheStats] = {}
 
             for cache_key, cache_entry in self._execution_cache.items():
                 tool_id = cache_entry.get("tool_id", "unknown")
@@ -1256,28 +1275,24 @@ class BashToolExecutor:
 
                 # Initialize tool stats if not exists
                 if tool_id not in tool_stats:
-                    tool_stats[tool_id] = {
-                        "entries": 0,
-                        "oldest_entry": None,
-                        "newest_entry": None,
-                        "total_size_mb": 0.0,
-                    }
+                    tool_stats[tool_id] = ToolCacheStats(
+                        entries=0,
+                        oldest_entry=None,
+                        newest_entry=None,
+                        total_size_mb=0.0,
+                    )
 
                 # Update tool stats
                 tool_stats[tool_id]["entries"] += 1
 
                 entry_timestamp = cache_entry.get("timestamp")
                 if entry_timestamp:
-                    if (
-                        tool_stats[tool_id]["oldest_entry"] is None
-                        or entry_timestamp < tool_stats[tool_id]["oldest_entry"]
-                    ):
+                    oldest_entry = tool_stats[tool_id]["oldest_entry"]
+                    if oldest_entry is None or entry_timestamp < oldest_entry:
                         tool_stats[tool_id]["oldest_entry"] = entry_timestamp
 
-                    if (
-                        tool_stats[tool_id]["newest_entry"] is None
-                        or entry_timestamp > tool_stats[tool_id]["newest_entry"]
-                    ):
+                    newest_entry = tool_stats[tool_id]["newest_entry"]
+                    if newest_entry is None or entry_timestamp > newest_entry:
                         tool_stats[tool_id]["newest_entry"] = entry_timestamp
 
                 # Estimate entry size

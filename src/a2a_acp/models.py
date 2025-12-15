@@ -10,6 +10,7 @@ from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional, Any, Union
+from uuid import uuid4
 
 
 class DeliveryStatus(Enum):
@@ -390,7 +391,9 @@ class ToolOutput:
     """Output from a successful tool call."""
 
     content: str
-    details: Optional[Union[ExecuteDetails, FileDiff, McpDetails]] = None
+    details: Optional[Union[ExecuteDetails, FileDiff, McpDetails, GenericDetails]] = (
+        None
+    )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -402,20 +405,21 @@ class ToolOutput:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ToolOutput":
         """Create from dictionary, handling union for details."""
-        details = None
+        details: Optional[
+            Union[ExecuteDetails, FileDiff, McpDetails, GenericDetails]
+        ] = None
         details_data = data.get("details")
-        if details_data:
-            if isinstance(details_data, dict):
-                if "path" in details_data:
-                    details = FileDiff.from_dict(details_data)
-                elif "stdout" in details_data or "exit_code" in details_data:
-                    details = ExecuteDetails.from_dict(details_data)
-                elif "tool_name" in details_data:
-                    details = McpDetails.from_dict(details_data)
-                else:
-                    details = None
+        if isinstance(details_data, dict):
+            if "path" in details_data:
+                details = FileDiff.from_dict(details_data)
+            elif "stdout" in details_data or "exit_code" in details_data:
+                details = ExecuteDetails.from_dict(details_data)
+            elif "tool_name" in details_data:
+                details = McpDetails.from_dict(details_data)
             else:
-                details = details_data
+                details = GenericDetails(description=str(details_data))
+        elif details_data is not None:
+            details = GenericDetails(description=str(details_data))
         return cls(content=data["content"], details=details)
 
 
@@ -470,7 +474,7 @@ class ConfirmationRequest:
         """Create from dictionary, handling union for details."""
         options = [ConfirmationOption.from_dict(opt) for opt in data["options"]]
         details_data = data.get("details", {})
-        details = None
+        details: Union[GenericDetails, ExecuteDetails, FileDiff, McpDetails]
         if isinstance(details_data, dict):
             if "description" in details_data:
                 details = GenericDetails.from_dict(details_data)
@@ -483,7 +487,7 @@ class ConfirmationRequest:
             else:
                 details = GenericDetails.from_dict({"description": str(details_data)})
         else:
-            details = details_data
+            details = GenericDetails(description=str(details_data))
         other = {k: v for k, v in data.items() if k not in ["options", "details"]}
         return cls(options=options, details=details, **other)
 
@@ -522,7 +526,7 @@ class ToolCall:
             confirmation_request = ConfirmationRequest.from_dict(
                 data["confirmation_request"]
             )
-        result = None
+        result: Optional[Union[ToolOutput, ErrorDetails]] = None
         if "result" in data and data["result"] is not None:
             res_data = data["result"]
             if isinstance(res_data, dict):
@@ -535,10 +539,17 @@ class ToolCall:
             else:
                 result = res_data
         # input_parameters remains dict
+        tool_call_id_value = data.get("tool_call_id")
+        if not isinstance(tool_call_id_value, str):
+            tool_call_id_value = str(uuid4())
+        tool_name_value = data.get("tool_name")
+        if not isinstance(tool_name_value, str):
+            tool_name_value = "unknown_tool"
+
         return cls(
-            tool_call_id=data.get("tool_call_id"),
+            tool_call_id=tool_call_id_value,
             status=params["status"],
-            tool_name=data.get("tool_name"),
+            tool_name=tool_name_value,
             input_parameters=data.get("input_parameters", {}),
             confirmation_request=confirmation_request,
             result=result,

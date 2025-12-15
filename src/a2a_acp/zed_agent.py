@@ -5,7 +5,7 @@ import logging
 import json
 from asyncio import StreamReader, StreamWriter
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Coroutine, Dict, Optional, Sequence
+from typing import Any, Awaitable, Callable, Coroutine, Dict, Optional, Sequence, cast
 from uuid import uuid4
 
 from .bash_executor import get_bash_executor, ToolExecutionResult
@@ -289,7 +289,7 @@ class ZedAgentConnection:
                 continue
 
             try:
-                payload = json.loads(decoded)
+                payload = cast(dict[str, Any], json.loads(decoded))
                 self._logger.info(
                     "Received JSON-RPC message from agent",
                     extra={

@@ -811,7 +811,7 @@ class ToolSandbox:
 
     async def _collect_output_files(self, working_dir: str) -> List[str]:
         """Collect any files created in the working directory."""
-        output_files = []
+        output_files: list[str] = []
 
         try:
             working_path = Path(working_dir)
@@ -929,7 +929,7 @@ class ToolSandbox:
                 ).total_seconds()
 
                 # Count by tool
-                tool_counts = {}
+                tool_counts: dict[str, int] = {}
                 for info in self._active_sandboxes.values():
                     tool_id = info["tool_id"]
                     tool_counts[tool_id] = tool_counts.get(tool_id, 0) + 1

@@ -53,7 +53,7 @@ class A2AContextManager:
     Provides A2A-compliant context lifecycle while maintaining ACP compatibility.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._active_contexts: Dict[str, ContextState] = {}
         self._lock: Optional[asyncio.Lock] = None
 
@@ -171,8 +171,12 @@ class A2AContextManager:
             return context_state.tasks or []
 
         # Load from database if available
-        context_state = await self.get_context(context_id)
-        return context_state.tasks if context_state and context_state.tasks else []
+        retrieved_context = await self.get_context(context_id)
+        return (
+            retrieved_context.tasks
+            if retrieved_context and retrieved_context.tasks
+            else []
+        )
 
     async def get_context_messages(self, context_id: str) -> List[Message]:
         """Get all messages for a context."""
@@ -181,9 +185,11 @@ class A2AContextManager:
             return context_state.messages or []
 
         # Load from database if available
-        context_state = await self.get_context(context_id)
+        retrieved_context = await self.get_context(context_id)
         return (
-            context_state.messages if context_state and context_state.messages else []
+            retrieved_context.messages
+            if retrieved_context and retrieved_context.messages
+            else []
         )
 
     async def close_context(self, context_id: str) -> bool:

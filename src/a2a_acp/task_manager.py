@@ -241,7 +241,7 @@ class A2ATaskManager:
         """Handle task errors with consistent status update, notification, and cleanup."""
         try:
             task = None
-            dev_tool_meta = {}
+            dev_tool_meta: Dict[str, Any] = {}
             exec_context = None
 
             # Update task status to failed
@@ -403,7 +403,7 @@ class A2ATaskManager:
                 extra={"task_id": task_id, "context": context, "error": str(e)},
             )
 
-    def _extract_message_content(self, message) -> str:
+    def _extract_message_content(self, message: Message) -> str:
         """Extract content from a message for notification purposes."""
         if message.parts:
             first_part = message.parts[0]
@@ -468,14 +468,16 @@ class A2ATaskManager:
         """Extract input types from response metadata if available."""
         # Check for _meta hints in final response for enhanced detection
         meta = response.get("_meta", {})
-        if isinstance(meta, dict) and "input_types" in meta:
-            return meta["input_types"]
+        if isinstance(meta, dict):
+            input_types = meta.get("input_types")
+            if isinstance(input_types, list):
+                return [str(item) for item in input_types if item is not None]
 
         # Fallback to default types
         return ["text/plain"]
 
     async def _send_message_notification(
-        self, task_id: str, message, message_type: str
+        self, task_id: str, message: Message, message_type: str
     ) -> None:
         """Send a notification for a task message with extracted content."""
         content = self._extract_message_content(message)

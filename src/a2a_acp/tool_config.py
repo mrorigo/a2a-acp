@@ -204,7 +204,7 @@ class BashTool:
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize tool to dictionary for storage or API responses."""
-        data = {
+        data: Dict[str, Any] = {
             "id": self.id,
             "name": self.name,
             "description": self.description,
@@ -398,7 +398,7 @@ class ToolConfigurationManager:
         self, config: Dict[str, Any], source_file: str
     ) -> Dict[str, BashTool]:
         """Parse tools configuration and create BashTool objects."""
-        tools = {}
+        tools: Dict[str, BashTool] = {}
 
         if not isinstance(config, dict) or "tools" not in config:
             logger.warning(

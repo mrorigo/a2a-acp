@@ -93,13 +93,16 @@ def atomic_write_json(
 
     # Create a NamedTemporaryFile in the same directory. Use delete=False so we can
     # close it and then os.replace the file path on all platforms.
-    tmp_kwargs = {"dir": str(parent), "delete": False, "mode": "wb"}
-    if tmp_suffix:
-        tmp_kwargs["suffix"] = tmp_suffix
-
     tmp_file = None
     try:
-        tmp_file = tempfile.NamedTemporaryFile(**tmp_kwargs)
+        if tmp_suffix:
+            tmp_file = tempfile.NamedTemporaryFile(
+                mode="wb", dir=str(parent), delete=False, suffix=tmp_suffix
+            )
+        else:
+            tmp_file = tempfile.NamedTemporaryFile(
+                mode="wb", dir=str(parent), delete=False
+            )
         try:
             # Write data, flush, fsync
             tmp_file.write(serialized)

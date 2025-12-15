@@ -16,7 +16,7 @@ import uuid
 from dataclasses import dataclass, asdict, replace
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from .tool_config import BashTool
 from .sandbox import ExecutionContext
@@ -92,12 +92,10 @@ class AuditDatabase:
     def _get_connection(self) -> sqlite3.Connection:
         """Get thread-local database connection."""
         if not hasattr(self._local, "connection"):
-            self._local.connection = sqlite3.connect(
-                self.db_path, check_same_thread=False
-            )
-            # Enable WAL mode for better concurrency
-            self._local.connection.execute("PRAGMA journal_mode=WAL")
-        return self._local.connection
+            connection = sqlite3.connect(self.db_path, check_same_thread=False)
+            connection.execute("PRAGMA journal_mode=WAL")
+            self._local.connection = connection
+        return cast(sqlite3.Connection, self._local.connection)
 
     def _init_database(self) -> None:
         """Initialize audit database schema."""
@@ -259,7 +257,7 @@ class AuditDatabase:
                 """
                 )
 
-                event_stats = {}
+                event_stats: dict[str, dict[str, int]] = {}
                 for row in cursor.fetchall():
                     event_type, severity, count = row
                     if event_type not in event_stats:
@@ -280,7 +278,7 @@ class AuditDatabase:
                 """
                 )
 
-                tool_stats = []
+                tool_stats: list[Dict[str, Any]] = []
                 for row in cursor.fetchall():
                     tool_stats.append(
                         {
@@ -519,39 +517,24 @@ class AuditLogger:
         stats = self.database.get_event_stats()
 
         # Generate summary
-        summary = {
-            "report_period": {
-                "start": start_time.isoformat() if start_time else None,
-                "end": end_time.isoformat() if end_time else None,
-            },
-            "total_events": len(events),
-            "events_by_type": {},
-            "events_by_severity": {},
-            "top_tools": [],
-            "top_users": [],
-            "security_incidents": 0,
-        }
+        events_by_type: dict[str, int] = {}
+        events_by_severity: dict[str, int] = {}
+        security_incidents = 0
 
         # Count by type and severity
         for event in events:
-            # Count by type
             event_type = event.event_type.value
-            summary["events_by_type"][event_type] = (
-                summary["events_by_type"].get(event_type, 0) + 1
+            events_by_type[event_type] = events_by_type.get(event_type, 0) + 1
+            events_by_severity[event.severity] = (
+                events_by_severity.get(event.severity, 0) + 1
             )
 
-            # Count by severity
-            summary["events_by_severity"][event.severity] = (
-                summary["events_by_severity"].get(event.severity, 0) + 1
-            )
-
-            # Count security incidents
             if event.severity in ["error", "critical"]:
-                summary["security_incidents"] += 1
+                security_incidents += 1
 
         # Get top tools and users
-        tool_usage = {}
-        user_activity = {}
+        tool_usage: dict[str, int] = {}
+        user_activity: dict[str, int] = {}
 
         for event in events:
             if event.tool_id:
@@ -559,12 +542,21 @@ class AuditLogger:
             if event.user_id:
                 user_activity[event.user_id] = user_activity.get(event.user_id, 0) + 1
 
-        summary["top_tools"] = sorted(
-            tool_usage.items(), key=lambda x: x[1], reverse=True
-        )[:10]
-        summary["top_users"] = sorted(
-            user_activity.items(), key=lambda x: x[1], reverse=True
-        )[:10]
+        top_tools = sorted(tool_usage.items(), key=lambda x: x[1], reverse=True)[:10]
+        top_users = sorted(user_activity.items(), key=lambda x: x[1], reverse=True)[:10]
+
+        summary: Dict[str, Any] = {
+            "report_period": {
+                "start": start_time.isoformat() if start_time else None,
+                "end": end_time.isoformat() if end_time else None,
+            },
+            "total_events": len(events),
+            "events_by_type": events_by_type,
+            "events_by_severity": events_by_severity,
+            "top_tools": top_tools,
+            "top_users": top_users,
+            "security_incidents": security_incidents,
+        }
 
         return {
             "summary": summary,

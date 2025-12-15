@@ -478,6 +478,7 @@ class PushNotificationManager:
         # but use enum for internal type determination
         payload_event = event_type_str  # Use original string from event
 
+        base_payload: NotificationPayload
         # Create base payload
         if event_type in [
             EventType.TASK_STATUS_CHANGE,
@@ -563,6 +564,8 @@ class PushNotificationManager:
         """Track a delivery attempt in the database."""
         delivery_id = str(uuid.uuid4())
         event_type = event.get("event", "unknown")
+        response_code: Optional[int]
+        response_body: Optional[str]
 
         # Determine delivery status
         if error:

@@ -36,7 +36,7 @@ class A2ATranslator:
     protocol-specific data structures between the two protocols.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._active_sessions: Dict[str, Dict[str, Any]] = {}
         self._context_sessions: Dict[str, str] = {}  # context_id -> session_id
 
@@ -50,7 +50,7 @@ class A2ATranslator:
         Returns:
             List of ZedACP prompt parts
         """
-        zedacp_parts = []
+        zedacp_parts: List[Dict[str, Any]] = []
 
         for part in a2a_message.parts:
             if part.kind == "text":
