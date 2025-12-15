@@ -1122,7 +1122,6 @@ class A2ATaskManager:
                         if task.metadata and "development-tool" in task.metadata:
                             dev_tool = task.metadata["development-tool"]
                             if "tool_calls" in dev_tool:
-                                # For simplicity, emit a generic update for ongoing execution
                                 event = DevelopmentToolEvent(
                                     kind=DevelopmentToolEventKind.TOOL_CALL_UPDATE,
                                     data={
@@ -1130,8 +1129,14 @@ class A2ATaskManager:
                                         "chunk_length": len(text),
                                     },
                                 )
-                                # This would be sent via streaming metadata if supported, or batched
-
+                                event_data = event.to_dict()
+                                async with context.lock:
+                                    task_metadata = context.task.metadata or {}
+                                    context.task.metadata = task_metadata
+                                    metadata_dev_tool = task_metadata.setdefault(
+                                        "development-tool", {}
+                                    )
+                                    metadata_dev_tool["last_stream_event"] = event_data
                         # Also check for artifact creation notifications
                         upper_text = text.upper()
                         if (

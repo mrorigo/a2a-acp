@@ -432,7 +432,6 @@ class TestRFCFlowSimulation:
             "/a2a/message/send", json={"message": message_data}
         )
         task_data = response.json()["task"]
-        task_id = task_data["id"]
 
         # Verify PENDING ToolCall with confirmation_request
         dev_tool = task_data["metadata"]["development-tool"]
@@ -555,7 +554,7 @@ class TestPushNotificationsWithExtensionMetadata:
         response = test_client_full.post(
             "/a2a/message/send", json={"message": message_data}
         )
-        task_id = response.json()["task"]["id"]
+        assert response.status_code == 200
 
         # Verify notifications emitted with metadata
         assert mock_push_manager.send_notification.call_count > 0
@@ -615,6 +614,7 @@ class TestBackwardCompatibility:
         response = test_client_full.post(
             "/a2a/message/send", json={"message": message_data}
         )
+        assert response.status_code == 200
 
         assert response.status_code == 200
         task_data = response.json()["task"]
@@ -655,7 +655,10 @@ class TestBackwardCompatibility:
             "parts": [{"kind": "text", "text": "Legacy test"}],
             "messageId": str(create_message_id()),
         }
-        test_client_full.post("/a2a/message/send", json={"message": message_data})
+        response = test_client_full.post(
+            "/a2a/message/send", json={"message": message_data}
+        )
+        assert response.status_code == 200
 
         # Verify notifications emitted with optional metadata
         calls = mock_push_manager.send_notification.call_args_list

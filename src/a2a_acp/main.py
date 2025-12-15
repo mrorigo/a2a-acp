@@ -45,12 +45,12 @@ from .api import auth_endpoints
 
 # Import development tool extension models
 from .models import (
-    GetAllSlashCommandsResponse,
+    CommandExecutionStatus,
     ExecuteSlashCommandRequest,
     ExecuteSlashCommandResponse,
+    GetAllSlashCommandsResponse,
     SlashCommand,
     SlashCommandArgument,
-    CommandExecutionStatus,
 )
 
 from a2a_acp.a2a.models import (
@@ -162,6 +162,15 @@ async def iter_streaming_payloads(
 
         chunk_message_payload = chunk_message.model_dump(exclude_none=True)
 
+        status_metadata: Dict[str, Any] = {"chunk_index": chunk_index}
+        dev_tool_event_data: Optional[Dict[str, Any]] = None
+        if task.metadata:
+            dev_tool = task.metadata.get("development-tool")
+            if dev_tool:
+                dev_tool_event_data = dev_tool.get("last_stream_event")
+        if dev_tool_event_data:
+            status_metadata["development-tool"] = dev_tool_event_data
+
         status_event = TaskStatusUpdateEvent(
             taskId=task.id,
             contextId=task.contextId,
@@ -171,7 +180,7 @@ async def iter_streaming_payloads(
                 message=chunk_message_payload,
             ),
             final=False,
-            metadata={"chunk_index": chunk_index},
+            metadata=status_metadata,
         )
 
         await queue.put(("result", status_event))
@@ -201,6 +210,17 @@ async def iter_streaming_payloads(
                 final_message.model_dump(exclude_none=True) if final_message else None
             )
 
+            final_metadata: Dict[str, Any] = {
+                "total_chunks": len(accumulated_chunks),
+                "stream_completed": True,
+            }
+
+            dev_tool_metadata = task_manager._get_development_tool_metadata(
+                result_task.id
+            )
+            if dev_tool_metadata:
+                final_metadata["development-tool"] = dev_tool_metadata
+
             final_status_event = TaskStatusUpdateEvent(
                 taskId=result_task.id,
                 contextId=result_task.contextId,
@@ -210,10 +230,7 @@ async def iter_streaming_payloads(
                     message=final_message_payload,
                 ),
                 final=True,
-                metadata={
-                    "total_chunks": len(accumulated_chunks),
-                    "stream_completed": True,
-                },
+                metadata=final_metadata,
             )
 
             await queue.put(("result", final_status_event))
@@ -793,9 +810,7 @@ async def handle_message_send_jsonrpc(
                 await connection.initialize()
 
                 # Create or load ZedACP session if context is provided
-                session_id = await connection.start_session(
-                    cwd=os.getcwd(), mcp_servers=[]
-                )
+                await connection.start_session(cwd=os.getcwd(), mcp_servers=[])
 
                 # Execute the task (task manager handles translation and history updates)
                 result = await task_manager.execute_task(
@@ -1186,7 +1201,7 @@ def create_app() -> FastAPI:
 
         try:
             # Check database connection - simple check if database exists and is accessible
-            database = get_database(request)
+            get_database(request)
             # Try to execute a simple query to verify database is working
             health_info["services"]["database"] = "healthy"
         except Exception as e:
@@ -1196,7 +1211,7 @@ def create_app() -> FastAPI:
 
         try:
             # Check push notification manager - basic availability check
-            push_mgr = get_push_notification_manager(request)
+            get_push_notification_manager(request)
             health_info["services"]["push_notifications"] = "healthy"
         except Exception as e:
             health_info["services"]["push_notifications"] = "unhealthy"
@@ -1207,7 +1222,7 @@ def create_app() -> FastAPI:
 
         try:
             # Check streaming manager - basic availability check
-            streaming_mgr = get_streaming_manager(request)
+            get_streaming_manager(request)
             health_info["services"]["streaming"] = "healthy"
         except Exception as e:
             health_info["services"]["streaming"] = "unhealthy"
@@ -1682,9 +1697,7 @@ def create_app() -> FastAPI:
                 await connection.initialize()
 
                 # Create or load ZedACP session if context is provided
-                session_id = await connection.start_session(
-                    cwd=os.getcwd(), mcp_servers=[]
-                )
+                await connection.start_session(cwd=os.getcwd(), mcp_servers=[])
 
                 # Execute the task
                 result = await task_manager.execute_task(
